@@ -211,7 +211,7 @@
             <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
             <td style="text-align:center;font-weight:700;width:36px">${d}</td>
             <td style="text-align:center;color:#666;width:36px">${d*2}</td>
-            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:62px">${fmtBRL(v)}</td>
+            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:46px">${fmtBRL(v)}</td>
             <td style="border-left:1px solid #ccc;width:150px">
               <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
               <div style="font-size:7pt;color:#999;margin-top:2px">Data: ___/___/______</div>
@@ -264,15 +264,10 @@
             <th style="width:56px">Escala</th>
             <th style="width:36px">Dias</th>
             <th style="width:36px">Pass.</th>
-            <th style="width:62px">Valor</th>
+            <th style="width:46px">Valor</th>
             <th style="width:150px;text-align:left">Assinatura / Data</th>
           </tr></thead>
           <tbody>${linhas}</tbody>
-          <tfoot><tr class="tfoot-row">
-            <td colspan="5">TOTAL GERAL</td>
-            <td class="tfoot-val" style="text-align:center">${fmtBRL(tot)}</td>
-            <td style="background:#fff!important"></td>
-          </tr></tfoot>
         </table>
         <div class="resumo">
           <div class="resumo-item"><div class="resumo-label">Colaboradores</div><div class="resumo-val">${employees.length}</div></div>
@@ -284,11 +279,21 @@
           <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Responsável pelo Pagamento</div><div class="assin-label">Data: ___/___/______</div></div>
           <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Conferência</div><div class="assin-label">Data: ___/___/______</div></div>
         </div>
-        <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}<\/script>
         </body></html>`;
-        const w=window.open("","_blank","width=900,height=700");
-        w.document.write(html);
-        w.document.close();
+        // Iframe invisível — sem janela intermediária, print abre direto
+        const old=document.getElementById("__print_iframe");
+        if(old) old.remove();
+        const iframe=document.createElement("iframe");
+        iframe.id="__print_iframe";
+        iframe.style.cssText="position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none";
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(html);
+        iframe.contentDocument.close();
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        // Remove após 2s (tempo suficiente para o diálogo de impressão carregar)
+        setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); }, 2000);
       },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr]);
 
       function VTPage(){
