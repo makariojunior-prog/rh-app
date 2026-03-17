@@ -13,10 +13,45 @@
     input, select, textarea, button { font-family: inherit; }
     input[type=checkbox] { accent-color: #219653; }
     @media print {
-      .no-print { display: none !important; }
-      #print-area, #print-area * { visibility: visible; }
-      body * { visibility: hidden; }
-      #print-area { position: fixed; top: 0; left: 0; width: 100%; padding: 20px; background: #fff; font-family: Arial, sans-serif; }
+      /* Esconde tudo exceto a área de impressão */
+      body > * { display: none !important; }
+      #print-area { display: block !important; }
+
+      /* Reset para impressão limpa */
+      body {
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        font-family: Arial, sans-serif;
+        font-size: 11pt;
+        color: #000;
+      }
+
+      /* Área de impressão ocupa a página toda, com múltiplas páginas */
+      #print-area {
+        display: block;
+        width: 100%;
+        padding: 10mm 12mm;
+        background: #fff;
+      }
+
+      /* Evita quebra dentro de linha da tabela */
+      tr { page-break-inside: avoid; }
+
+      /* Cabeçalho da tabela repete em cada página */
+      thead { display: table-header-group; }
+      tfoot { display: table-footer-group; }
+
+      /* Bloco de resumo e assinaturas não quebra */
+      #print-area > div:last-child { page-break-inside: avoid; }
+
+      /* Bordas visíveis na impressão */
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ccc !important; padding: 6px 8px !important; font-size: 9pt; }
+      th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+      /* Cores de fundo preservadas */
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
