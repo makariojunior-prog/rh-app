@@ -206,15 +206,15 @@
           const d=getD(emp); const v=getV(emp);
           const badge=emp.escala==="SEG-SAB"?"background:#FFF8E7;color:#D4972A":"background:#E8F5EE;color:#219653";
           return `<tr style="background:${i%2===0?'#fff':'#f9f9f9'}">
-            <td style="text-align:center;color:#888">${i+1}</td>
-            <td style="font-weight:600">${emp.nome}</td>
-            <td style="text-align:center"><span style="padding:2px 7px;border-radius:20px;font-size:8pt;font-weight:700;${badge}">${emp.escala}</span></td>
-            <td style="text-align:center;font-weight:700">${d}</td>
-            <td style="text-align:center;color:#666">${d*2}</td>
-            <td style="text-align:center;font-weight:800;color:#1B3A2B">${fmtBRL(v)}</td>
-            <td style="border-left:1px solid #ccc">
+            <td style="text-align:center;color:#888;width:20px">${i+1}</td>
+            <td style="font-weight:600;font-size:7.5pt">${emp.nome}</td>
+            <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
+            <td style="text-align:center;font-weight:700;width:36px">${d}</td>
+            <td style="text-align:center;color:#666;width:36px">${d*2}</td>
+            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:62px">${fmtBRL(v)}</td>
+            <td style="border-left:1px solid #ccc;width:150px">
               <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
-              <div style="font-size:7.5pt;color:#999;margin-top:2px">Data: ___/___/______</div>
+              <div style="font-size:7pt;color:#999;margin-top:2px">Data: ___/___/______</div>
             </td>
           </tr>`;
         }).join("");
@@ -225,8 +225,8 @@
           *{box-sizing:border-box;margin:0;padding:0}
           body{font-family:Arial,sans-serif;font-size:9pt;color:#111;padding:8mm 10mm}
           table{width:100%;border-collapse:collapse;margin-bottom:10px}
-          th{background:#EDE9E1;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:5px 7px;border:1px solid #ccc;color:#555}
-          td{padding:5px 7px;border:1px solid #ddd;vertical-align:middle;font-size:8.5pt}
+          th{background:#EDE9E1;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:4px 5px;border:1px solid #ccc;color:#555}
+          td{padding:4px 5px;border:1px solid #ddd;vertical-align:middle;font-size:8pt}
           thead{display:table-header-group}
           tfoot{display:table-footer-group}
           tr{page-break-inside:avoid}
@@ -259,10 +259,13 @@
         </div>
         <table>
           <thead><tr>
-            <th style="width:24px">#</th>
+            <th style="width:20px">#</th>
             <th style="text-align:left">Nome do Colaborador</th>
-            <th>Escala</th><th>Dias</th><th>Pass.</th><th>Valor</th>
-            <th style="min-width:160px;text-align:left">Assinatura / Data</th>
+            <th style="width:56px">Escala</th>
+            <th style="width:36px">Dias</th>
+            <th style="width:36px">Pass.</th>
+            <th style="width:62px">Valor</th>
+            <th style="width:150px;text-align:left">Assinatura / Data</th>
           </tr></thead>
           <tbody>${linhas}</tbody>
           <tfoot><tr class="tfoot-row">
