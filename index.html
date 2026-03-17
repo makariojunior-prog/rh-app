@@ -13,45 +13,41 @@
     input, select, textarea, button { font-family: inherit; }
     input[type=checkbox] { accent-color: #219653; }
     @media print {
-      /* Esconde tudo exceto a área de impressão */
-      body > * { display: none !important; }
-      #print-area { display: block !important; }
+      /* Esconde tudo via visibility (não remove do fluxo, evita página em branco) */
+      body * { visibility: hidden; }
 
-      /* Reset para impressão limpa */
-      body {
-        margin: 0;
-        padding: 0;
+      /* Mostra apenas a área de impressão e filhos */
+      #print-area,
+      #print-area * { visibility: visible; }
+
+      /* position: absolute (NÃO fixed) permite múltiplas páginas */
+      #print-area {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        padding: 10mm 14mm;
         background: #fff;
         font-family: Arial, sans-serif;
-        font-size: 11pt;
+        font-size: 10pt;
         color: #000;
       }
 
-      /* Área de impressão ocupa a página toda, com múltiplas páginas */
-      #print-area {
-        display: block;
-        width: 100%;
-        padding: 10mm 12mm;
-        background: #fff;
-      }
-
-      /* Evita quebra dentro de linha da tabela */
-      tr { page-break-inside: avoid; }
-
-      /* Cabeçalho da tabela repete em cada página */
+      /* Cabeçalho repete em cada página, total fica sempre na última */
       thead { display: table-header-group; }
       tfoot { display: table-footer-group; }
 
-      /* Bloco de resumo e assinaturas não quebra */
-      #print-area > div:last-child { page-break-inside: avoid; }
+      /* Não quebra linha da tabela no meio */
+      tr { page-break-inside: avoid; }
 
-      /* Bordas visíveis na impressão */
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #ccc !important; padding: 6px 8px !important; font-size: 9pt; }
-      th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      /* Resumo e assinaturas não quebram */
+      #print-area > div:last-of-type { page-break-inside: avoid; }
 
-      /* Cores de fundo preservadas */
-      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      /* Bordas visíveis e cores preservadas */
+      table { border-collapse: collapse !important; width: 100% !important; }
+      th, td { border: 1px solid #bbb !important; padding: 5px 8px !important; font-size: 9pt !important; }
+
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
   </style>
 </head>
