@@ -12,50 +12,14 @@
     body { background: #F4F1EC; font-family: 'Segoe UI', system-ui, sans-serif; color: #1A1A1A; }
     input, select, textarea, button { font-family: inherit; }
     input[type=checkbox] { accent-color: #219653; }
-    @media print {
-      /* Esconde tudo via visibility (não remove do fluxo, evita página em branco) */
-      body * { visibility: hidden; }
-
-      /* Mostra apenas a área de impressão e filhos */
-      #print-area,
-      #print-area * { visibility: visible; }
-
-      /* position: absolute (NÃO fixed) permite múltiplas páginas */
-      #print-area {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        padding: 10mm 14mm;
-        background: #fff;
-        font-family: Arial, sans-serif;
-        font-size: 10pt;
-        color: #000;
-      }
-
-      /* Cabeçalho repete em cada página, total fica sempre na última */
-      thead { display: table-header-group; }
-      tfoot { display: table-footer-group; }
-
-      /* Não quebra linha da tabela no meio */
-      tr { page-break-inside: avoid; }
-
-      /* Resumo e assinaturas não quebram */
-      #print-area > div:last-of-type { page-break-inside: avoid; }
-
-      /* Bordas visíveis e cores preservadas */
-      table { border-collapse: collapse !important; width: 100% !important; }
-      th, td { border: 1px solid #bbb !important; padding: 5px 8px !important; font-size: 9pt !important; }
-
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
+    /* Impressão gerenciada via window.open() — sem @media print necessário */
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useCallback } = React;
+    const { useState, useCallback, useEffect } = React;
 
     const DIAS_SF = ["SEG","TER","QUA","QUI","SEX"];
     const DIAS_SS = ["SEG","TER","QUA","QUI","SEX","SAB"];
@@ -152,16 +116,45 @@
 
     function App(){
       const [page,setPage]=useState("vt");
-      const [empresa,setEmpresa]=useState("Cantina em Casa / Lumar Alimentos");
-      const [responsavel,setResponsavel]=useState("");
-      const [passagemStr,setPassagemStr]=useState("4,30");
-      const [semanaIni,setSemanaIni]=useState("");
-      const [semanaFim,setSemanaFim]=useState("");
-      const [employees,setEmployees]=useState([]);
+      const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
+      const [responsavel,setResponsavel]=useState(()=>localStorage.getItem("rh_responsavel")||"");
+      const [passagemStr,setPassagemStr]=useState(()=>localStorage.getItem("rh_passagem")||"4,30");
+      const [semanaIni,setSemanaIni]=useState(()=>localStorage.getItem("rh_semanaIni")||"");
+      const [semanaFim,setSemanaFim]=useState(()=>localStorage.getItem("rh_semanaFim")||"");
+      const [employees,setEmployees]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_employees")||"[]"); }catch(e){ return []; } });
+      const [historico,setHistorico]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_historico")||"[]"); }catch(e){ return []; } });
       const [novoNome,setNovoNome]=useState("");
       const [novaEscala,setNovaEscala]=useState("SEG-SEX");
       const [csvStatus,setCsvStatus]=useState(null);
       const [drag,setDrag]=useState(false);
+
+      // Persiste config e semana atual no localStorage
+      useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
+      useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
+      useEffect(()=>{ localStorage.setItem("rh_passagem",passagemStr); },[passagemStr]);
+      useEffect(()=>{ localStorage.setItem("rh_semanaIni",semanaIni); },[semanaIni]);
+      useEffect(()=>{ localStorage.setItem("rh_semanaFim",semanaFim); },[semanaFim]);
+      useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
+      useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
+
+      // Salva semana atual no histórico
+      const salvarNoHistorico=useCallback(()=>{
+        if(!semanaIni||!semanaFim||employees.length===0) return;
+        const label=`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`;
+        setHistorico(prev=>{
+          const semAlabel=prev.filter(h=>h.semanaIni!==semanaIni||h.semanaFim!==semanaFim);
+          const novaEntrada={id:Date.now(),label,semanaIni,semanaFim,employees,importadoEm:new Date().toLocaleString("pt-BR")};
+          return [novaEntrada,...semAlabel].slice(0,12); // guarda até 12 semanas
+        });
+      },[semanaIni,semanaFim,employees]);
+
+      // Carrega semana do histórico
+      const carregarDoHistorico=useCallback((entrada)=>{
+        setEmployees(entrada.employees);
+        setSemanaIni(entrada.semanaIni);
+        setSemanaFim(entrada.semanaFim);
+        setCsvStatus({ok:true,msg:`✅ Semana ${entrada.label} carregada do histórico.`});
+      },[]);
 
       const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
       const getDias=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
@@ -187,6 +180,12 @@
             setSemanaIni(ini);
             setSemanaFim(fim);
             setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores importados. Período: ${fmtDate(ini)} a ${fmtDate(fim)}.`});
+            // Salva automaticamente no histórico
+            const lbl=`${fmtDate(ini)} a ${fmtDate(fim)}`;
+            setHistorico(prev=>{
+              const sem=prev.filter(h=>h.semanaIni!==ini||h.semanaFim!==fim);
+              return [{id:Date.now(),label:lbl,semanaIni:ini,semanaFim:fim,employees:emps.map((e,i)=>({...e,id:i+1})),importadoEm:new Date().toLocaleString("pt-BR")},...sem].slice(0,12);
+            });
           }catch(err){
             setCsvStatus({ok:false,msg:`Erro ao processar arquivo: ${err.message}`});
           }
@@ -196,9 +195,102 @@
 
       const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
 
+      // ── IMPRESSÃO via janela limpa (sem conflito com React/flex/overflow) ──
+      const printRecibo=useCallback(()=>{
+        const vp=parseFloat(passagemStr.replace(",","."))||0;
+        const getD=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
+        const getV=(emp)=>getD(emp)*2*vp;
+        const tot=employees.reduce((s,e)=>s+getV(e),0);
+        const periodo=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"—";
+        const linhas=employees.map((emp,i)=>{
+          const d=getD(emp); const v=getV(emp);
+          const badge=emp.escala==="SEG-SAB"?"background:#FFF8E7;color:#D4972A":"background:#E8F5EE;color:#219653";
+          return `<tr style="background:${i%2===0?'#fff':'#f9f9f9'}">
+            <td style="text-align:center;color:#888">${i+1}</td>
+            <td style="font-weight:600">${emp.nome}</td>
+            <td style="text-align:center"><span style="padding:2px 7px;border-radius:20px;font-size:8pt;font-weight:700;${badge}">${emp.escala}</span></td>
+            <td style="text-align:center;font-weight:700">${d}</td>
+            <td style="text-align:center;color:#666">${d*2}</td>
+            <td style="text-align:center;font-weight:800;color:#1B3A2B">${fmtBRL(v)}</td>
+            <td style="border-left:1px solid #ccc">
+              <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
+              <div style="font-size:7.5pt;color:#999;margin-top:2px">Data: ___/___/______</div>
+            </td>
+          </tr>`;
+        }).join("");
+        const totalPass=employees.reduce((s,e)=>s+getD(e)*2,0);
+        const html=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+        <title>Recibo VT — ${periodo}</title>
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body{font-family:Arial,sans-serif;font-size:9pt;color:#111;padding:8mm 10mm}
+          table{width:100%;border-collapse:collapse;margin-bottom:10px}
+          th{background:#EDE9E1;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:5px 7px;border:1px solid #ccc;color:#555}
+          td{padding:5px 7px;border:1px solid #ddd;vertical-align:middle;font-size:8.5pt}
+          thead{display:table-header-group}
+          tfoot{display:table-footer-group}
+          tr{page-break-inside:avoid}
+          .tfoot-row td{background:#1B3A2B!important;color:#fff;font-weight:800;font-size:10pt;padding:7px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          .tfoot-val{color:#C8A843!important;font-size:11pt}
+          .resumo{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+          .resumo-item{flex:1;min-width:90px;border:1px solid #ddd;border-radius:6px;padding:7px 10px}
+          .resumo-item.hl{border-left:4px solid #1B3A2B;background:#EAF5F0}
+          .resumo-label{font-size:7pt;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+          .resumo-val{font-size:13pt;font-weight:800;color:#1B3A2B}
+          .assinaturas{display:flex;gap:30px;margin-top:16px;padding-top:12px;border-top:1px dashed #ccc}
+          .assin-item{flex:1}
+          .assin-linha{border-bottom:1px solid #666;height:30px}
+          .assin-label{text-align:center;font-size:8pt;color:#888;margin-top:4px}
+          @media print{body{padding:5mm 7mm}}
+        </style></head><body>
+        <div style="border-bottom:3px solid #1B3A2B;padding-bottom:8px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-end">
+            <div>
+              <div style="font-size:15pt;font-weight:800;color:#1B3A2B">${empresa}</div>
+              <div style="font-size:8pt;color:#888;margin-top:2px">R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:8pt;color:#888">Período de referência</div>
+              <div style="font-size:11pt;font-weight:700;color:#1B3A2B">${periodo}</div>
+              ${responsavel?`<div style="font-size:8pt;color:#888">Resp.: ${responsavel}</div>`:""}
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:11pt;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:.07em">Recibo de Vale Transporte</div>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:24px">#</th>
+            <th style="text-align:left">Nome do Colaborador</th>
+            <th>Escala</th><th>Dias</th><th>Pass.</th><th>Valor</th>
+            <th style="min-width:160px;text-align:left">Assinatura / Data</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+          <tfoot><tr class="tfoot-row">
+            <td colspan="5">TOTAL GERAL</td>
+            <td class="tfoot-val" style="text-align:center">${fmtBRL(tot)}</td>
+            <td style="background:#fff!important"></td>
+          </tr></tfoot>
+        </table>
+        <div class="resumo">
+          <div class="resumo-item"><div class="resumo-label">Colaboradores</div><div class="resumo-val">${employees.length}</div></div>
+          <div class="resumo-item"><div class="resumo-label">Total passagens</div><div class="resumo-val">${totalPass}</div></div>
+          <div class="resumo-item"><div class="resumo-label">Valor/passagem</div><div class="resumo-val">${fmtBRL(vp)}</div></div>
+          <div class="resumo-item hl"><div class="resumo-label">Total a pagar</div><div class="resumo-val">${fmtBRL(tot)}</div></div>
+        </div>
+        <div class="assinaturas">
+          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Responsável pelo Pagamento</div><div class="assin-label">Data: ___/___/______</div></div>
+          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Conferência</div><div class="assin-label">Data: ___/___/______</div></div>
+        </div>
+        <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}<\/script>
+        </body></html>`;
+        const w=window.open("","_blank","width=900,height=700");
+        w.document.write(html);
+        w.document.close();
+      },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr]);
+
       function VTPage(){
         const [vtTab,setVtTab]=useState("import");
-        const vtTabs=[{k:"import",l:"📂 Importar CSV"},{k:"manual",l:"✏️ Manual"},{k:"ponto",l:"📋 Ponto"},{k:"recibo",l:"🖨️ Recibo"}];
+        const vtTabs=[{k:"import",l:"📂 Importar CSV"},{k:"manual",l:"✏️ Manual"},{k:"ponto",l:"📋 Ponto"},{k:"recibo",l:"🖨️ Recibo"},{k:"hist",l:"📚 Histórico"}];
 
         return (
           <div>
@@ -214,7 +306,7 @@
                 <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
                 <div>
                   <label style={s.label}>Valor da passagem (R$)</label>
-                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="4,30"/>
+                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
                   <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
                 </div>
               </div>
@@ -371,7 +463,7 @@
                 <div style={s.card}>
                   <div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                     <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
-                    <button style={s.btnAcc} onClick={()=>window.print()}>🖨️ Imprimir / Salvar PDF</button>
+                    <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
                   </div>
                   <div id="print-area">
                     <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
@@ -451,8 +543,55 @@
                   </div>
                 </div>
                 <div className="no-print" style={{display:"flex",justifyContent:"flex-end"}}>
-                  <button style={s.btnAcc} onClick={()=>window.print()}>🖨️ Imprimir / Salvar PDF</button>
+                  <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
                 </div>
+              </div>
+            )}
+
+            {vtTab==="hist"&&(
+              <div style={s.card}>
+                <div style={s.cardTitle}>📚 Histórico de Semanas</div>
+                <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas automaticamente neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
+                {historico.length===0?(
+                  <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
+                ):(
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Período</th>
+                      <th style={s.thC}>Colaboradores</th>
+                      <th style={s.thC}>Total VT</th>
+                      <th style={s.th}>Importado em</th>
+                      <th style={s.thC}></th>
+                    </tr></thead>
+                    <tbody>
+                      {historico.map((h,i)=>{
+                        const vp2=parseFloat(passagemStr.replace(",","."))||0;
+                        const getD2=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
+                        const tot2=h.employees.reduce((acc,e)=>acc+getD2(e)*2*vp2,0);
+                        const ativo=h.semanaIni===semanaIni&&h.semanaFim===semanaFim;
+                        return(
+                          <tr key={h.id} style={{...s.row(i),outline:ativo?`2px solid ${C.acc}`:"none",outlineOffset:-1}}>
+                            <td style={{...s.td,fontWeight:ativo?700:400}}>
+                              {ativo&&<span style={{fontSize:10,background:C.acc,color:"#fff",borderRadius:20,padding:"1px 7px",marginRight:6,fontWeight:700}}>ATIVA</span>}
+                              {h.label}
+                            </td>
+                            <td style={s.tdC}>{h.employees.length}</td>
+                            <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(tot2)}</td>
+                            <td style={{...s.td,fontSize:11,color:C.muted}}>{h.importadoEm}</td>
+                            <td style={s.tdC}>
+                              <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>{carregarDoHistorico(h);setVtTab("ponto");}}>Carregar</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+                {historico.length>0&&(
+                  <div style={{marginTop:12,textAlign:"right"}}>
+                    <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={()=>{ if(window.confirm("Apagar todo o histórico salvo?")) setHistorico([]); }}>🗑️ Limpar histórico</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
