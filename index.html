@@ -154,7 +154,7 @@
       const [page,setPage]=useState("vt");
       const [empresa,setEmpresa]=useState("Cantina em Casa / Lumar Alimentos");
       const [responsavel,setResponsavel]=useState("");
-      const [passagemStr,setPassagemStr]=useState("5,50");
+      const [passagemStr,setPassagemStr]=useState("4,30");
       const [semanaIni,setSemanaIni]=useState("");
       const [semanaFim,setSemanaFim]=useState("");
       const [employees,setEmployees]=useState([]);
@@ -214,7 +214,7 @@
                 <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
                 <div>
                   <label style={s.label}>Valor da passagem (R$)</label>
-                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
+                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="4,30"/>
                   <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
                 </div>
               </div>
