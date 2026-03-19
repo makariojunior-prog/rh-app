@@ -127,6 +127,7 @@
       const [novaEscala,setNovaEscala]=useState("SEG-SEX");
       const [csvStatus,setCsvStatus]=useState(null);
       const [drag,setDrag]=useState(false);
+      const [vtTab,setVtTab]=useState("import");
 
       // Persiste config e semana atual no localStorage
       useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
@@ -296,11 +297,8 @@
         setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); }, 2000);
       },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr]);
 
-      function VTPage(){
-        const [vtTab,setVtTab]=useState("import");
-        const vtTabs=[{k:"import",l:"📂 Importar CSV"},{k:"manual",l:"✏️ Manual"},{k:"ponto",l:"📋 Ponto"},{k:"recibo",l:"🖨️ Recibo"},{k:"hist",l:"📚 Histórico"}];
-
-        return (
+      const vtTabs=[{k:"import",l:"📂 Importar CSV"},{k:"manual",l:"✏️ Manual"},{k:"ponto",l:"📋 Ponto"},{k:"recibo",l:"🖨️ Recibo"},{k:"hist",l:"📚 Histórico"}];
+      const vtPageContent=(
           <div>
             <div style={{marginBottom:20}}>
               <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🚌 Vale Transporte</div>
@@ -603,8 +601,7 @@
               </div>
             )}
           </div>
-        );
-      }
+      );
 
       function PlaceholderPage({title,icon}){
         return(
@@ -644,7 +641,7 @@
               ))}
             </nav>
             <main style={s.main}>
-              {page==="vt"&&<VTPage/>}
+              {page==="vt"&&vtPageContent}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
