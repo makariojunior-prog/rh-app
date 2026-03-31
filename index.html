@@ -12,7 +12,10 @@
     body { background: #F4F1EC; font-family: 'Segoe UI', system-ui, sans-serif; color: #1A1A1A; }
     input, select, textarea, button { font-family: inherit; }
     input[type=checkbox] { accent-color: #219653; }
-    /* Impressão gerenciada via window.open() — sem @media print necessário */
+    .afastado-row td { opacity: 0.45; }
+    .afastado-row td:first-child { opacity: 1; }
+    .feriado-col { background: #F5F0E8 !important; }
+    pre { white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -70,6 +73,8 @@
         id:i+1, cracha:e.id, nome:e.nome,
         escala:e.trabalhouSab?"SEG-SAB":"SEG-SEX",
         presente:e.presente,
+        afastado: false,
+        valorPago: "",
       }));
       const sorted=allDates.sort((a,b)=>a-b);
       return { employees, semanaIni:toISO(sorted[0]), semanaFim:toISO(sorted[sorted.length-1]) };
@@ -79,7 +84,8 @@
       bg:"#F4F1EC", card:"#FFF", pri:"#1B3A2B", acc:"#C8A843",
       text:"#1A1A1A", muted:"#888", border:"#E0DDD6",
       danger:"#A93226", rowAlt:"#F9F6F1", green:"#219653",
-      greenBg:"#E8F5EE", amber:"#D4972A", amberBg:"#FFF8E7"
+      greenBg:"#E8F5EE", amber:"#D4972A", amberBg:"#FFF8E7",
+      feriado:"#EDE0C4",
     };
 
     const s={
@@ -94,13 +100,16 @@
       cardTitle:{fontWeight:700,fontSize:13,color:C.pri,marginBottom:16,textTransform:"uppercase",letterSpacing:"0.05em",display:"flex",alignItems:"center",gap:7},
       label:{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5,display:"block"},
       input:{border:`1.5px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:13,outline:"none",background:"#FAFAF8",color:C.text,width:"100%"},
+      inputSm:{border:`1.5px solid ${C.border}`,borderRadius:6,padding:"5px 8px",fontSize:11,outline:"none",background:"#FAFAF8",color:C.text,width:"100%"},
       select:{border:`1.5px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:13,outline:"none",background:"#FAFAF8",color:C.text,cursor:"pointer"},
       btn:{background:C.pri,color:"#fff",border:"none",borderRadius:7,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13,display:"inline-flex",alignItems:"center",gap:5},
       btnAcc:{background:C.acc,color:"#fff",border:"none",borderRadius:7,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13,display:"inline-flex",alignItems:"center",gap:5},
       btnSm:{background:"transparent",color:C.danger,border:`1.5px solid ${C.danger}`,borderRadius:6,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:600},
+      btnOutline:{background:"transparent",color:C.pri,border:`1.5px solid ${C.pri}`,borderRadius:7,padding:"8px 16px",cursor:"pointer",fontWeight:700,fontSize:13,display:"inline-flex",alignItems:"center",gap:5},
       table:{width:"100%",borderCollapse:"collapse"},
       th:{textAlign:"left",padding:"9px 12px",background:"#EDE9E1",fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:`1px solid ${C.border}`},
       thC:{textAlign:"center",padding:"9px 8px",background:"#EDE9E1",fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:`1px solid ${C.border}`},
+      thFeriado:{textAlign:"center",padding:"9px 8px",background:C.feriado,fontWeight:700,fontSize:11,color:"#8B6914",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:`1px solid #D4B483`},
       td:{padding:"10px 12px",borderBottom:`1px solid #F0EDE8`,verticalAlign:"middle",fontSize:13},
       tdC:{padding:"10px 8px",borderBottom:`1px solid #F0EDE8`,verticalAlign:"middle",textAlign:"center",fontSize:13},
       badge:(e)=>({display:"inline-block",padding:"3px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:e==="SEG-SAB"?C.amberBg:C.greenBg,color:e==="SEG-SAB"?C.amber:C.green}),
@@ -112,7 +121,54 @@
       successBox:{background:C.greenBg,border:`1px solid ${C.green}`,borderRadius:8,padding:"11px 15px",fontSize:13,color:"#1A5631",marginBottom:14},
       dropZone:(drag)=>({border:`2px dashed ${drag?C.acc:C.border}`,borderRadius:10,padding:"32px 20px",textAlign:"center",background:drag?"#FFFBF0":"#FAFAF8",cursor:"pointer",transition:"all 0.2s",color:drag?C.acc:C.muted,marginBottom:14}),
       divider:{border:"none",borderTop:`1px solid ${C.border}`,margin:"14px 0"},
+      codeBlock:{background:"#1B3A2B",color:"#A8D5A2",borderRadius:8,padding:"14px 16px",fontSize:11.5,fontFamily:"monospace",overflowX:"auto",marginBottom:14,lineHeight:1.6},
     };
+
+    const GAS_SCRIPT = `// ============================================================
+// Cole esta função no Apps Script da planilha RH
+// e publique como Web App (Executar como: Eu,
+// Quem tem acesso: Qualquer pessoa)
+// ============================================================
+function doPost(e) {
+  try {
+    var dados = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.openById('1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU');
+    var aba = ss.getSheetByName('VT');
+    if (!aba) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ok:false,msg:'Aba VT não encontrada'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    // Cria cabeçalho se a aba estiver vazia
+    if (aba.getLastRow() === 0) {
+      aba.appendRow([
+        'Semana Início','Semana Fim','Colaborador','Escala',
+        'Dias Trabalhados','Passagens','Valor Calculado','Valor Pago',
+        'Afastado','Registrado em'
+      ]);
+    }
+    var registrado = Utilities.formatDate(
+      new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm'
+    );
+    dados.employees.forEach(function(emp) {
+      aba.appendRow([
+        dados.semanaIni, dados.semanaFim,
+        emp.nome, emp.escala,
+        emp.diasTrabalhados, emp.diasTrabalhados * 2,
+        emp.valorCalculado, emp.valorPago,
+        emp.afastado ? 'Sim' : 'Não',
+        registrado
+      ]);
+    });
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:true,msg:'Salvo com sucesso'}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:false,msg:err.message}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
 
     function App(){
       const [page,setPage]=useState("vt");
@@ -128,8 +184,13 @@
       const [csvStatus,setCsvStatus]=useState(null);
       const [drag,setDrag]=useState(false);
       const [vtTab,setVtTab]=useState("import");
+      // Novos estados
+      const [feriadosDia,setFeriadosDia]=useState({});
+      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"");
+      const [gasStatus,setGasStatus]=useState(null);
+      const [copiedScript,setCopiedScript]=useState(false);
+      const [copiedCsv,setCopiedCsv]=useState(false);
 
-      // Persiste config e semana atual no localStorage
       useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
       useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
       useEffect(()=>{ localStorage.setItem("rh_passagem",passagemStr); },[passagemStr]);
@@ -137,36 +198,42 @@
       useEffect(()=>{ localStorage.setItem("rh_semanaFim",semanaFim); },[semanaFim]);
       useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
       useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
+      useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
 
-      // Salva semana atual no histórico
-      const salvarNoHistorico=useCallback(()=>{
-        if(!semanaIni||!semanaFim||employees.length===0) return;
-        const label=`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`;
-        setHistorico(prev=>{
-          const semAlabel=prev.filter(h=>h.semanaIni!==semanaIni||h.semanaFim!==semanaFim);
-          const novaEntrada={id:Date.now(),label,semanaIni,semanaFim,employees,importadoEm:new Date().toLocaleString("pt-BR")};
-          return [novaEntrada,...semAlabel].slice(0,12); // guarda até 12 semanas
-        });
-      },[semanaIni,semanaFim,employees]);
+      const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
 
-      // Carrega semana do histórico
+      // getDias respeita feriados e afastamento
+      const getDias=(emp)=>{
+        if(emp.afastado) return 0;
+        const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
+        return dias.filter(d=>emp.presente?.[d]&&!feriadosDia[d]).length;
+      };
+
+      // getValorFinal usa valorPago se preenchido, senão calcula
+      const getValorFinal=(emp)=>{
+        if(emp.afastado) return 0;
+        const vp=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
+        if(vp) return parseFloat(String(emp.valorPago).replace(",","."))||0;
+        return getDias(emp)*2*valorPassagem;
+      };
+
+      const total=employees.reduce((s,e)=>s+getValorFinal(e),0);
+      const semanaLabel=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"— período não definido —";
+
+      const toggleFeriado=(dia)=>setFeriadosDia(p=>({...p,[dia]:!p[dia]}));
+      const toggleAtt=(id,dia)=>setEmployees(p=>p.map(e=>e.id===id?{...e,presente:{...e.presente,[dia]:!e.presente?.[dia]}}:e));
+      const toggleAfastado=(id)=>setEmployees(p=>p.map(e=>e.id===id?{...e,afastado:!e.afastado}:e));
+      const setValorPago=(id,val)=>setEmployees(p=>p.map(e=>e.id===id?{...e,valorPago:val}:e));
+      const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
+      const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
+      const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{},afastado:false,valorPago:""}]); setNovoNome(""); };
+
       const carregarDoHistorico=useCallback((entrada)=>{
-        setEmployees(entrada.employees);
+        setEmployees(entrada.employees.map(e=>({afastado:false,valorPago:"",...e})));
         setSemanaIni(entrada.semanaIni);
         setSemanaFim(entrada.semanaFim);
         setCsvStatus({ok:true,msg:`✅ Semana ${entrada.label} carregada do histórico.`});
       },[]);
-
-      const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
-      const getDias=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
-      const getValor=(emp)=>getDias(emp)*2*valorPassagem;
-      const total=employees.reduce((s,e)=>s+getValor(e),0);
-      const semanaLabel=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"— período não definido —";
-
-      const toggleAtt=(id,dia)=>setEmployees(p=>p.map(e=>e.id===id?{...e,presente:{...e.presente,[dia]:!e.presente?.[dia]}}:e));
-      const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
-      const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
-      const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{}}]); setNovoNome(""); };
 
       const handleFile=useCallback((file)=>{
         if(!file){ return; }
@@ -181,7 +248,6 @@
             setSemanaIni(ini);
             setSemanaFim(fim);
             setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores importados. Período: ${fmtDate(ini)} a ${fmtDate(fim)}.`});
-            // Salva automaticamente no histórico
             const lbl=`${fmtDate(ini)} a ${fmtDate(fim)}`;
             setHistorico(prev=>{
               const sem=prev.filter(h=>h.semanaIni!==ini||h.semanaFim!==fim);
@@ -196,23 +262,102 @@
 
       const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
 
-      // ── IMPRESSÃO via janela limpa (sem conflito com React/flex/overflow) ──
+      // Exportar CSV para download
+      const exportarCSV=useCallback(()=>{
+        if(employees.length===0) return;
+        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias Trabalhados","Passagens","Valor Calculado","Valor Pago","Afastado"];
+        const rows=employees.map(emp=>[
+          semanaIni,semanaFim,emp.nome,emp.escala,
+          getDias(emp),getDias(emp)*2,
+          (getDias(emp)*2*valorPassagem).toFixed(2).replace(".",","),
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          emp.afastado?"Sim":"Não"
+        ]);
+        const csv=[header,...rows].map(r=>r.join(";")).join("\n");
+        const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;
+        a.download=`VT_${semanaIni}_${semanaFim}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },[employees,semanaIni,semanaFim,valorPassagem]);
+
+      // Copiar CSV para clipboard
+      const copiarCSV=useCallback(()=>{
+        if(employees.length===0) return;
+        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias","Passagens","Vlr Calculado","Vlr Pago","Afastado"];
+        const rows=employees.map(emp=>[
+          fmtDate(semanaIni),fmtDate(semanaFim),emp.nome,emp.escala,
+          getDias(emp),getDias(emp)*2,
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          emp.afastado?"Sim":"Não"
+        ]);
+        const tsv=[header,...rows].map(r=>r.join("\t")).join("\n");
+        navigator.clipboard.writeText(tsv).then(()=>{
+          setCopiedCsv(true);
+          setTimeout(()=>setCopiedCsv(false),2500);
+        });
+      },[employees,semanaIni,semanaFim,valorPassagem]);
+
+      // Salvar na planilha via GAS web app
+      const salvarNaPlanilha=useCallback(async()=>{
+        if(!gasUrl.trim()){ setGasStatus({ok:false,msg:"Cole a URL do Web App antes de salvar."}); return; }
+        if(employees.length===0){ setGasStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
+        const payload={
+          semanaIni,semanaFim,
+          employees:employees.map(emp=>({
+            nome:emp.nome,escala:emp.escala,
+            afastado:emp.afastado||false,
+            diasTrabalhados:getDias(emp),
+            valorCalculado:getDias(emp)*2*valorPassagem,
+            valorPago:getValorFinal(emp),
+          }))
+        };
+        setGasStatus({ok:null,msg:"Enviando dados..."});
+        try{
+          // no-cors: dados chegam ao GAS mas não conseguimos ler a resposta
+          await fetch(gasUrl,{
+            method:"POST",
+            mode:"no-cors",
+            body:JSON.stringify(payload),
+          });
+          setGasStatus({ok:true,msg:"✅ Dados enviados! Verifique a aba VT na planilha para confirmar o registro."});
+        }catch(err){
+          setGasStatus({ok:false,msg:`Erro: ${err.message}. Tente exportar o CSV manualmente.`});
+        }
+      },[gasUrl,employees,semanaIni,semanaFim,valorPassagem]);
+
       const printRecibo=useCallback(()=>{
         const vp=parseFloat(passagemStr.replace(",","."))||0;
-        const getD=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
-        const getV=(emp)=>getD(emp)*2*vp;
+        const fd=feriadosDia;
+        const getD=(emp)=>{
+          if(emp.afastado) return 0;
+          const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
+          return dias.filter(d=>emp.presente?.[d]&&!fd[d]).length;
+        };
+        const getV=(emp)=>{
+          if(emp.afastado) return 0;
+          const pago=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
+          if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0;
+          return getD(emp)*2*vp;
+        };
         const tot=employees.reduce((s,e)=>s+getV(e),0);
         const periodo=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"—";
         const linhas=employees.map((emp,i)=>{
           const d=getD(emp); const v=getV(emp);
+          const calculado=d*2*vp;
+          const manualNote=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado?`<span style="font-size:7pt;color:#888">(calc: ${fmtBRL(calculado)})</span>`:"";
           const badge=emp.escala==="SEG-SAB"?"background:#FFF8E7;color:#D4972A":"background:#E8F5EE;color:#219653";
-          return `<tr style="background:${i%2===0?'#fff':'#f9f9f9'}">
+          const afastadoStyle=emp.afastado?"opacity:0.5;text-decoration:line-through;":"";
+          return `<tr style="background:${i%2===0?"#fff":"#f9f9f9"};${afastadoStyle}">
             <td style="text-align:center;color:#888;width:20px">${i+1}</td>
-            <td style="font-weight:600;font-size:7.5pt">${emp.nome}</td>
+            <td style="font-weight:600;font-size:7.5pt">${emp.nome}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}</td>
             <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
             <td style="text-align:center;font-weight:700;width:36px">${d}</td>
             <td style="text-align:center;color:#666;width:36px">${d*2}</td>
-            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:46px">${fmtBRL(v)}</td>
+            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:60px">${fmtBRL(v)} ${manualNote}</td>
             <td style="border-left:1px solid #ccc;width:150px">
               <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
               <div style="font-size:7pt;color:#999;margin-top:2px">Data: ___/___/______</div>
@@ -232,7 +377,6 @@
           tfoot{display:table-footer-group}
           tr{page-break-inside:avoid}
           .tfoot-row td{background:#1B3A2B!important;color:#fff;font-weight:800;font-size:10pt;padding:7px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-          .tfoot-val{color:#C8A843!important;font-size:11pt}
           .resumo{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
           .resumo-item{flex:1;min-width:90px;border:1px solid #ddd;border-radius:6px;padding:7px 10px}
           .resumo-item.hl{border-left:4px solid #1B3A2B;background:#EAF5F0}
@@ -265,7 +409,7 @@
             <th style="width:56px">Escala</th>
             <th style="width:36px">Dias</th>
             <th style="width:36px">Pass.</th>
-            <th style="width:46px">Valor</th>
+            <th style="width:60px">Valor</th>
             <th style="width:150px;text-align:left">Assinatura / Data</th>
           </tr></thead>
           <tbody>${linhas}</tbody>
@@ -281,7 +425,6 @@
           <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Conferência</div><div class="assin-label">Data: ___/___/______</div></div>
         </div>
         </body></html>`;
-        // Iframe invisível — sem janela intermediária, print abre direto
         const old=document.getElementById("__print_iframe");
         if(old) old.remove();
         const iframe=document.createElement("iframe");
@@ -293,314 +436,511 @@
         iframe.contentDocument.close();
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
-        // Remove após 2s (tempo suficiente para o diálogo de impressão carregar)
-        setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); }, 2000);
-      },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr]);
+        setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); },2000);
+      },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr,feriadosDia]);
 
-      const vtTabs=[{k:"import",l:"📂 Importar CSV"},{k:"manual",l:"✏️ Manual"},{k:"ponto",l:"📋 Ponto"},{k:"recibo",l:"🖨️ Recibo"},{k:"hist",l:"📚 Histórico"}];
+      const vtTabs=[
+        {k:"import",l:"📂 Importar CSV"},
+        {k:"manual",l:"✏️ Manual"},
+        {k:"ponto",l:"📋 Ponto"},
+        {k:"recibo",l:"🖨️ Recibo"},
+        {k:"hist",l:"📚 Histórico"},
+        {k:"sheets",l:"📤 Google Sheets"},
+      ];
+
       const vtPageContent=(
-          <div>
-            <div style={{marginBottom:20}}>
-              <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🚌 Vale Transporte</div>
-              <div style={{fontSize:13,color:C.muted}}>Controle semanal de presença e geração de recibo</div>
-            </div>
+        <div>
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🚌 Vale Transporte</div>
+            <div style={{fontSize:13,color:C.muted}}>Controle semanal de presença e geração de recibo</div>
+          </div>
 
-            <div style={s.card}>
-              <div style={s.cardTitle}>⚙️ Configurações</div>
-              <div style={s.grid3}>
-                <div><label style={s.label}>Empresa</label><input style={s.input} value={empresa} onChange={e=>setEmpresa(e.target.value)}/></div>
-                <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
-                <div>
-                  <label style={s.label}>Valor da passagem (R$)</label>
-                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
-                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
-                </div>
-              </div>
-              <div style={{...s.grid2,marginTop:12}}>
-                <div><label style={s.label}>Semana — Início</label><input style={s.input} type="date" value={semanaIni} onChange={e=>setSemanaIni(e.target.value)}/></div>
-                <div><label style={s.label}>Semana — Fim</label><input style={s.input} type="date" value={semanaFim} onChange={e=>setSemanaFim(e.target.value)}/></div>
-              </div>
-            </div>
-
-            <div className="no-print" style={{display:"flex",gap:4,marginBottom:18,borderBottom:`1px solid ${C.border}`,paddingBottom:0}}>
-              {vtTabs.map(t=>(
-                <button key={t.k} style={{...s.btn,background:vtTab===t.k?C.pri:"transparent",color:vtTab===t.k?"#fff":C.muted,border:"none",borderRadius:"7px 7px 0 0",fontSize:12,padding:"8px 16px"}} onClick={()=>setVtTab(t.k)}>{t.l}</button>
-              ))}
-            </div>
-
-            {vtTab==="import"&&(
-              <div style={s.card}>
-                <div style={s.cardTitle}>📂 Importar arquivo do ponto eletrônico</div>
-                <div style={s.infoBox}>
-                  <strong>Formato esperado:</strong> arquivo <code>.csv</code> com separador <code>;</code> — o mesmo exportado pelo sistema de ponto eletrônico. A presença é detectada pela coluna <strong>1ª Batida</strong>.
-                </div>
-                <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDrop} onClick={()=>document.getElementById("csvInput").click()}>
-                  <div style={{fontSize:32,marginBottom:8}}>📄</div>
-                  <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o arquivo CSV aqui</div>
-                  <div style={{fontSize:13}}>ou clique para selecionar</div>
-                  <input id="csvInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-                </div>
-                {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
-                {employees.length>0&&(
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
-                    <span style={{fontSize:13,fontWeight:600,color:C.pri}}>{employees.length} colaboradores · Semana: <strong>{semanaLabel}</strong></span>
-                    <button style={s.btnAcc} onClick={()=>setVtTab("ponto")}>Ver Ponto →</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {vtTab==="manual"&&(
-              <div style={s.card}>
-                <div style={s.cardTitle}>✏️ Cadastro manual de colaboradores</div>
-                <div style={s.infoBox}>Use quando o arquivo do ponto não estiver disponível. Vá para a aba <strong>Ponto</strong> para marcar as presenças.</div>
-                {employees.length===0?(
-                  <div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:13}}>Nenhum colaborador ainda.</div>
-                ):(
-                  <table style={{...s.table,marginBottom:14}}>
-                    <thead><tr>
-                      <th style={{...s.th,width:32}}>#</th>
-                      <th style={s.th}>Nome</th>
-                      <th style={{...s.th,width:160}}>Escala</th>
-                      <th style={{...s.th,width:70}}></th>
-                    </tr></thead>
-                    <tbody>
-                      {employees.map((emp,i)=>(
-                        <tr key={emp.id} style={s.row(i)}>
-                          <td style={{...s.tdC,color:C.muted}}>{i+1}</td>
-                          <td style={s.td}><input style={{...s.input,fontSize:12}} value={emp.nome} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,nome:e.target.value}:x))}/></td>
-                          <td style={s.td}>
-                            <select style={{...s.select,width:"100%",fontSize:12}} value={emp.escala} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,escala:e.target.value}:x))}>
-                              <option value="SEG-SEX">Seg → Sex</option>
-                              <option value="SEG-SAB">Seg → Sáb</option>
-                            </select>
-                          </td>
-                          <td style={s.tdC}><button style={s.btnSm} onClick={()=>removeEmp(emp.id)}>✕</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-                <hr style={s.divider}/>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  <div style={{flex:1,minWidth:180}}><input style={s.input} placeholder="Nome do colaborador" value={novoNome} onChange={e=>setNovoNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEmp()}/></div>
-                  <select style={{...s.select,minWidth:140}} value={novaEscala} onChange={e=>setNovaEscala(e.target.value)}>
-                    <option value="SEG-SEX">Seg → Sex</option>
-                    <option value="SEG-SAB">Seg → Sáb</option>
-                  </select>
-                  <button style={s.btn} onClick={addEmp}>＋ Adicionar</button>
-                </div>
-              </div>
-            )}
-
-            {vtTab==="ponto"&&(
+          <div style={s.card}>
+            <div style={s.cardTitle}>⚙️ Configurações</div>
+            <div style={s.grid3}>
+              <div><label style={s.label}>Empresa</label><input style={s.input} value={empresa} onChange={e=>setEmpresa(e.target.value)}/></div>
+              <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
               <div>
-                {employees.length===0?(
-                  <div style={{...s.card,textAlign:"center",color:C.muted,padding:"32px"}}>Importe o CSV ou cadastre colaboradores primeiro.</div>
-                ):(
-                  <div style={s.card}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                      <div style={s.cardTitle}>📋 Semana: <span style={{color:C.acc,marginLeft:6}}>{semanaLabel}</span></div>
+                <label style={s.label}>Valor da passagem (R$)</label>
+                <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
+                <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
+              </div>
+            </div>
+            <div style={{...s.grid2,marginTop:12}}>
+              <div><label style={s.label}>Semana — Início</label><input style={s.input} type="date" value={semanaIni} onChange={e=>setSemanaIni(e.target.value)}/></div>
+              <div><label style={s.label}>Semana — Fim</label><input style={s.input} type="date" value={semanaFim} onChange={e=>setSemanaFim(e.target.value)}/></div>
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:4,marginBottom:18,borderBottom:`1px solid ${C.border}`,paddingBottom:0,overflowX:"auto"}}>
+            {vtTabs.map(t=>(
+              <button key={t.k} style={{...s.btn,background:vtTab===t.k?C.pri:"transparent",color:vtTab===t.k?"#fff":C.muted,border:"none",borderRadius:"7px 7px 0 0",fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}} onClick={()=>setVtTab(t.k)}>{t.l}</button>
+            ))}
+          </div>
+
+          {/* ── TAB IMPORT ── */}
+          {vtTab==="import"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>📂 Importar arquivo do ponto eletrônico</div>
+              <div style={s.infoBox}><strong>Formato esperado:</strong> arquivo <code>.csv</code> com separador <code>;</code> exportado pelo sistema de ponto. Presença detectada pela coluna <strong>1ª Batida</strong>.</div>
+              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDrop} onClick={()=>document.getElementById("csvInput").click()}>
+                <div style={{fontSize:32,marginBottom:8}}>📄</div>
+                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o arquivo CSV aqui</div>
+                <div style={{fontSize:13}}>ou clique para selecionar</div>
+                <input id="csvInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+              </div>
+              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
+              {employees.length>0&&(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:13,fontWeight:600,color:C.pri}}>{employees.length} colaboradores · Semana: <strong>{semanaLabel}</strong></span>
+                  <button style={s.btnAcc} onClick={()=>setVtTab("ponto")}>Ver Ponto →</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB MANUAL ── */}
+          {vtTab==="manual"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>✏️ Cadastro manual de colaboradores</div>
+              <div style={s.infoBox}>Use quando o arquivo do ponto não estiver disponível. Vá para a aba <strong>Ponto</strong> para marcar as presenças.</div>
+              {employees.length===0?(
+                <div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:13}}>Nenhum colaborador ainda.</div>
+              ):(
+                <table style={{...s.table,marginBottom:14}}>
+                  <thead><tr>
+                    <th style={{...s.th,width:32}}>#</th>
+                    <th style={s.th}>Nome</th>
+                    <th style={{...s.th,width:160}}>Escala</th>
+                    <th style={{...s.th,width:70}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {employees.map((emp,i)=>(
+                      <tr key={emp.id} style={s.row(i)}>
+                        <td style={{...s.tdC,color:C.muted}}>{i+1}</td>
+                        <td style={s.td}><input style={{...s.input,fontSize:12}} value={emp.nome} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,nome:e.target.value}:x))}/></td>
+                        <td style={s.td}>
+                          <select style={{...s.select,width:"100%",fontSize:12}} value={emp.escala} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,escala:e.target.value}:x))}>
+                            <option value="SEG-SEX">Seg → Sex</option>
+                            <option value="SEG-SAB">Seg → Sáb</option>
+                          </select>
+                        </td>
+                        <td style={s.tdC}><button style={s.btnSm} onClick={()=>removeEmp(emp.id)}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <hr style={s.divider}/>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:180}}><input style={s.input} placeholder="Nome do colaborador" value={novoNome} onChange={e=>setNovoNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEmp()}/></div>
+                <select style={{...s.select,minWidth:140}} value={novaEscala} onChange={e=>setNovaEscala(e.target.value)}>
+                  <option value="SEG-SEX">Seg → Sex</option>
+                  <option value="SEG-SAB">Seg → Sáb</option>
+                </select>
+                <button style={s.btn} onClick={addEmp}>＋ Adicionar</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB PONTO ── */}
+          {vtTab==="ponto"&&(
+            <div>
+              {employees.length===0?(
+                <div style={{...s.card,textAlign:"center",color:C.muted,padding:"32px"}}>Importe o CSV ou cadastre colaboradores primeiro.</div>
+              ):(
+                <div style={s.card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                    <div style={s.cardTitle}>📋 Semana: <span style={{color:C.acc,marginLeft:6}}>{semanaLabel}</span></div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      {Object.values(feriadosDia).some(Boolean)&&(
+                        <div style={{fontSize:11,background:C.amberBg,color:C.amber,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",fontWeight:700}}>
+                          ⚠️ {Object.values(feriadosDia).filter(Boolean).length} dia(s) como feriado/folga
+                        </div>
+                      )}
                       <div style={{fontSize:12,color:C.muted,background:C.rowAlt,borderRadius:7,padding:"6px 12px",border:`1px solid ${C.border}`}}>
                         ✅ presente &nbsp;|&nbsp; ⬜ falta &nbsp;|&nbsp; — fora da escala
                       </div>
                     </div>
-                    <div style={{overflowX:"auto"}}>
-                      <table style={s.table}>
-                        <thead><tr>
+                  </div>
+
+                  {/* Legenda das novas colunas */}
+                  <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                    <div style={{fontSize:11,background:"#FEF3F2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 10px",color:"#991B1B"}}>
+                      🏖️ <strong>Afastado</strong>: férias / atestado / licença → zera o VT
+                    </div>
+                    <div style={{fontSize:11,background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",color:"#6E4C1E"}}>
+                      🎯 <strong>Pago R$</strong>: valor ajustado (ex: arredondamento) — substitui o calculado
+                    </div>
+                    <div style={{fontSize:11,background:C.feriado,border:`1px solid #D4B483`,borderRadius:6,padding:"4px 10px",color:"#8B6914"}}>
+                      📅 <strong>Feriado/Folga</strong>: marque o dia no cabeçalho — descontado de todos
+                    </div>
+                  </div>
+
+                  <div style={{overflowX:"auto"}}>
+                    <table style={s.table}>
+                      <thead>
+                        <tr>
                           <th style={{...s.th,minWidth:200}}>Colaborador</th>
                           <th style={{...s.th,width:80,textAlign:"center"}}>Escala</th>
                           {DIAS_SS.map(d=>(
-                            <th key={d} style={{...s.thC,minWidth:56}}>
-                              {DIA_LABEL[d]}
-                              <div style={{marginTop:4,display:"flex",justifyContent:"center"}}>
-                                <input type="checkbox" title={`Marcar todos — ${DIA_LABEL_FULL[d]}`} style={{width:12,height:12,cursor:"pointer"}} onChange={e=>setAllDay(d,e.target.checked)}/>
+                            <th key={d} style={feriadosDia[d]?{...s.thFeriado,minWidth:60}:{...s.thC,minWidth:60}}>
+                              <div>{DIA_LABEL[d]}</div>
+                              {/* Marcar todos */}
+                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:6,alignItems:"center"}}>
+                                <input type="checkbox" title={`Marcar todos — ${DIA_LABEL_FULL[d]}`} style={{width:11,height:11,cursor:"pointer"}} onChange={e=>setAllDay(d,e.target.checked)}/>
+                              </div>
+                              {/* Feriado toggle */}
+                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:3,alignItems:"center"}}>
+                                <input
+                                  type="checkbox"
+                                  title={`Marcar ${DIA_LABEL_FULL[d]} como feriado/folga`}
+                                  checked={feriadosDia[d]||false}
+                                  onChange={()=>toggleFeriado(d)}
+                                  style={{width:11,height:11,cursor:"pointer",accentColor:C.amber}}
+                                />
+                                <span style={{fontSize:8,color:feriadosDia[d]?"#8B6914":C.muted,fontWeight:700}}>FER</span>
                               </div>
                             </th>
                           ))}
-                          <th style={{...s.thC,minWidth:52}}>Dias</th>
-                          <th style={{...s.thC,minWidth:82}}>VT</th>
-                        </tr></thead>
-                        <tbody>
-                          {employees.map((emp,i)=>{
-                            const diasEmp=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-                            const dias=getDias(emp);
-                            const valor=getValor(emp);
-                            return(
-                              <tr key={emp.id} style={s.row(i)}>
-                                <td style={s.td}><span style={{fontWeight:600,fontSize:12}}>{emp.nome}</span></td>
-                                <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
-                                {DIAS_SS.map(d=>{
-                                  const works=diasEmp.includes(d);
-                                  const checked=emp.presente?.[d]||false;
-                                  return(
-                                    <td key={d} style={{...s.tdC,background:!works?"#F0ECE8":checked?"#E6F5EC":undefined}}>
-                                      {works?(
-                                        <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
-                                      ):(
-                                        <span style={{color:"#CCC",fontSize:12}}>—</span>
-                                      )}
-                                    </td>
-                                  );
-                                })}
-                                <td style={{...s.tdC,fontWeight:700,color:dias>0?C.pri:C.muted}}>{dias}</td>
-                                <td style={{...s.tdC,fontWeight:700,color:valor>0?C.green:C.muted,fontSize:12}}>{fmtBRL(valor)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{background:"#EDE9E1"}}>
-                            <td style={{...s.td,fontWeight:800,fontSize:13}} colSpan={2}>TOTAL</td>
-                            <td colSpan={DIAS_SS.length}/>
-                            <td style={{...s.tdC,fontWeight:800}}>{employees.reduce((s,e)=>s+getDias(e),0)}</td>
-                            <td style={{...s.tdC,fontWeight:900,color:C.pri,fontSize:14}}>{fmtBRL(total)}</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {vtTab==="recibo"&&(
-              <div>
-                <div style={s.card}>
-                  <div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                    <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
-                    <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
-                  </div>
-                  <div id="print-area">
-                    <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-                        <div>
-                          <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{empresa}</div>
-                          <div style={{fontSize:11,color:C.muted,marginTop:2}}>R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
-                        </div>
-                        <div style={{textAlign:"right"}}>
-                          <div style={{fontSize:11,color:C.muted}}>Período de referência</div>
-                          <div style={{fontSize:14,fontWeight:700,color:C.pri}}>{semanaLabel}</div>
-                          {responsavel&&<div style={{fontSize:11,color:C.muted}}>Resp.: {responsavel}</div>}
-                        </div>
-                      </div>
-                      <div style={{marginTop:10,fontSize:14,fontWeight:800,textAlign:"center",textTransform:"uppercase",letterSpacing:"0.07em"}}>Recibo de Vale Transporte</div>
-                    </div>
-                    <table style={{...s.table,marginBottom:16,fontSize:12}}>
-                      <thead><tr>
-                        <th style={{...s.th,width:28}}>#</th>
-                        <th style={s.th}>Nome do Colaborador</th>
-                        <th style={s.thC}>Escala</th>
-                        <th style={s.thC}>Dias</th>
-                        <th style={s.thC}>Passagens</th>
-                        <th style={s.thC}>Valor</th>
-                        <th style={{...s.th,minWidth:180}}>Assinatura / Data</th>
-                      </tr></thead>
+                          <th style={{...s.thC,minWidth:44}}>Dias</th>
+                          <th style={{...s.thC,minWidth:76}}>VT Calc.</th>
+                          <th style={{...s.thC,minWidth:80,background:"#EEF5E9",color:C.green}}>Pago R$</th>
+                          <th style={{...s.thC,minWidth:76,background:"#EEF5E9",color:C.green}}>Total</th>
+                          <th style={{...s.thC,minWidth:72,background:"#FEF3F2",color:"#991B1B"}}>Afastado</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         {employees.map((emp,i)=>{
+                          const diasEmp=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
                           const dias=getDias(emp);
-                          const valor=getValor(emp);
+                          const calcVal=dias*2*valorPassagem;
+                          const finalVal=getValorFinal(emp);
+                          const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
                           return(
-                            <tr key={emp.id} style={s.row(i)}>
-                              <td style={{...s.tdC,color:C.muted,fontSize:11}}>{i+1}</td>
-                              <td style={{...s.td,fontWeight:600}}>{emp.nome}</td>
+                            <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.55:1}}>
+                              <td style={{...s.td,fontWeight:600,fontSize:12,textDecoration:emp.afastado?"line-through":"none"}}>
+                                {emp.nome}
+                                {emp.afastado&&<span style={{marginLeft:6,fontSize:10,background:"#FEE2E2",color:"#991B1B",borderRadius:10,padding:"1px 5px",fontWeight:700}}>Afastado</span>}
+                              </td>
                               <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
-                              <td style={{...s.tdC,fontWeight:700}}>{dias}</td>
-                              <td style={{...s.tdC,color:C.muted}}>{dias*2}</td>
-                              <td style={{...s.tdC,fontWeight:800,color:C.pri,fontSize:13}}>{fmtBRL(valor)}</td>
-                              <td style={{...s.td,borderLeft:`1px solid ${C.border}`}}>
-                                <div style={{borderBottom:"1px solid #AAA",height:26,marginTop:6}}/>
-                                <div style={{fontSize:10,color:C.muted,marginTop:3}}>Data: ___/___/______</div>
+                              {DIAS_SS.map(d=>{
+                                const works=diasEmp.includes(d);
+                                const checked=emp.presente?.[d]||false;
+                                const isFeriado=feriadosDia[d];
+                                const bgCell=isFeriado?"#F5EFDF":!works?"#F0ECE8":checked&&!emp.afastado?"#E6F5EC":undefined;
+                                return(
+                                  <td key={d} style={{...s.tdC,background:bgCell,transition:"background 0.15s"}}>
+                                    {works&&!isFeriado&&!emp.afastado?(
+                                      <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
+                                    ):isFeriado?(
+                                      <span style={{color:"#C8A843",fontSize:13}}>🎌</span>
+                                    ):(
+                                      <span style={{color:"#CCC",fontSize:12}}>—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td style={{...s.tdC,fontWeight:700,color:dias>0&&!emp.afastado?C.pri:C.muted}}>{dias}</td>
+                              <td style={{...s.tdC,fontSize:12,color:emp.afastado?C.muted:C.muted,textDecoration:temAjuste?"line-through":"none"}}>
+                                {fmtBRL(calcVal)}
+                              </td>
+                              {/* Coluna Pago R$ */}
+                              <td style={{...s.tdC,background:"#F7FBF4"}}>
+                                {!emp.afastado?(
+                                  <input
+                                    type="text"
+                                    value={emp.valorPago||""}
+                                    placeholder="auto"
+                                    onChange={e=>setValorPago(emp.id,e.target.value)}
+                                    style={{...s.inputSm,width:72,textAlign:"center",background:temAjuste?"#FFFBF0":"#FAFAF8",border:temAjuste?`1.5px solid ${C.amber}`:`1.5px solid ${C.border}`,color:temAjuste?C.amber:C.muted}}
+                                  />
+                                ):(
+                                  <span style={{color:"#CCC",fontSize:12}}>—</span>
+                                )}
+                              </td>
+                              {/* Coluna Total (valor final) */}
+                              <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:12,background:"#F7FBF4"}}>
+                                {fmtBRL(finalVal)}
+                              </td>
+                              {/* Coluna Afastado */}
+                              <td style={{...s.tdC,background:"#FFF8F8"}}>
+                                <input
+                                  type="checkbox"
+                                  checked={emp.afastado||false}
+                                  onChange={()=>toggleAfastado(emp.id)}
+                                  style={{width:16,height:16,cursor:"pointer",accentColor:"#A93226"}}
+                                  title="Marcar como afastado (férias, atestado ou licença)"
+                                />
                               </td>
                             </tr>
                           );
                         })}
                       </tbody>
                       <tfoot>
-                        <tr style={{background:C.pri}}>
-                          <td colSpan={5} style={{padding:"10px 12px",fontWeight:800,fontSize:13,color:"#fff"}}>TOTAL GERAL</td>
-                          <td style={{textAlign:"center",fontWeight:900,fontSize:14,color:C.acc,padding:10}}>{fmtBRL(total)}</td>
-                          <td style={{background:"#fff",borderLeft:`1px solid ${C.border}`}}/>
+                        <tr style={{background:"#EDE9E1"}}>
+                          <td style={{...s.td,fontWeight:800,fontSize:13}} colSpan={2}>TOTAL</td>
+                          <td colSpan={DIAS_SS.length}/>
+                          <td style={{...s.tdC,fontWeight:800}}>{employees.reduce((s,e)=>s+getDias(e),0)}</td>
+                          <td style={{...s.tdC,fontWeight:700,fontSize:12,color:C.muted}}>{fmtBRL(employees.reduce((s,e)=>s+getDias(e)*2*valorPassagem,0))}</td>
+                          <td style={{background:"#F7FBF4"}}/>
+                          <td style={{...s.tdC,fontWeight:900,color:C.pri,fontSize:14,background:"#F7FBF4"}}>{fmtBRL(total)}</td>
+                          <td style={{background:"#FFF8F8"}}/>
                         </tr>
                       </tfoot>
                     </table>
-                    <div style={{display:"flex",gap:14,marginBottom:16,flexWrap:"wrap"}}>
-                      {[
-                        {l:"Colaboradores",v:`${employees.length}`},
-                        {l:"Total passagens",v:`${employees.reduce((x,e)=>x+getDias(e)*2,0)} pass.`},
-                        {l:"Valor/passagem",v:fmtBRL(valorPassagem)},
-                        {l:"Total a pagar",v:fmtBRL(total),hl:true},
-                      ].map((it,i)=>(
-                        <div key={i} style={{flex:1,minWidth:100,background:it.hl?"#EAF5F0":C.rowAlt,border:`1px solid ${C.border}`,borderLeft:it.hl?`4px solid ${C.pri}`:undefined,borderRadius:8,padding:"10px 14px"}}>
-                          <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
-                          <div style={{fontSize:15,fontWeight:800,color:it.hl?C.pri:C.text}}>{it.v}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{display:"flex",gap:28,marginTop:24,paddingTop:14,borderTop:`1px dashed ${C.border}`}}>
-                      {["Responsável pelo Pagamento","Conferência"].map((l,i)=>(
-                        <div key={i} style={{flex:1}}>
-                          <div style={{borderBottom:"1px solid #666",height:36}}/>
-                          <div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:5}}>{l}</div>
-                          <div style={{textAlign:"center",fontSize:10,color:C.muted,marginTop:2}}>Data: ___/___/______</div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </div>
-                <div className="no-print" style={{display:"flex",justifyContent:"flex-end"}}>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB RECIBO ── */}
+          {vtTab==="recibo"&&(
+            <div>
+              <div style={s.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
                   <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
                 </div>
-              </div>
-            )}
-
-            {vtTab==="hist"&&(
-              <div style={s.card}>
-                <div style={s.cardTitle}>📚 Histórico de Semanas</div>
-                <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas automaticamente neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
-                {historico.length===0?(
-                  <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
-                ):(
-                  <table style={s.table}>
+                <div>
+                  <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+                      <div>
+                        <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{empresa}</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:11,color:C.muted}}>Período de referência</div>
+                        <div style={{fontSize:14,fontWeight:700,color:C.pri}}>{semanaLabel}</div>
+                        {responsavel&&<div style={{fontSize:11,color:C.muted}}>Resp.: {responsavel}</div>}
+                      </div>
+                    </div>
+                    <div style={{marginTop:10,fontSize:14,fontWeight:800,textAlign:"center",textTransform:"uppercase",letterSpacing:"0.07em"}}>Recibo de Vale Transporte</div>
+                  </div>
+                  <table style={{...s.table,marginBottom:16,fontSize:12}}>
                     <thead><tr>
-                      <th style={s.th}>Período</th>
-                      <th style={s.thC}>Colaboradores</th>
-                      <th style={s.thC}>Total VT</th>
-                      <th style={s.th}>Importado em</th>
-                      <th style={s.thC}></th>
+                      <th style={{...s.th,width:28}}>#</th>
+                      <th style={s.th}>Nome do Colaborador</th>
+                      <th style={s.thC}>Escala</th>
+                      <th style={s.thC}>Dias</th>
+                      <th style={s.thC}>Passagens</th>
+                      <th style={s.thC}>VT Calc.</th>
+                      <th style={{...s.thC,color:C.green}}>Valor Pago</th>
+                      <th style={{...s.th,minWidth:180}}>Assinatura / Data</th>
                     </tr></thead>
                     <tbody>
-                      {historico.map((h,i)=>{
-                        const vp2=parseFloat(passagemStr.replace(",","."))||0;
-                        const getD2=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
-                        const tot2=h.employees.reduce((acc,e)=>acc+getD2(e)*2*vp2,0);
-                        const ativo=h.semanaIni===semanaIni&&h.semanaFim===semanaFim;
+                      {employees.map((emp,i)=>{
+                        const dias=getDias(emp);
+                        const calcVal=dias*2*valorPassagem;
+                        const finalVal=getValorFinal(emp);
+                        const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
                         return(
-                          <tr key={h.id} style={{...s.row(i),outline:ativo?`2px solid ${C.acc}`:"none",outlineOffset:-1}}>
-                            <td style={{...s.td,fontWeight:ativo?700:400}}>
-                              {ativo&&<span style={{fontSize:10,background:C.acc,color:"#fff",borderRadius:20,padding:"1px 7px",marginRight:6,fontWeight:700}}>ATIVA</span>}
-                              {h.label}
+                          <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.5:1}}>
+                            <td style={{...s.tdC,color:C.muted,fontSize:11}}>{i+1}</td>
+                            <td style={{...s.td,fontWeight:600,textDecoration:emp.afastado?"line-through":"none"}}>
+                              {emp.nome}
+                              {emp.afastado&&<span style={{marginLeft:6,fontSize:10,color:"#A93226"}}>(Afastado)</span>}
                             </td>
-                            <td style={s.tdC}>{h.employees.length}</td>
-                            <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(tot2)}</td>
-                            <td style={{...s.td,fontSize:11,color:C.muted}}>{h.importadoEm}</td>
-                            <td style={s.tdC}>
-                              <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>{carregarDoHistorico(h);setVtTab("ponto");}}>Carregar</button>
+                            <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
+                            <td style={{...s.tdC,fontWeight:700}}>{dias}</td>
+                            <td style={{...s.tdC,color:C.muted}}>{dias*2}</td>
+                            <td style={{...s.tdC,color:C.muted,textDecoration:temAjuste?"line-through":"none",fontSize:11}}>{fmtBRL(calcVal)}</td>
+                            <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:13}}>
+                              {fmtBRL(finalVal)}
+                              {temAjuste&&<div style={{fontSize:9,color:C.amber,fontWeight:700}}>ajustado</div>}
+                            </td>
+                            <td style={{...s.td,borderLeft:`1px solid ${C.border}`}}>
+                              <div style={{borderBottom:"1px solid #AAA",height:26,marginTop:6}}/>
+                              <div style={{fontSize:10,color:C.muted,marginTop:3}}>Data: ___/___/______</div>
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
+                    <tfoot>
+                      <tr style={{background:C.pri}}>
+                        <td colSpan={6} style={{padding:"10px 12px",fontWeight:800,fontSize:13,color:"#fff"}}>TOTAL GERAL</td>
+                        <td style={{textAlign:"center",fontWeight:900,fontSize:14,color:C.acc,padding:10}}>{fmtBRL(total)}</td>
+                        <td style={{background:"#fff",borderLeft:`1px solid ${C.border}`}}/>
+                      </tr>
+                    </tfoot>
                   </table>
-                )}
-                {historico.length>0&&(
-                  <div style={{marginTop:12,textAlign:"right"}}>
-                    <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={()=>{ if(window.confirm("Apagar todo o histórico salvo?")) setHistorico([]); }}>🗑️ Limpar histórico</button>
+                  <div style={{display:"flex",gap:14,marginBottom:16,flexWrap:"wrap"}}>
+                    {[
+                      {l:"Colaboradores",v:`${employees.length}`},
+                      {l:"Total passagens",v:`${employees.reduce((x,e)=>x+getDias(e)*2,0)} pass.`},
+                      {l:"Valor/passagem",v:fmtBRL(valorPassagem)},
+                      {l:"Total a pagar",v:fmtBRL(total),hl:true},
+                    ].map((it,i)=>(
+                      <div key={i} style={{flex:1,minWidth:100,background:it.hl?"#EAF5F0":C.rowAlt,border:`1px solid ${C.border}`,borderLeft:it.hl?`4px solid ${C.pri}`:undefined,borderRadius:8,padding:"10px 14px"}}>
+                        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
+                        <div style={{fontSize:15,fontWeight:800,color:it.hl?C.pri:C.text}}>{it.v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:28,marginTop:24,paddingTop:14,borderTop:`1px dashed ${C.border}`}}>
+                    {["Responsável pelo Pagamento","Conferência"].map((l,i)=>(
+                      <div key={i} style={{flex:1}}>
+                        <div style={{borderBottom:"1px solid #666",height:36}}/>
+                        <div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:5}}>{l}</div>
+                        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginTop:2}}>Data: ___/___/______</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end"}}>
+                <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB HISTÓRICO ── */}
+          {vtTab==="hist"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>📚 Histórico de Semanas</div>
+              <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
+              {historico.length===0?(
+                <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
+              ):(
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Período</th>
+                    <th style={s.thC}>Colaboradores</th>
+                    <th style={s.thC}>Total VT</th>
+                    <th style={s.th}>Importado em</th>
+                    <th style={s.thC}></th>
+                  </tr></thead>
+                  <tbody>
+                    {historico.map((h,i)=>{
+                      const vp2=parseFloat(passagemStr.replace(",","."))||0;
+                      const getD2=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
+                      const getV2=(emp)=>{ const pago=emp.valorPago!==undefined&&emp.valorPago!==""; if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0; return getD2(emp)*2*vp2; };
+                      const tot2=h.employees.reduce((acc,e)=>acc+(e.afastado?0:getV2(e)),0);
+                      const ativo=h.semanaIni===semanaIni&&h.semanaFim===semanaFim;
+                      return(
+                        <tr key={h.id} style={{...s.row(i),outline:ativo?`2px solid ${C.acc}`:"none",outlineOffset:-1}}>
+                          <td style={{...s.td,fontWeight:ativo?700:400}}>
+                            {ativo&&<span style={{fontSize:10,background:C.acc,color:"#fff",borderRadius:20,padding:"1px 7px",marginRight:6,fontWeight:700}}>ATIVA</span>}
+                            {h.label}
+                          </td>
+                          <td style={s.tdC}>{h.employees.length}</td>
+                          <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(tot2)}</td>
+                          <td style={{...s.td,fontSize:11,color:C.muted}}>{h.importadoEm}</td>
+                          <td style={s.tdC}>
+                            <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>{carregarDoHistorico(h);setVtTab("ponto");}}>Carregar</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {historico.length>0&&(
+                <div style={{marginTop:12,textAlign:"right"}}>
+                  <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={()=>{ if(window.confirm("Apagar todo o histórico salvo?")) setHistorico([]); }}>🗑️ Limpar histórico</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB GOOGLE SHEETS ── */}
+          {vtTab==="sheets"&&(
+            <div>
+              {/* Exportar CSV */}
+              <div style={s.card}>
+                <div style={s.cardTitle}>📥 Exportar CSV</div>
+                <div style={s.infoBox}>
+                  Gere um arquivo <strong>.csv</strong> da semana atual ou copie os dados formatados para colar diretamente na aba <strong>VT</strong> da planilha.
+                </div>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <button style={s.btn} onClick={exportarCSV} disabled={employees.length===0}>
+                    ⬇️ Baixar CSV
+                  </button>
+                  <button style={s.btnOutline} onClick={copiarCSV} disabled={employees.length===0}>
+                    {copiedCsv?"✅ Copiado!":"📋 Copiar dados (Tab-separado)"}
+                  </button>
+                </div>
+                {employees.length===0&&<div style={{fontSize:12,color:C.muted,marginTop:10}}>Carregue a semana na aba Ponto primeiro.</div>}
+                {copiedCsv&&<div style={{...s.successBox,marginTop:12}}>✅ Dados copiados! Cole diretamente na aba VT da planilha (Ctrl+V).</div>}
+              </div>
+
+              {/* Integração direta via GAS */}
+              <div style={s.card}>
+                <div style={s.cardTitle}>🔗 Integração Direta com Google Sheets</div>
+                <div style={s.warnBox}>
+                  <strong>Configuração necessária (feita uma única vez):</strong> adicione a função abaixo ao Apps Script da planilha de RH e publique como Web App. Depois cole a URL aqui.
+                </div>
+
+                {/* Passo 1 */}
+                <div style={{marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:8}}>
+                    Passo 1 — Adicionar ao Apps Script da planilha RH
+                  </div>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:8}}>
+                    Abra a planilha RH → Extensões → Apps Script → Cole no final do arquivo (ou crie um novo arquivo <code>RegistroVT.gs</code>):
+                  </div>
+                  <div style={{position:"relative"}}>
+                    <pre style={s.codeBlock}>{GAS_SCRIPT}</pre>
+                    <button
+                      style={{position:"absolute",top:8,right:8,...s.btnSm,color:copiedScript?"#219653":"#C8A843",borderColor:copiedScript?"#219653":"#C8A843",background:"rgba(255,255,255,0.1)",fontSize:11}}
+                      onClick={()=>{ navigator.clipboard.writeText(GAS_SCRIPT).then(()=>{ setCopiedScript(true); setTimeout(()=>setCopiedScript(false),2500); }); }}
+                    >
+                      {copiedScript?"✅ Copiado":"📋 Copiar"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Passo 2 */}
+                <div style={{marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:8}}>
+                    Passo 2 — Publicar como Web App
+                  </div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.7}}>
+                    No Apps Script: <strong>Implantar → Nova implantação → Tipo: Web App</strong><br/>
+                    • Executar como: <strong>Eu (minha conta Google)</strong><br/>
+                    • Quem tem acesso: <strong>Qualquer pessoa</strong><br/>
+                    • Clique em <strong>Implantar</strong> e copie a URL gerada
+                  </div>
+                </div>
+
+                {/* Passo 3 */}
+                <div style={{marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:8}}>
+                    Passo 3 — Cole a URL aqui
+                  </div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <input
+                      style={{...s.input,flex:1,minWidth:280,fontSize:12}}
+                      value={gasUrl}
+                      onChange={e=>setGasUrl(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/ABC.../exec"
+                    />
+                    <button
+                      style={{...s.btnAcc,opacity:employees.length===0||!gasUrl?0.6:1}}
+                      onClick={salvarNaPlanilha}
+                      disabled={employees.length===0||!gasUrl}
+                    >
+                      💾 Salvar semana na planilha
+                    </button>
+                  </div>
+                  {employees.length===0&&<div style={{fontSize:12,color:C.muted,marginTop:6}}>Carregue os dados da semana na aba Ponto primeiro.</div>}
+                </div>
+
+                {gasStatus&&(
+                  <div style={gasStatus.ok===true?s.successBox:gasStatus.ok===false?s.warnBox:{...s.infoBox}}>
+                    {gasStatus.msg}
                   </div>
                 )}
+
+                <div style={{...s.infoBox,marginTop:8,marginBottom:0}}>
+                  <strong>ℹ️ Limitação técnica:</strong> por restrições de CORS do navegador, os dados são enviados mas não é possível confirmar o retorno automaticamente. Após clicar em "Salvar", <strong>verifique a aba VT na planilha</strong> para confirmar que as linhas foram registradas.
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
       );
 
       function PlaceholderPage({title,icon}){
@@ -626,7 +966,7 @@
 
       return(
         <div style={s.wrap}>
-          <header style={s.header} className="no-print">
+          <header style={s.header}>
             <div style={s.logo}>👔</div>
             <div>
               <div style={{fontSize:16,fontWeight:800,letterSpacing:"-0.01em"}}>RH · Cantina em Casa / Lumar</div>
@@ -634,7 +974,7 @@
             </div>
           </header>
           <div style={s.body}>
-            <nav style={s.sidebar} className="no-print">
+            <nav style={s.sidebar}>
               <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.08em",padding:"0 20px",marginBottom:8}}>Módulos</div>
               {navItems.map(n=>(
                 <button key={n.k} style={s.navBtn(page===n.k)} onClick={()=>setPage(n.k)}>{n.l}</button>
