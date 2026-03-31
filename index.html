@@ -186,7 +186,7 @@ function doPost(e) {
       const [vtTab,setVtTab]=useState("import");
       // Novos estados
       const [feriadosDia,setFeriadosDia]=useState({});
-      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"");
+      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec");
       const [gasStatus,setGasStatus]=useState(null);
       const [copiedScript,setCopiedScript]=useState(false);
       const [copiedCsv,setCopiedCsv]=useState(false);
