@@ -953,11 +953,24 @@ function doPost(e) {
               setApiStatus({ok:false, msg:"Erro: " + (json.msg||"desconhecido")});
             }
           } catch(err) {
-            setApiStatus({ok:false, msg:"Erro de rede: " + err.message});
+            setApiStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App do GAS. Verifique se (1) a implantação foi atualizada com Nova Versão após o último deploy e (2) o acesso está como 'Qualquer pessoa'. Erro técnico: " + err.message});
           } finally {
             setLoadingAPI(false);
           }
         }, [GAS_URL]);
+
+        // ---- Detectar período do CSV importado ----
+        const csvPeriodoSugerido = (()=>{
+          const todasDatas = Object.values(folhaData).flatMap(e => Object.keys(e.dias||{}));
+          if (todasDatas.length === 0) return null;
+          const sorted = todasDatas.sort();
+          const primeira = sorted[0]; // yyyy-mm-dd
+          const ultima = sorted[sorted.length - 1];
+          const [uY, uM] = ultima.split("-");
+          return { primeira, ultima, mesAnoSugerido: `${uM}/${uY}` };
+        })();
+
+        const periodoBate = !csvPeriodoSugerido || csvPeriodoSugerido.mesAnoSugerido === mesAno;
 
         const parseCSVFolha = useCallback((text)=>{
           const lines = text.trim().split(/\r?\n/);
@@ -1270,6 +1283,23 @@ function doPost(e) {
                 <input id="csvFolhaInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
               </div>
               {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
+
+              {csvPeriodoSugerido && !periodoBate && (
+                <div style={{marginTop:12, marginBottom:0, background:"#FEF3C7", border:"1.5px solid #F59E0B", padding:"12px 14px", borderRadius:8}}>
+                  <div style={{fontWeight:800, color:"#92400E", marginBottom:6}}>⚠️ Descompasso de período detectado</div>
+                  <div style={{fontSize:12, color:"#78350F", marginBottom:10}}>
+                    O CSV tem dados de <strong>{csvPeriodoSugerido.primeira.split("-").reverse().join("/")}</strong> a <strong>{csvPeriodoSugerido.ultima.split("-").reverse().join("/")}</strong> (folha de <strong>{csvPeriodoSugerido.mesAnoSugerido}</strong>),
+                    mas o mês selecionado é <strong>{mesAno}</strong>. Por isso os valores estão zerados.
+                  </div>
+                  <button onClick={()=>setMesAno(csvPeriodoSugerido.mesAnoSugerido)}
+                          style={{background:"#F59E0B", color:"#fff", padding:"7px 14px", fontSize:12, borderRadius:6, border:"none", cursor:"pointer", fontWeight:700}}>
+                    ✅ Ajustar período para {csvPeriodoSugerido.mesAnoSugerido}
+                  </button>
+                </div>
+              )}
+              {csvPeriodoSugerido && periodoBate && (
+                <div style={{marginTop:10, fontSize:11, color:C.green, fontWeight:700}}>✅ Período do CSV bate com o selecionado.</div>
+              )}
             </div>
 
             <div style={s.card}>
