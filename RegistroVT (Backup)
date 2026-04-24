@@ -1,0 +1,40 @@
+function doPost(e) {
+  try {
+    var dados = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.openById('1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU');
+    var aba = ss.getSheetByName('VT');
+    if (!aba) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ok:false,msg:'Aba VT não encontrada'}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    // Cria cabeçalho se a aba estiver vazia
+    if (aba.getLastRow() === 0) {
+      aba.appendRow([
+        'Semana Início','Semana Fim','Colaborador','Escala',
+        'Dias Trabalhados','Passagens','Valor Calculado','Valor Pago',
+        'Afastado','Registrado em'
+      ]);
+    }
+    var registrado = Utilities.formatDate(
+      new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm'
+    );
+    dados.employees.forEach(function(emp) {
+      aba.appendRow([
+        dados.semanaIni, dados.semanaFim,
+        emp.nome, emp.escala,
+        emp.diasTrabalhados, emp.diasTrabalhados * 2,
+        emp.valorCalculado, emp.valorPago,
+        emp.afastado ? 'Sim' : 'Não',
+        registrado
+      ]);
+    });
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:true,msg:'Salvo com sucesso'}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:false,msg:err.message}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
