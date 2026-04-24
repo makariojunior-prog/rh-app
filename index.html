@@ -940,15 +940,104 @@ function doPost(e) {
         const d = new Date(dataIni);
         while (d <= dataFim) { datasPeriodo.push(toISO(new Date(d))); d.setDate(d.getDate()+1); }
 
+        // ---- Helpers de nome e data ----
+        const normalizarNome = (n) => {
+          if (!n) return "";
+          return String(n)
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos
+            .toUpperCase()
+            .replace(/\s+/g, " ")
+            .trim();
+        };
+
+        // ---- Feriados nacionais brasileiros (cálculo da Páscoa + fixos) ----
+        const calcularFeriadosBR = (ano) => {
+          // Algoritmo de Meeus/Jones/Butcher para Páscoa
+          const a = ano % 19;
+          const b = Math.floor(ano / 100);
+          const c = ano % 100;
+          const d = Math.floor(b / 4);
+          const e = b % 4;
+          const f = Math.floor((b + 8) / 25);
+          const g = Math.floor((b - f + 1) / 3);
+          const h = (19*a + b - d - g + 15) % 30;
+          const i = Math.floor(c / 4);
+          const k = c % 4;
+          const l = (32 + 2*e + 2*i - h - k) % 7;
+          const m = Math.floor((a + 11*h + 22*l) / 451);
+          const mes = Math.floor((h + l - 7*m + 114) / 31);
+          const dia = ((h + l - 7*m + 114) % 31) + 1;
+          const pascoa = new Date(ano, mes-1, dia);
+          const addDias = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
+          const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+          return {
+            [`${ano}-01-01`]: "Confraternização Universal",
+            [fmt(addDias(pascoa,-48))]: "Segunda de Carnaval",
+            [fmt(addDias(pascoa,-47))]: "Terça de Carnaval",
+            [fmt(addDias(pascoa,-2))]: "Sexta-Feira Santa",
+            [`${ano}-04-21`]: "Tiradentes",
+            [`${ano}-05-01`]: "Dia do Trabalho",
+            [fmt(addDias(pascoa,60))]: "Corpus Christi",
+            [`${ano}-09-07`]: "Independência do Brasil",
+            [`${ano}-10-12`]: "Nossa Sra. Aparecida",
+            [`${ano}-11-02`]: "Finados",
+            [`${ano}-11-15`]: "Proclamação da República",
+            [`${ano}-11-20`]: "Consciência Negra",
+            [`${ano}-12-25`]: "Natal"
+          };
+        };
+
+        // Auto-preencher feriados nacionais ao mudar mês/ano (só adiciona, preserva existentes)
+        const [anosFeriadosCarregados, setAnosFeriadosCarregados] = useState(()=>{
+          try { return JSON.parse(localStorage.getItem("rh_anos_feriados")||"[]"); } catch(e) { return []; }
+        });
+        useEffect(()=>{ localStorage.setItem("rh_anos_feriados", JSON.stringify(anosFeriadosCarregados)); }, [anosFeriadosCarregados]);
+
+        useEffect(()=>{
+          const anosPrecisos = [ano-1, ano];
+          const anosFaltando = anosPrecisos.filter(y => !anosFeriadosCarregados.includes(y));
+          if (anosFaltando.length === 0) return;
+          const novosFeriados = {};
+          anosFaltando.forEach(y => Object.assign(novosFeriados, calcularFeriadosBR(y)));
+          setFeriados(prev => {
+            const set = new Set(prev);
+            Object.keys(novosFeriados).forEach(iso => set.add(iso));
+            return Array.from(set).sort();
+          });
+          setAnosFeriadosCarregados(prev => [...new Set([...prev, ...anosFaltando])]);
+        }, [ano, anosFeriadosCarregados]);
+
         const buscarColaboradores = useCallback(async ()=>{
           setLoadingAPI(true);
-          setApiStatus({ok:null,msg:"Buscando colaboradores na planilha..."});
+          setApiStatus({ok:null,msg:"Buscando colaboradores e atestados na planilha..."});
           try {
-            const res = await fetch(GAS_URL + "?acao=colaboradores");
+            const isoIni = toISO(dataIni);
+            const isoFim = toISO(dataFim);
+            const res = await fetch(`${GAS_URL}?acao=folha_dados&ini=${isoIni}&fim=${isoFim}`);
             const json = await res.json();
             if (json.ok) {
               setColabAPI(json.colaboradores || []);
-              setApiStatus({ok:true, msg:`✅ ${json.total} colaboradores ativos carregados.`});
+              // Aplicar atestados automaticamente nas marcações
+              const novasMarc = { ...marcacoes };
+              (json.atestados || []).forEach(at => {
+                const nomeKey = at.nome; // vamos matching pelo nome normalizado no app
+                const dIni = new Date(at.inicio + "T12:00:00");
+                const dFim = new Date(at.fim + "T12:00:00");
+                const d = new Date(dIni);
+                while (d <= dFim) {
+                  const iso = toISO(d);
+                  if (!novasMarc[nomeKey]) novasMarc[nomeKey] = {};
+                  else novasMarc[nomeKey] = { ...novasMarc[nomeKey] };
+                  // Não sobrescreve férias/folgas marcadas manualmente
+                  if (!novasMarc[nomeKey][iso] || novasMarc[nomeKey][iso] === "atestado") {
+                    novasMarc[nomeKey][iso] = "atestado";
+                  }
+                  d.setDate(d.getDate()+1);
+                }
+              });
+              setMarcacoes(novasMarc);
+              const atMsg = (json.atestados || []).length > 0 ? ` · ${json.atestados.length} atestados aplicados` : "";
+              setApiStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores carregados${atMsg}.`});
             } else {
               setApiStatus({ok:false, msg:"Erro: " + (json.msg||"desconhecido")});
             }
@@ -957,7 +1046,7 @@ function doPost(e) {
           } finally {
             setLoadingAPI(false);
           }
-        }, [GAS_URL]);
+        }, [GAS_URL, dataIni, dataFim, marcacoes]);
 
         // ---- Detectar período do CSV importado ----
         const csvPeriodoSugerido = (()=>{
@@ -1031,10 +1120,10 @@ function doPost(e) {
           return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
         };
 
-        const analisarDia = (nome, iso, diaDados)=>{
-          const marc = marcacoes[nome]?.[iso];
+        const analisarDia = (nomeKey, iso, diaDados)=>{
+          // nomeKey vem normalizado para buscar em marcacoes
+          const marc = marcacoes[nomeKey]?.[iso];
           const isFeriado = feriados.includes(iso);
-          // Dia previsto real = tem horário diferente de vazio E diferente de 00:00
           const horarioValido = (h)=> h && h !== "" && h !== "00:00";
           const temPrevisao = diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2));
           const temBatida = diaDados && (horarioValido(diaDados.real.b1) || horarioValido(diaDados.real.b2) || horarioValido(diaDados.real.b3) || horarioValido(diaDados.real.b4));
@@ -1047,13 +1136,16 @@ function doPost(e) {
           return {status:"falta", diaUtilPrevisto: true};
         };
 
-        const calcularColab = useCallback((nome, dados)=>{
+        const calcularColab = useCallback((nomeKey, dados, colabInfo)=>{
           let diasTrabalhados=0, faltas=0, atestados=0, ferias=0, folgas=0;
           let horasExtrasMin=0, horasFaltasMin=0;
           const diasFaltas = [];
+          // Data de fim da experiência (col I = EXPERIÊNCIA 90 DIAS)
+          const fimExperiencia = colabInfo?.experiencia90 ? new Date(colabInfo.experiencia90 + "T12:00:00") : null;
+
           datasPeriodo.forEach(iso=>{
             const diaDados = dados?.dias?.[iso];
-            const a = analisarDia(nome, iso, diaDados);
+            const a = analisarDia(nomeKey, iso, diaDados);
             if (a.status === "trabalhou") {
               diasTrabalhados++;
               if (diaDados?.horaExtra) horasExtrasMin += hhmmToMin(diaDados.horaExtra);
@@ -1087,7 +1179,7 @@ function doPost(e) {
             const isosSemana = semanasMap[semKey];
             let temFaltaSemana = false;
             isosSemana.forEach(iso=>{
-              const a = analisarDia(nome, iso, dados?.dias?.[iso]);
+              const a = analisarDia(nomeKey, iso, dados?.dias?.[iso]);
               if (a.status === "falta") temFaltaSemana = true;
             });
             if (temFaltaSemana) {
@@ -1098,21 +1190,39 @@ function doPost(e) {
             }
           });
 
+          // CAJU: só recebe dias trabalhados + atestados + férias que sejam APÓS experiência
           let diasUteisPrevistos = 0;
+          let cajuDias = 0;
+          let diasEmExperiencia = 0;
           datasPeriodo.forEach(iso=>{
             const diaDados = dados?.dias?.[iso];
             const horarioValido = (h)=> h && h !== "" && h !== "00:00";
-            if (diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2))) diasUteisPrevistos++;
+            const temPrev = diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2));
+            if (temPrev) diasUteisPrevistos++;
+
+            // Está em experiência neste dia?
+            const dtDia = new Date(iso+"T12:00:00");
+            const emExperiencia = fimExperiencia && dtDia <= fimExperiencia;
+            if (emExperiencia && temPrev) diasEmExperiencia++;
+
+            // Conta caju só se já saiu da experiência E está presente/atestado/férias (não conta falta)
+            if (!emExperiencia && temPrev) {
+              const a = analisarDia(nomeKey, iso, diaDados);
+              if (a.status === "trabalhou" || a.status === "atestado" || a.status === "ferias") {
+                cajuDias++;
+              }
+            }
           });
-          const cajuDias = Math.max(0, diasUteisPrevistos - faltas - atestados - ferias);
           const cajuValor = cajuDias * 5;
 
-          const aj = ajustes[nome] || {};
+          const aj = ajustes[nomeKey] || {};
           const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||0;
           const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",","."))||0;
           const premioAuto = faltas === 0;
           const premioAssiduidade = aj.premioAssiduidade !== undefined ? aj.premioAssiduidade : premioAuto;
-          const descontarVT = aj.descontarVT !== undefined ? aj.descontarVT : false;
+          // VT: pré-selecionado se transporte > 0 na planilha
+          const descontarVTAuto = (colabInfo?.transporte || 0) > 0;
+          const descontarVT = aj.descontarVT !== undefined ? aj.descontarVT : descontarVTAuto;
           const bancoHoras = aj.bancoHoras !== undefined ? aj.bancoHoras : false;
           const totalDesconto = produtos + adiantamento;
 
@@ -1123,35 +1233,47 @@ function doPost(e) {
             horasExtrasMin,
             horasFaltas: minToHHMM(horasFaltasMin),
             horasFaltasMin,
-            dsrPerdidos, diasUteisPrevistos,
+            dsrPerdidos, diasUteisPrevistos, diasEmExperiencia,
             cajuDias, cajuValor,
             premioAssiduidade, descontarVT, bancoHoras,
             produtos, adiantamento, totalDesconto,
-            diasFaltas, observacoes: aj.observacoes||""
+            diasFaltas, observacoes: aj.observacoes||"",
+            emExperiencia: diasEmExperiencia > 0,
+            valorTransporte: colabInfo?.transporte || 0
           };
         }, [datasPeriodo, marcacoes, feriados, ajustes]);
 
         const colaboradoresUnificados = (() => {
           const mapa = new Map();
+          // GAS agora retorna objetos com campos padronizados (nome, funcao, setor, transporte, experiencia90, etc.)
           colabAPI.forEach(c=>{
-            const nome = String(c.NOME||"").trim().toUpperCase();
-            if (!nome) return;
-            mapa.set(nome, {
-              nome: c.NOME,
-              funcao: c["FUNÇÃO"] || c.FUNCAO || "",
-              setor: c.SETOR || "",
-              salario: c["SALÁRIO"] || c.SALARIO || 0,
+            const nomeOriginal = c.nome || c.NOME || "";
+            const nomeKey = normalizarNome(nomeOriginal);
+            if (!nomeKey) return;
+            mapa.set(nomeKey, {
+              nomeKey,
+              nome: nomeOriginal,
+              funcao: c.funcao || c["FUNÇÃO"] || c.FUNCAO || "",
+              setor: c.setor || c.SETOR || "",
+              salario: c.salario || c["SALÁRIO"] || c.SALARIO || 0,
+              transporte: c.transporte || 0,
+              experiencia30: c.experiencia30 || "",
+              experiencia90: c.experiencia90 || "",
+              admissao: c.admissao || "",
               fonteCadastro: true, fonteCSV: false, dadosCSV: null
             });
           });
           Object.keys(folhaData).forEach(nomeCSV=>{
-            const key = nomeCSV.toUpperCase();
-            if (mapa.has(key)) {
-              mapa.get(key).fonteCSV = true;
-              mapa.get(key).dadosCSV = folhaData[nomeCSV];
+            const nomeKey = normalizarNome(nomeCSV);
+            if (mapa.has(nomeKey)) {
+              const ex = mapa.get(nomeKey);
+              ex.fonteCSV = true;
+              ex.dadosCSV = folhaData[nomeCSV];
+              // Se no CSV tiver um nome um pouco diferente, mostrar o da planilha (prefere cadastro)
             } else {
-              mapa.set(key, {
-                nome: nomeCSV, funcao:"", setor:"", salario:0,
+              mapa.set(nomeKey, {
+                nomeKey, nome: nomeCSV, funcao:"", setor:"", salario:0,
+                transporte: 0, experiencia30:"", experiencia90:"", admissao:"",
                 fonteCadastro:false, fonteCSV:true, dadosCSV: folhaData[nomeCSV]
               });
             }
@@ -1159,7 +1281,7 @@ function doPost(e) {
           return Array.from(mapa.values()).sort((a,b)=>a.nome.localeCompare(b.nome));
         })();
 
-        const resultados = colaboradoresUnificados.map(c=>({...c, calc: calcularColab(c.nome, c.dadosCSV)}));
+        const resultados = colaboradoresUnificados.map(c=>({...c, calc: calcularColab(c.nomeKey, c.dadosCSV, c)}));
 
         const totais = resultados.reduce((acc,r)=>{
           acc.diasTrabalhados += r.calc.diasTrabalhados;
@@ -1244,7 +1366,7 @@ function doPost(e) {
           setAjustes(prev=>({...prev, [nome]:{...(prev[nome]||{}), [campo]: valor}}));
         };
 
-        const colabInfoAtual = colabSelecionado ? resultados.find(r=>r.nome === colabSelecionado) : null;
+        const colabInfoAtual = colabSelecionado ? resultados.find(r=>r.nomeKey === colabSelecionado) : null;
 
         return (
           <div>
@@ -1303,8 +1425,18 @@ function doPost(e) {
             </div>
 
             <div style={s.card}>
-              <div style={s.cardTitle}>📅 Feriados no Período</div>
-              <div style={s.infoBox}>Clique para marcar dias que foram feriado. Afeta o cálculo do DSR.</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={s.cardTitle}>📅 Feriados no Período</div>
+                <button onClick={()=>{
+                  if (confirm("Recarregar feriados nacionais (perderá marcações municipais)?")) {
+                    setFeriados([]);
+                    setAnosFeriadosCarregados([]);
+                  }
+                }} style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:11,color:C.muted}}>
+                  🔄 Recarregar feriados nacionais
+                </button>
+              </div>
+              <div style={s.infoBox}>Feriados nacionais já pré-marcados automaticamente. Ajuste adicionando municipais ou removendo pontos facultativos.</div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                 {datasPeriodo.map(iso=>{
                   const dt = new Date(iso+"T12:00:00");
@@ -1382,11 +1514,12 @@ function doPost(e) {
                       {resultados.map((r,i)=>{
                         const cruzamento = r.fonteCadastro && r.fonteCSV ? "ok" : r.fonteCadastro ? "sem_ponto" : "nao_cadastrado";
                         return (
-                          <tr key={r.nome} style={{...s.row(i),cursor:"pointer"}} onClick={()=>setColabSelecionado(r.nome)}>
+                          <tr key={r.nomeKey} style={{...s.row(i),cursor:"pointer"}} onClick={()=>setColabSelecionado(r.nomeKey)}>
                             <td style={{...s.td,fontWeight:600,fontSize:12}}>
                               {r.nome}
                               {cruzamento === "sem_ponto" && <span title="Cadastrado, sem ponto no CSV" style={{marginLeft:6,fontSize:9,color:C.amber,fontWeight:700}}>⚠ sem ponto</span>}
                               {cruzamento === "nao_cadastrado" && <span title="No ponto, mas não cadastrado" style={{marginLeft:6,fontSize:9,color:C.danger,fontWeight:700}}>⚠ não cadastrado</span>}
+                              {r.calc.emExperiencia && <span title={`Em experiência até ${r.experiencia90?.split("-").reverse().join("/")}`} style={{marginLeft:6,fontSize:9,color:"#8b5cf6",fontWeight:700,background:"#EDE9FE",padding:"1px 5px",borderRadius:4}}>🆕 experiência</span>}
                               {r.funcao&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{r.funcao}</div>}
                             </td>
                             <td style={{...s.tdC,fontWeight:700,color:r.calc.diasTrabalhados>0?C.pri:C.muted}}>{r.calc.diasTrabalhados}</td>
@@ -1397,33 +1530,36 @@ function doPost(e) {
                             <td style={{...s.tdC,color:r.calc.dsrPerdidos>0?C.danger:C.muted}}>
                               {r.calc.dsrPerdidos}{r.calc.feriadosPerdidos>0&&`+${r.calc.feriadosPerdidos}f`}
                             </td>
-                            <td style={{...s.tdC,color:C.green,fontWeight:600,fontSize:11}}>{fmtBRL(r.calc.cajuValor)}</td>
+                            <td style={{...s.tdC,color:r.calc.cajuDias>0?C.green:C.muted,fontWeight:600,fontSize:11}}>
+                              {fmtBRL(r.calc.cajuValor)}
+                              {r.calc.emExperiencia && <div style={{fontSize:9,color:"#8b5cf6",fontWeight:700}}>(exp.)</div>}
+                            </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
                               <input style={{...s.inputSm,width:62,textAlign:"right"}}
-                                     value={ajustes[r.nome]?.produtos||""}
-                                     onChange={e=>setAjuste(r.nome,"produtos",e.target.value)}
+                                     value={ajustes[r.nomeKey]?.produtos||""}
+                                     onChange={e=>setAjuste(r.nomeKey,"produtos",e.target.value)}
                                      placeholder="0,00"/>
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
                               <input style={{...s.inputSm,width:62,textAlign:"right"}}
-                                     value={ajustes[r.nome]?.adiantamento||""}
-                                     onChange={e=>setAjuste(r.nome,"adiantamento",e.target.value)}
+                                     value={ajustes[r.nomeKey]?.adiantamento||""}
+                                     onChange={e=>setAjuste(r.nomeKey,"adiantamento",e.target.value)}
                                      placeholder="0,00"/>
                             </td>
                             <td style={{...s.tdC,fontWeight:800,color:r.calc.totalDesconto>0?C.danger:C.muted,fontSize:12}}>{fmtBRL(r.calc.totalDesconto)}</td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
                               <input type="checkbox" checked={r.calc.premioAssiduidade}
-                                     onChange={e=>setAjuste(r.nome,"premioAssiduidade",e.target.checked)}
+                                     onChange={e=>setAjuste(r.nomeKey,"premioAssiduidade",e.target.checked)}
                                      style={{width:14,height:14,cursor:"pointer"}}/>
                             </td>
-                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()} title={r.valorTransporte>0?`VT: ${fmtBRL(r.valorTransporte)}`:"Sem VT"}>
                               <input type="checkbox" checked={r.calc.descontarVT}
-                                     onChange={e=>setAjuste(r.nome,"descontarVT",e.target.checked)}
+                                     onChange={e=>setAjuste(r.nomeKey,"descontarVT",e.target.checked)}
                                      style={{width:14,height:14,cursor:"pointer"}}/>
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
                               <input type="checkbox" checked={r.calc.bancoHoras}
-                                     onChange={e=>setAjuste(r.nome,"bancoHoras",e.target.checked)}
+                                     onChange={e=>setAjuste(r.nomeKey,"bancoHoras",e.target.checked)}
                                      style={{width:14,height:14,cursor:"pointer"}}/>
                             </td>
                             <td style={s.tdC}>
