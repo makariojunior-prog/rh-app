@@ -903,8 +903,658 @@ function doPost(e) {
         );
       }
 
+      // ============================================================
+      // MÓDULO FOLHA DE PAGAMENTO
+      // ============================================================
+      function FolhaPage() {
+        const GAS_URL = gasUrl || "https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec";
+
+        const hoje = new Date();
+        const [mesAno, setMesAno] = useState(()=>{
+          const m = hoje.getMonth()+1; const y = hoje.getFullYear();
+          return `${String(m).padStart(2,"0")}/${y}`;
+        });
+        const [colabAPI, setColabAPI] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
+        const [folhaData, setFolhaData] = useState({});
+        const [marcacoes, setMarcacoes] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_folha_marc")||"{}");}catch(e){return {};} });
+        const [feriados, setFeriados] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_feriados")||"[]");}catch(e){return [];} });
+        const [ajustes, setAjustes] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_folha_ajustes")||"{}");}catch(e){return {};} });
+        const [csvStatus, setCsvStatus] = useState(null);
+        const [apiStatus, setApiStatus] = useState(null);
+        const [saveStatus, setSaveStatus] = useState(null);
+        const [drag, setDrag] = useState(false);
+        const [colabSelecionado, setColabSelecionado] = useState(null);
+        const [loadingAPI, setLoadingAPI] = useState(false);
+
+        useEffect(()=>{localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI));},[colabAPI]);
+        useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
+        useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
+        useEffect(()=>{localStorage.setItem("rh_folha_ajustes",JSON.stringify(ajustes));},[ajustes]);
+
+        const [mes, ano] = mesAno.split("/").map(n=>parseInt(n));
+        const dataIni = new Date(ano, mes-2, 26);
+        const dataFim = new Date(ano, mes-1, 25);
+        const periodoLabel = `${String(dataIni.getDate()).padStart(2,"0")}/${String(dataIni.getMonth()+1).padStart(2,"0")}/${dataIni.getFullYear()} a ${String(dataFim.getDate()).padStart(2,"0")}/${String(dataFim.getMonth()+1).padStart(2,"0")}/${dataFim.getFullYear()}`;
+
+        const datasPeriodo = [];
+        const d = new Date(dataIni);
+        while (d <= dataFim) { datasPeriodo.push(toISO(new Date(d))); d.setDate(d.getDate()+1); }
+
+        const buscarColaboradores = useCallback(async ()=>{
+          setLoadingAPI(true);
+          setApiStatus({ok:null,msg:"Buscando colaboradores na planilha..."});
+          try {
+            const res = await fetch(GAS_URL + "?acao=colaboradores");
+            const json = await res.json();
+            if (json.ok) {
+              setColabAPI(json.colaboradores || []);
+              setApiStatus({ok:true, msg:`✅ ${json.total} colaboradores ativos carregados.`});
+            } else {
+              setApiStatus({ok:false, msg:"Erro: " + (json.msg||"desconhecido")});
+            }
+          } catch(err) {
+            setApiStatus({ok:false, msg:"Erro de rede: " + err.message});
+          } finally {
+            setLoadingAPI(false);
+          }
+        }, [GAS_URL]);
+
+        const parseCSVFolha = useCallback((text)=>{
+          const lines = text.trim().split(/\r?\n/);
+          if (lines.length < 2) throw new Error("Arquivo vazio ou inválido");
+          const header = lines[0].split(";");
+          if (!header[0].includes("Crach")) throw new Error("Formato não reconhecido. Use o CSV do ponto eletrônico.");
+          const empMap = {};
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(";").map(s=>s.trim());
+            if (cols.length < 11) continue;
+            const cracha = cols[0];
+            const nome = cols[1];
+            const dataStr = cols[2];
+            if (!cracha||!nome||!dataStr) continue;
+            const [dd,mm,yyyy] = dataStr.split("/");
+            const iso = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+            const previsto = {e1: cols[3]||"", s1: cols[4]||"", e2: cols[5]||"", s2: cols[6]||""};
+            const real = {b1: cols[7]||"", b2: cols[8]||"", b3: cols[9]||"", b4: cols[10]||""};
+            const horaExtra = cols[11]||"00:00";
+            if (!empMap[nome]) empMap[nome] = { cracha, nome, dias: {} };
+            empMap[nome].dias[iso] = { data: iso, previsto, real, horaExtra };
+          }
+          return empMap;
+        }, []);
+
+        const handleFile = useCallback((file)=>{
+          if (!file) return;
+          if (!file.name.toLowerCase().endsWith(".csv")) {
+            setCsvStatus({ok:false, msg:"Selecione um arquivo .csv do ponto."});
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = (e)=>{
+            try {
+              const bytes = new Uint8Array(e.target.result);
+              const text = new TextDecoder("iso-8859-1").decode(bytes);
+              const data = parseCSVFolha(text);
+              setFolhaData(data);
+              setCsvStatus({ok:true, msg:`✅ Ponto importado: ${Object.keys(data).length} colaboradores no CSV.`});
+            } catch(err) {
+              setCsvStatus({ok:false, msg:"Erro: " + err.message});
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        }, [parseCSVFolha]);
+
+        const onDropFolha = useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }, [handleFile]);
+
+        const hhmmToMin = (str)=>{
+          if (!str || str === "00:00") return 0;
+          const parts = str.split(":");
+          return parseInt(parts[0])*60 + parseInt(parts[1]||0);
+        };
+        const minToHHMM = (min)=>{
+          if (!min || min < 0) return "00:00";
+          const h = Math.floor(min/60);
+          const m = min%60;
+          return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+        };
+
+        const analisarDia = (nome, iso, diaDados)=>{
+          const marc = marcacoes[nome]?.[iso];
+          const isFeriado = feriados.includes(iso);
+          // Dia previsto real = tem horário diferente de vazio E diferente de 00:00
+          const horarioValido = (h)=> h && h !== "" && h !== "00:00";
+          const temPrevisao = diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2));
+          const temBatida = diaDados && (horarioValido(diaDados.real.b1) || horarioValido(diaDados.real.b2) || horarioValido(diaDados.real.b3) || horarioValido(diaDados.real.b4));
+          if (marc === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
+          if (marc === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (marc === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
+          if (isFeriado) return {status:"feriado", diaUtilPrevisto: !!temPrevisao};
+          if (!temPrevisao) return {status:"nao_previsto", diaUtilPrevisto: false};
+          if (temBatida) return {status:"trabalhou", diaUtilPrevisto: true};
+          return {status:"falta", diaUtilPrevisto: true};
+        };
+
+        const calcularColab = useCallback((nome, dados)=>{
+          let diasTrabalhados=0, faltas=0, atestados=0, ferias=0, folgas=0;
+          let horasExtrasMin=0, horasFaltasMin=0;
+          const diasFaltas = [];
+          datasPeriodo.forEach(iso=>{
+            const diaDados = dados?.dias?.[iso];
+            const a = analisarDia(nome, iso, diaDados);
+            if (a.status === "trabalhou") {
+              diasTrabalhados++;
+              if (diaDados?.horaExtra) horasExtrasMin += hhmmToMin(diaDados.horaExtra);
+              if (diaDados) {
+                const prevMin = (hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) + 
+                                (hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
+                const realMin = ((hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1)) || 0) +
+                                ((hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3)) || 0);
+                if (realMin > 0 && prevMin > realMin) horasFaltasMin += (prevMin - realMin);
+              }
+            } else if (a.status === "falta") {
+              faltas++;
+              diasFaltas.push(iso.split("-").reverse().slice(0,2).join("/"));
+            } else if (a.status === "atestado") { atestados++; }
+            else if (a.status === "ferias") { ferias++; }
+            else if (a.status === "folga") { folgas++; }
+          });
+
+          let dsrPerdidos = 0, feriadosNaSemanaPerdidos = 0;
+          const semanasMap = {};
+          datasPeriodo.forEach(iso=>{
+            const dd = new Date(iso+"T12:00:00");
+            const dayOfWeek = dd.getDay();
+            const domingo = new Date(dd);
+            domingo.setDate(dd.getDate() - dayOfWeek);
+            const semKey = toISO(domingo);
+            if (!semanasMap[semKey]) semanasMap[semKey] = [];
+            semanasMap[semKey].push(iso);
+          });
+          Object.keys(semanasMap).forEach(semKey=>{
+            const isosSemana = semanasMap[semKey];
+            let temFaltaSemana = false;
+            isosSemana.forEach(iso=>{
+              const a = analisarDia(nome, iso, dados?.dias?.[iso]);
+              if (a.status === "falta") temFaltaSemana = true;
+            });
+            if (temFaltaSemana) {
+              dsrPerdidos += 1;
+              isosSemana.forEach(iso=>{
+                if (feriados.includes(iso)) feriadosNaSemanaPerdidos += 1;
+              });
+            }
+          });
+
+          let diasUteisPrevistos = 0;
+          datasPeriodo.forEach(iso=>{
+            const diaDados = dados?.dias?.[iso];
+            const horarioValido = (h)=> h && h !== "" && h !== "00:00";
+            if (diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2))) diasUteisPrevistos++;
+          });
+          const cajuDias = Math.max(0, diasUteisPrevistos - faltas - atestados - ferias);
+          const cajuValor = cajuDias * 5;
+
+          const aj = ajustes[nome] || {};
+          const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||0;
+          const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",","."))||0;
+          const premioAuto = faltas === 0;
+          const premioAssiduidade = aj.premioAssiduidade !== undefined ? aj.premioAssiduidade : premioAuto;
+          const descontarVT = aj.descontarVT !== undefined ? aj.descontarVT : false;
+          const bancoHoras = aj.bancoHoras !== undefined ? aj.bancoHoras : false;
+          const totalDesconto = produtos + adiantamento;
+
+          return {
+            diasTrabalhados, faltas, atestados, ferias, folgas,
+            feriadosPerdidos: feriadosNaSemanaPerdidos,
+            horasExtras: minToHHMM(horasExtrasMin),
+            horasExtrasMin,
+            horasFaltas: minToHHMM(horasFaltasMin),
+            horasFaltasMin,
+            dsrPerdidos, diasUteisPrevistos,
+            cajuDias, cajuValor,
+            premioAssiduidade, descontarVT, bancoHoras,
+            produtos, adiantamento, totalDesconto,
+            diasFaltas, observacoes: aj.observacoes||""
+          };
+        }, [datasPeriodo, marcacoes, feriados, ajustes]);
+
+        const colaboradoresUnificados = (() => {
+          const mapa = new Map();
+          colabAPI.forEach(c=>{
+            const nome = String(c.NOME||"").trim().toUpperCase();
+            if (!nome) return;
+            mapa.set(nome, {
+              nome: c.NOME,
+              funcao: c["FUNÇÃO"] || c.FUNCAO || "",
+              setor: c.SETOR || "",
+              salario: c["SALÁRIO"] || c.SALARIO || 0,
+              fonteCadastro: true, fonteCSV: false, dadosCSV: null
+            });
+          });
+          Object.keys(folhaData).forEach(nomeCSV=>{
+            const key = nomeCSV.toUpperCase();
+            if (mapa.has(key)) {
+              mapa.get(key).fonteCSV = true;
+              mapa.get(key).dadosCSV = folhaData[nomeCSV];
+            } else {
+              mapa.set(key, {
+                nome: nomeCSV, funcao:"", setor:"", salario:0,
+                fonteCadastro:false, fonteCSV:true, dadosCSV: folhaData[nomeCSV]
+              });
+            }
+          });
+          return Array.from(mapa.values()).sort((a,b)=>a.nome.localeCompare(b.nome));
+        })();
+
+        const resultados = colaboradoresUnificados.map(c=>({...c, calc: calcularColab(c.nome, c.dadosCSV)}));
+
+        const totais = resultados.reduce((acc,r)=>{
+          acc.diasTrabalhados += r.calc.diasTrabalhados;
+          acc.faltas += r.calc.faltas;
+          acc.atestados += r.calc.atestados;
+          acc.ferias += r.calc.ferias;
+          acc.cajuValor += r.calc.cajuValor;
+          acc.totalDesconto += r.calc.totalDesconto;
+          acc.horasExtrasMin += r.calc.horasExtrasMin;
+          return acc;
+        }, {diasTrabalhados:0,faltas:0,atestados:0,ferias:0,cajuValor:0,totalDesconto:0,horasExtrasMin:0});
+
+        const salvarFolha = async () => {
+          if (resultados.length === 0) { setSaveStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
+          setSaveStatus({ok:null, msg:"Enviando folha para a planilha..."});
+          const payload = {
+            tipo:"folha", periodo: mesAno,
+            periodoInicio: toISO(dataIni), periodoFim: toISO(dataFim),
+            colaboradores: resultados.map(r=>({
+              nome: r.nome, funcao: r.funcao,
+              diasTrabalhados: r.calc.diasTrabalhados,
+              faltas: r.calc.faltas, atestados: r.calc.atestados,
+              ferias: r.calc.ferias, folgas: r.calc.folgas,
+              horasExtras: r.calc.horasExtras, horasFaltas: r.calc.horasFaltas,
+              dsrPerdidos: r.calc.dsrPerdidos, feriadosPerdidos: r.calc.feriadosPerdidos,
+              cajuDias: r.calc.cajuDias, cajuValor: r.calc.cajuValor,
+              premioAssiduidade: r.calc.premioAssiduidade,
+              descontarVT: r.calc.descontarVT,
+              produtos: r.calc.produtos, adiantamento: r.calc.adiantamento,
+              totalDesconto: r.calc.totalDesconto,
+              bancoHoras: r.calc.bancoHoras,
+              diasFaltas: r.calc.diasFaltas,
+              observacoes: r.calc.observacoes
+            }))
+          };
+          try {
+            await fetch(GAS_URL, { method:"POST", mode:"no-cors", body:JSON.stringify(payload) });
+            setSaveStatus({ok:true, msg:`✅ Folha ${mesAno} enviada! Verifique a aba FOLHA${ano} na planilha.`});
+          } catch(err) {
+            setSaveStatus({ok:false, msg:"Erro: " + err.message});
+          }
+        };
+
+        const exportarCSVFolha = () => {
+          const header = ["Período","Colaborador","Função","Dias Trab.","Faltas","Atestados","Férias","H.Extras","DSR Perd.","Caju Dias","Caju R$","Produtos R$","Adiant. R$","Total Desc. R$","Banco Horas","Dias Faltas"];
+          const rows = resultados.map(r=>[
+            periodoLabel, r.nome, r.funcao,
+            r.calc.diasTrabalhados, r.calc.faltas, r.calc.atestados, r.calc.ferias,
+            r.calc.horasExtras, r.calc.dsrPerdidos,
+            r.calc.cajuDias, r.calc.cajuValor.toFixed(2).replace(".",","),
+            r.calc.produtos.toFixed(2).replace(".",","),
+            r.calc.adiantamento.toFixed(2).replace(".",","),
+            r.calc.totalDesconto.toFixed(2).replace(".",","),
+            r.calc.bancoHoras?"Sim":"Não",
+            r.calc.diasFaltas.join(" | ")
+          ]);
+          const csv = [header, ...rows].map(r=>r.join(";")).join("\n");
+          const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8;"});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = `Folha_${mesAno.replace("/","-")}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        const setMarcacao = (nome, iso, valor) => {
+          setMarcacoes(prev=>{
+            const novo = {...prev};
+            if (!novo[nome]) novo[nome] = {}; else novo[nome] = {...novo[nome]};
+            if (valor === null || valor === "") delete novo[nome][iso];
+            else novo[nome][iso] = valor;
+            return novo;
+          });
+        };
+        const toggleFeriado = (iso) => {
+          setFeriados(prev=>{
+            if (prev.includes(iso)) return prev.filter(x=>x!==iso);
+            return [...prev, iso].sort();
+          });
+        };
+        const setAjuste = (nome, campo, valor) => {
+          setAjustes(prev=>({...prev, [nome]:{...(prev[nome]||{}), [campo]: valor}}));
+        };
+
+        const colabInfoAtual = colabSelecionado ? resultados.find(r=>r.nome === colabSelecionado) : null;
+
+        return (
+          <div>
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>💼 Folha de Pagamento</div>
+              <div style={{fontSize:13,color:C.muted}}>Fechamento mensal do dia 26 ao 25 · cálculos automáticos a partir do ponto</div>
+            </div>
+
+            <div style={s.card}>
+              <div style={s.cardTitle}>⚙️ Período de Fechamento</div>
+              <div style={{display:"flex",gap:14,alignItems:"flex-end",flexWrap:"wrap"}}>
+                <div>
+                  <label style={s.label}>Mês / Ano de referência</label>
+                  <input style={{...s.input,width:130}} value={mesAno} onChange={e=>setMesAno(e.target.value)} placeholder="MM/AAAA"/>
+                </div>
+                <div style={{flex:1,minWidth:200}}>
+                  <label style={s.label}>Período calculado</label>
+                  <div style={{padding:"8px 12px",background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:7,fontSize:13,fontWeight:700,color:C.pri}}>{periodoLabel}</div>
+                </div>
+                <button style={{...s.btnAcc,opacity:loadingAPI?0.6:1}} onClick={buscarColaboradores} disabled={loadingAPI}>
+                  {loadingAPI?"⏳ Buscando...":"🔄 Carregar colaboradores da planilha"}
+                </button>
+              </div>
+              {apiStatus&&<div style={{...(apiStatus.ok===true?s.successBox:apiStatus.ok===false?s.warnBox:s.infoBox),marginTop:12,marginBottom:0}}>{apiStatus.msg}</div>}
+            </div>
+
+            <div style={s.card}>
+              <div style={s.cardTitle}>📂 Importar Ponto do Período</div>
+              <div style={s.infoBox}>
+                Exporte do ponto eletrônico o CSV com todos os colaboradores para o período <strong>{periodoLabel}</strong>.
+              </div>
+              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDropFolha} onClick={()=>document.getElementById("csvFolhaInput").click()}>
+                <div style={{fontSize:32,marginBottom:8}}>📄</div>
+                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o CSV do ponto aqui</div>
+                <div style={{fontSize:13}}>ou clique para selecionar</div>
+                <input id="csvFolhaInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+              </div>
+              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
+            </div>
+
+            <div style={s.card}>
+              <div style={s.cardTitle}>📅 Feriados no Período</div>
+              <div style={s.infoBox}>Clique para marcar dias que foram feriado. Afeta o cálculo do DSR.</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {datasPeriodo.map(iso=>{
+                  const dt = new Date(iso+"T12:00:00");
+                  const dow = dt.getDay();
+                  if (dow === 0) return null;
+                  const isFer = feriados.includes(iso);
+                  const label = `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}`;
+                  const dname = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"][dow];
+                  return (
+                    <button key={iso} onClick={()=>toggleFeriado(iso)} style={{
+                      background:isFer?C.amber:"transparent",
+                      color:isFer?"#fff":C.muted,
+                      border:`1.5px solid ${isFer?C.amber:C.border}`,
+                      borderRadius:6, padding:"4px 10px", cursor:"pointer",
+                      fontSize:11, fontWeight:700
+                    }}>
+                      {isFer&&"🎌 "}{dname} {label}
+                    </button>
+                  );
+                })}
+              </div>
+              {feriados.length===0&&<div style={{fontSize:12,color:C.muted,marginTop:10}}>Nenhum feriado marcado no período.</div>}
+            </div>
+
+            {resultados.length > 0 && (
+              <div style={s.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
+                  <div style={s.cardTitle}>📊 Fechamento — {periodoLabel}</div>
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                    <button style={s.btnAcc} onClick={salvarFolha}>💾 Salvar na planilha</button>
+                    <button style={s.btn} onClick={exportarCSVFolha}>⬇️ Baixar CSV</button>
+                  </div>
+                </div>
+
+                {saveStatus&&<div style={{...(saveStatus.ok===true?s.successBox:saveStatus.ok===false?s.warnBox:s.infoBox),marginTop:0,marginBottom:14}}>{saveStatus.msg}</div>}
+
+                <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+                  {[
+                    {l:"Colaboradores",v:resultados.length,c:C.pri},
+                    {l:"Dias trab.",v:totais.diasTrabalhados,c:C.green},
+                    {l:"Faltas",v:totais.faltas,c:C.danger},
+                    {l:"H.Extras",v:minToHHMM(totais.horasExtrasMin),c:C.acc},
+                    {l:"Caju total",v:fmtBRL(totais.cajuValor),c:C.green,hl:true},
+                    {l:"Descontos",v:fmtBRL(totais.totalDesconto),c:C.danger,hl:true},
+                  ].map((it,i)=>(
+                    <div key={i} style={{flex:1,minWidth:120,background:it.hl?"#F0F9F4":C.rowAlt,border:`1px solid ${C.border}`,borderLeft:`4px solid ${it.c}`,borderRadius:8,padding:"10px 14px"}}>
+                      <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
+                      <div style={{fontSize:15,fontWeight:800,color:it.c}}>{it.v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{overflowX:"auto"}}>
+                  <table style={{...s.table,fontSize:12}}>
+                    <thead>
+                      <tr>
+                        <th style={s.th}>Colaborador</th>
+                        <th style={s.thC}>Trab.</th>
+                        <th style={s.thC}>Faltas</th>
+                        <th style={s.thC}>Atest.</th>
+                        <th style={s.thC}>Férias</th>
+                        <th style={s.thC}>H.Extras</th>
+                        <th style={s.thC}>DSR</th>
+                        <th style={s.thC}>Caju</th>
+                        <th style={s.thC}>Prod. R$</th>
+                        <th style={s.thC}>Adiant. R$</th>
+                        <th style={s.thC}>Total Desc.</th>
+                        <th style={s.thC} title="Prêmio Assiduidade">Ass.</th>
+                        <th style={s.thC} title="Descontar VT">VT</th>
+                        <th style={s.thC} title="Banco de Horas">BH</th>
+                        <th style={s.thC}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultados.map((r,i)=>{
+                        const cruzamento = r.fonteCadastro && r.fonteCSV ? "ok" : r.fonteCadastro ? "sem_ponto" : "nao_cadastrado";
+                        return (
+                          <tr key={r.nome} style={{...s.row(i),cursor:"pointer"}} onClick={()=>setColabSelecionado(r.nome)}>
+                            <td style={{...s.td,fontWeight:600,fontSize:12}}>
+                              {r.nome}
+                              {cruzamento === "sem_ponto" && <span title="Cadastrado, sem ponto no CSV" style={{marginLeft:6,fontSize:9,color:C.amber,fontWeight:700}}>⚠ sem ponto</span>}
+                              {cruzamento === "nao_cadastrado" && <span title="No ponto, mas não cadastrado" style={{marginLeft:6,fontSize:9,color:C.danger,fontWeight:700}}>⚠ não cadastrado</span>}
+                              {r.funcao&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{r.funcao}</div>}
+                            </td>
+                            <td style={{...s.tdC,fontWeight:700,color:r.calc.diasTrabalhados>0?C.pri:C.muted}}>{r.calc.diasTrabalhados}</td>
+                            <td style={{...s.tdC,fontWeight:700,color:r.calc.faltas>0?C.danger:C.muted}}>{r.calc.faltas}</td>
+                            <td style={{...s.tdC,color:r.calc.atestados>0?C.amber:C.muted}}>{r.calc.atestados}</td>
+                            <td style={{...s.tdC,color:r.calc.ferias>0?"#3b82f6":C.muted}}>{r.calc.ferias}</td>
+                            <td style={{...s.tdC,color:r.calc.horasExtrasMin>0?C.green:C.muted,fontWeight:600}}>{r.calc.horasExtras}</td>
+                            <td style={{...s.tdC,color:r.calc.dsrPerdidos>0?C.danger:C.muted}}>
+                              {r.calc.dsrPerdidos}{r.calc.feriadosPerdidos>0&&`+${r.calc.feriadosPerdidos}f`}
+                            </td>
+                            <td style={{...s.tdC,color:C.green,fontWeight:600,fontSize:11}}>{fmtBRL(r.calc.cajuValor)}</td>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                              <input style={{...s.inputSm,width:62,textAlign:"right"}}
+                                     value={ajustes[r.nome]?.produtos||""}
+                                     onChange={e=>setAjuste(r.nome,"produtos",e.target.value)}
+                                     placeholder="0,00"/>
+                            </td>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                              <input style={{...s.inputSm,width:62,textAlign:"right"}}
+                                     value={ajustes[r.nome]?.adiantamento||""}
+                                     onChange={e=>setAjuste(r.nome,"adiantamento",e.target.value)}
+                                     placeholder="0,00"/>
+                            </td>
+                            <td style={{...s.tdC,fontWeight:800,color:r.calc.totalDesconto>0?C.danger:C.muted,fontSize:12}}>{fmtBRL(r.calc.totalDesconto)}</td>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                              <input type="checkbox" checked={r.calc.premioAssiduidade}
+                                     onChange={e=>setAjuste(r.nome,"premioAssiduidade",e.target.checked)}
+                                     style={{width:14,height:14,cursor:"pointer"}}/>
+                            </td>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                              <input type="checkbox" checked={r.calc.descontarVT}
+                                     onChange={e=>setAjuste(r.nome,"descontarVT",e.target.checked)}
+                                     style={{width:14,height:14,cursor:"pointer"}}/>
+                            </td>
+                            <td style={s.tdC} onClick={e=>e.stopPropagation()}>
+                              <input type="checkbox" checked={r.calc.bancoHoras}
+                                     onChange={e=>setAjuste(r.nome,"bancoHoras",e.target.checked)}
+                                     style={{width:14,height:14,cursor:"pointer"}}/>
+                            </td>
+                            <td style={s.tdC}>
+                              <button style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:11,color:C.pri,fontWeight:700}}>
+                                Detalhes →
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {resultados.length === 0 && (
+              <div style={{...s.card,textAlign:"center",padding:"40px 20px",color:C.muted}}>
+                <div style={{fontSize:40,marginBottom:10}}>📋</div>
+                <div style={{fontSize:14,fontWeight:700,color:C.pri,marginBottom:4}}>Folha ainda vazia</div>
+                <div style={{fontSize:12}}>Carregue os colaboradores da planilha e importe o CSV do ponto para começar.</div>
+              </div>
+            )}
+
+            {colabSelecionado && colabInfoAtual && (
+              <PainelColaborador
+                colab={colabInfoAtual}
+                datasPeriodo={datasPeriodo}
+                marcacoes={marcacoes[colabSelecionado]||{}}
+                feriados={feriados}
+                ajustes={ajustes[colabSelecionado]||{}}
+                onMarcar={(iso,valor)=>setMarcacao(colabSelecionado,iso,valor)}
+                onAjustar={(campo,val)=>setAjuste(colabSelecionado,campo,val)}
+                onClose={()=>setColabSelecionado(null)}
+                analisarDia={(iso,diaDados)=>analisarDia(colabSelecionado,iso,diaDados)}
+              />
+            )}
+          </div>
+        );
+      }
+
+      function PainelColaborador({colab, datasPeriodo, marcacoes, feriados, ajustes, onMarcar, onAjustar, onClose, analisarDia}) {
+        const STATUS_LABELS = {
+          trabalhou:{l:"Trab.",c:C.green,bg:"#E8F5EE"},
+          falta:{l:"Falta",c:C.danger,bg:"#FEE2E2"},
+          atestado:{l:"Atest.",c:C.amber,bg:C.amberBg},
+          ferias:{l:"Férias",c:"#3b82f6",bg:"#DBEAFE"},
+          folga:{l:"Folga",c:"#8b5cf6",bg:"#EDE9FE"},
+          feriado:{l:"Feriado",c:"#D4972A",bg:"#FFF8E7"},
+          nao_previsto:{l:"",c:C.muted,bg:"#F3F3F3"}
+        };
+
+        const primeiro = new Date(datasPeriodo[0]+"T12:00:00");
+        const dowPrimeiro = primeiro.getDay();
+        const celulasVazias = Array(dowPrimeiro).fill(null);
+        const celulas = [...celulasVazias, ...datasPeriodo];
+
+        return (
+          <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:100,display:"flex",justifyContent:"flex-end"}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:"min(560px,100%)",background:"#fff",height:"100%",overflowY:"auto",boxShadow:"-4px 0 20px rgba(0,0,0,0.2)"}}>
+              <div style={{background:C.pri,color:"#fff",padding:"18px 22px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"sticky",top:0,zIndex:10}}>
+                <div>
+                  <div style={{fontSize:16,fontWeight:800}}>{colab.nome}</div>
+                  {colab.funcao&&<div style={{fontSize:11,opacity:0.7,marginTop:2}}>{colab.funcao}{colab.setor?` · ${colab.setor}`:""}</div>}
+                </div>
+                <button onClick={onClose} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:13}}>✕ Fechar</button>
+              </div>
+
+              <div style={{padding:"16px 22px",background:C.rowAlt,borderBottom:`1px solid ${C.border}`}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                  {[
+                    {l:"Trab.",v:colab.calc.diasTrabalhados,c:C.green},
+                    {l:"Faltas",v:colab.calc.faltas,c:C.danger},
+                    {l:"Atest.",v:colab.calc.atestados,c:C.amber},
+                    {l:"Férias",v:colab.calc.ferias,c:"#3b82f6"},
+                    {l:"H.Extras",v:colab.calc.horasExtras,c:C.green},
+                    {l:"DSR",v:`${colab.calc.dsrPerdidos}${colab.calc.feriadosPerdidos>0?`+${colab.calc.feriadosPerdidos}f`:""}`,c:C.danger},
+                    {l:"Caju dias",v:colab.calc.cajuDias,c:C.pri},
+                    {l:"Caju R$",v:fmtBRL(colab.calc.cajuValor),c:C.green}
+                  ].map((it,i)=>(
+                    <div key={i} style={{background:"#fff",borderRadius:7,padding:"7px 9px",border:`1px solid ${C.border}`}}>
+                      <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em"}}>{it.l}</div>
+                      <div style={{fontSize:13,fontWeight:800,color:it.c}}>{it.v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{padding:"16px 22px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.pri,marginBottom:10}}>📅 Calendário do período</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Clique em um dia para ciclar: <strong>Normal → Atestado → Férias → Folga → Normal</strong></div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:6}}>
+                  {["D","S","T","Q","Q","S","S"].map((d,i)=>(
+                    <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.muted,padding:"4px 0"}}>{d}</div>
+                  ))}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+                  {celulas.map((iso,idx)=>{
+                    if (!iso) return <div key={idx}/>;
+                    const d = new Date(iso+"T12:00:00");
+                    const dia = d.getDate();
+                    const diaDados = colab.dadosCSV?.dias?.[iso];
+                    const a = analisarDia(iso, diaDados);
+                    const info = STATUS_LABELS[a.status] || STATUS_LABELS.nao_previsto;
+                    const isFer = feriados.includes(iso);
+                    const marc = marcacoes[iso];
+                    const clique = () => {
+                      const ciclo = ["", "atestado", "ferias", "folga"];
+                      const atual = marc || "";
+                      const next = ciclo[(ciclo.indexOf(atual)+1)%ciclo.length];
+                      onMarcar(iso, next || null);
+                    };
+                    return (
+                      <button key={idx} onClick={clique} style={{
+                        background:info.bg,
+                        border:`1.5px solid ${info.c}40`,
+                        borderRadius:6, padding:"6px 4px", cursor:"pointer",
+                        display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                        minHeight:58
+                      }}>
+                        <div style={{fontSize:13,fontWeight:800,color:info.c}}>{dia}</div>
+                        <div style={{fontSize:8,color:info.c,fontWeight:700,textAlign:"center",lineHeight:1.1}}>
+                          {isFer&&a.status==="feriado"?"Feriado":info.l}
+                        </div>
+                        {diaDados?.horaExtra && diaDados.horaExtra !== "00:00" && (
+                          <div style={{fontSize:8,color:C.green,fontWeight:700}}>+{diaDados.horaExtra}</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{marginTop:14,display:"flex",flexWrap:"wrap",gap:6}}>
+                  {Object.entries(STATUS_LABELS).filter(([k])=>k!=="nao_previsto").map(([k,v])=>(
+                    <div key={k} style={{fontSize:10,background:v.bg,color:v.c,border:`1px solid ${v.c}30`,borderRadius:5,padding:"2px 7px",fontWeight:700}}>{v.l}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{padding:"0 22px 22px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.pri,marginBottom:10,marginTop:14}}>📝 Observações</div>
+                <textarea style={{...s.input,minHeight:60,fontFamily:"inherit"}}
+                          value={ajustes.observacoes||""}
+                          onChange={e=>onAjustar("observacoes",e.target.value)}
+                          placeholder="Notas adicionais..."/>
+
+                {colab.calc.diasFaltas.length>0&&(
+                  <div style={{marginTop:14,padding:"10px 14px",background:"#FEE2E2",border:"1px solid #FECACA",borderRadius:7}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.danger,marginBottom:4}}>Dias de falta injustificada:</div>
+                    <div style={{fontSize:12,color:"#991B1B"}}>{colab.calc.diasFaltas.join(" · ")}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       const navItems=[
         {k:"vt",l:"🚌 Vale Transporte"},
+        {k:"folha",l:"💼 Folha de Pagto"},
         {k:"ferias",l:"🏖️ Férias"},
         {k:"atestados",l:"🏥 Atestados"},
         {k:"ponto_hist",l:"📊 Histórico Ponto"},
@@ -928,6 +1578,7 @@ function doPost(e) {
             </nav>
             <main style={s.main}>
               {page==="vt"&&vtPageContent}
+              {page==="folha"&&<FolhaPage/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
