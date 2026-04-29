@@ -171,6 +171,185 @@ function doPost(e) {
   }
 }`;
 
+      // ============================================================
+      // PÁGINA DE AJUDA
+      // ============================================================
+      function AjudaPage() {
+        const [secao, setSecao] = useState("vt");
+
+        const tabs = [
+          {k:"vt", l:"🚌 Vale Transporte"},
+          {k:"folha", l:"💼 Folha de Pagamento"},
+        ];
+
+        const SecaoVT = () => (
+          <div>
+            <div style={{fontSize:15,fontWeight:800,color:C.pri,marginBottom:16}}>Como usar o módulo de Vale Transporte</div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>📂 1. Importar CSV do Ponto</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Exporte o arquivo CSV do seu sistema de ponto eletrônico e arraste-o para a área indicada (ou clique para selecionar o arquivo).</p>
+              <div style={{background:"#F0F9F4",border:`1px solid ${C.green}`,borderRadius:8,padding:"10px 14px",fontSize:12,lineHeight:1.8}}>
+                <strong style={{color:C.green}}>Formato esperado do CSV:</strong><br/>
+                Colunas obrigatórias: <code>Cracha · Nome · Data · Batida (1ª entrada)</code><br/>
+                Separador: ponto-e-vírgula (<code>;</code>)<br/>
+                Codificação: ISO-8859-1 (padrão da maioria dos sistemas de ponto)
+              </div>
+              <div style={{...s.infoBox, marginTop:10, marginBottom:0}}>
+                💡 Ao importar, o sistema detecta automaticamente a escala de cada colaborador (SEG-SEX ou SEG-SAB) com base nos registros de sábado presentes no CSV.
+              </div>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>✏️ 2. Adição Manual de Colaboradores</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Caso algum colaborador não esteja no CSV, você pode adicioná-lo manualmente pela aba <strong>Manual</strong>. Informe o nome e selecione a escala (SEG-SEX ou SEG-SAB).</p>
+              <div style={{...s.warnBox, marginBottom:0}}>
+                ⚠️ Colaboradores adicionados manualmente não terão dados de presença preenchidos automaticamente — você precisará marcar os dias pela aba Ponto.
+              </div>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>📋 3. Marcação de Ponto e Feriados</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Na aba <strong>Ponto</strong>, você pode:</p>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li>Marcar/desmarcar presença de cada colaborador em cada dia da semana</li>
+                <li>Marcar feriados (dias feriados não contam para o cálculo do VT)</li>
+                <li>Usar os botões de cabeçalho para marcar/desmarcar todos de uma coluna</li>
+                <li>Afastar um colaborador (zera os dias e o valor calculado)</li>
+                <li>Inserir um valor pago manualmente, sobrescrevendo o cálculo automático</li>
+              </ul>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>🧮 4. Como o Valor é Calculado</div>
+              <div style={{background:"#1B3A2B",color:"#A8D5A2",borderRadius:8,padding:"14px 16px",fontSize:12,fontFamily:"monospace",lineHeight:1.9,marginBottom:10}}>
+                {"Valor VT = Dias trabalhados × 2 passagens × R$ valor da passagem"}<br/>
+                {"Exemplo: 5 dias × 2 × R$ 4,30 = R$ 43,00"}
+              </div>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li>Dias feriados marcados <strong>não</strong> contam como dias trabalhados</li>
+                <li>Colaboradores afastados recebem R$ 0,00</li>
+                <li>O valor por passagem é configurável nas configurações (padrão: R$ 4,30)</li>
+                <li>Se um valor manual for inserido na coluna "Valor Pago", ele sobrescreve o cálculo</li>
+              </ul>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>🖨️ 5. Recibo e Exportação</div>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li><strong>Aba Recibo:</strong> Gera um recibo imprimível com espaço para assinatura de cada colaborador</li>
+                <li><strong>Aba Salvar:</strong> Envia os dados para o Google Sheets (requer configuração do endpoint GAS) ou baixa um CSV</li>
+                <li><strong>Aba Histórico:</strong> Exibe semanas já salvas — clique em uma para recarregá-la</li>
+              </ul>
+            </div>
+          </div>
+        );
+
+        const SecaoFolha = () => (
+          <div>
+            <div style={{fontSize:15,fontWeight:800,color:C.pri,marginBottom:16}}>Como usar o módulo de Folha de Pagamento</div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>📅 1. Período de Fechamento</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>O período padrão vai do <strong>dia 26 do mês anterior</strong> ao <strong>dia 25 do mês de referência</strong>. Informe o mês/ano no campo e o período será calculado automaticamente.</p>
+              <div style={{...s.infoBox, marginBottom:0}}>
+                💡 Exemplo: para a folha de <strong>Maio/2025</strong>, o período vai de 26/04/2025 a 25/05/2025.
+              </div>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>👥 2. Carregar Colaboradores</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Clique em <strong>"Carregar colaboradores da planilha"</strong> para buscar a lista de funcionários cadastrados. Isso é necessário para cruzar os dados de ponto com as informações do cadastro (função, setor, período de experiência, etc.).</p>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>📂 3. Importar CSV do Ponto</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Arraste o arquivo CSV do ponto eletrônico do período completo para a área indicada.</p>
+              <div style={{background:"#F0F9F4",border:`1px solid ${C.green}`,borderRadius:8,padding:"10px 14px",fontSize:12,lineHeight:1.8,marginBottom:10}}>
+                <strong style={{color:C.green}}>Formato esperado do CSV da Folha:</strong><br/>
+                <code>Cracha · Nome · Data · Previsto E1 · Previsto S1 · Previsto E2 · Previsto S2 · Real B1 · Real B2 · Real B3 · Real B4 · Hora Extra</code>
+              </div>
+              <div style={{...s.warnBox, marginBottom:0}}>
+                ⚠️ Se o período do CSV não bater com o mês selecionado, o sistema avisará e oferecerá ajuste automático do período.
+              </div>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>📅 4. Feriados e Marcações</div>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li>Feriados nacionais são pré-calculados automaticamente (incluindo datas móveis como Carnaval, Semana Santa e Corpus Christi)</li>
+                <li>Você pode adicionar feriados municipais ou remover pontos facultativos clicando nos botões de data</li>
+                <li>No painel de cada colaborador, clique nos dias para ciclar o status: <strong>Normal → Atestado → Férias → Folga → Normal</strong></li>
+              </ul>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>⚙️ 5. Ajustes por Colaborador</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Clique em <strong>"Detalhes →"</strong> na linha de um colaborador para abrir o painel individual. Lá você pode:</p>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li>Ajustar marcações dia a dia no calendário</li>
+                <li>Inserir descontos de <strong>Produtos</strong> e <strong>Adiantamento</strong></li>
+                <li>Ativar/desativar: Prêmio Assiduidade, Desconto VT, Banco de Horas</li>
+                <li>Adicionar observações para o fechamento</li>
+              </ul>
+            </div>
+
+            <div style={{...s.card, marginBottom:14}}>
+              <div style={s.cardTitle}>💾 6. Exportar a Folha</div>
+              <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li><strong>Salvar na planilha:</strong> Envia os dados calculados para o Google Sheets via integração GAS</li>
+                <li><strong>Baixar CSV:</strong> Exporta a folha em formato semicolon (compatível com Excel)</li>
+              </ul>
+            </div>
+
+            <div style={{...s.card, marginBottom:0}}>
+              <div style={s.cardTitle}>🧮 Regras de Cálculo — Resumo</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                {[
+                  {t:"Período", d:"Dia 26 do mês anterior ao dia 25 do mês de referência"},
+                  {t:"DSR (Descanso Semanal)", d:"Perdido quando há pelo menos 1 falta injustificada na semana"},
+                  {t:"Feriado em semana com falta", d:"O feriado também é perdido na semana em que há falta"},
+                  {t:"CAJU (vale-alimentação)", d:"R$ 5,00 por dia trabalhado, em atestado ou férias. Não conta durante os 90 dias de experiência"},
+                  {t:"Horas Extras", d:"Lidas diretamente do campo 'Hora Extra' do CSV do ponto"},
+                  {t:"Prêmio Assiduidade", d:"Marcado automaticamente se não houver faltas. Pode ser ajustado manualmente"},
+                  {t:"Desconto VT", d:"Ativado automaticamente se o colaborador tiver valor de transporte cadastrado"},
+                  {t:"Total Descontos", d:"Soma de Produtos + Adiantamento informados manualmente"},
+                ].map((it,i)=>(
+                  <div key={i} style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:C.pri,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.04em"}}>{it.t}</div>
+                    <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>{it.d}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+        return (
+          <div>
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>❓ Central de Ajuda</div>
+              <div style={{fontSize:13,color:C.muted}}>Instruções de uso e regras dos módulos do sistema de RH</div>
+            </div>
+
+            <div style={{display:"flex",gap:8,marginBottom:20,borderBottom:`2px solid ${C.border}`,paddingBottom:0}}>
+              {tabs.map(t=>(
+                <button key={t.k} onClick={()=>setSecao(t.k)} style={{
+                  background:"transparent", border:"none", cursor:"pointer",
+                  padding:"10px 18px", fontWeight:secao===t.k?800:500, fontSize:13,
+                  color:secao===t.k?C.pri:C.muted,
+                  borderBottom:secao===t.k?`3px solid ${C.pri}`:"3px solid transparent",
+                  marginBottom:-2, transition:"all 0.15s"
+                }}>{t.l}</button>
+              ))}
+            </div>
+
+            {secao==="vt"&&<SecaoVT/>}
+            {secao==="folha"&&<SecaoFolha/>}
+          </div>
+        );
+      }
+
     function App(){
       const [page,setPage]=useState("vt");
       const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
@@ -925,6 +1104,7 @@ function doPost(e) {
         const [drag, setDrag] = useState(false);
         const [colabSelecionado, setColabSelecionado] = useState(null);
         const [loadingAPI, setLoadingAPI] = useState(false);
+        const [showRegras, setShowRegras] = useState(false);
 
         useEffect(()=>{localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI));},[colabAPI]);
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
@@ -1370,9 +1550,120 @@ function doPost(e) {
 
         return (
           <div>
-            <div style={{marginBottom:20}}>
-              <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>💼 Folha de Pagamento</div>
-              <div style={{fontSize:13,color:C.muted}}>Fechamento mensal do dia 26 ao 25 · cálculos automáticos a partir do ponto</div>
+            {showRegras && (
+              <div onClick={()=>setShowRegras(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
+                <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:14,width:"min(720px,100%)",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.25)"}}>
+                  <div style={{background:C.pri,color:"#fff",padding:"18px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,borderRadius:"14px 14px 0 0"}}>
+                    <div>
+                      <div style={{fontSize:16,fontWeight:800}}>🧮 Regras e Orientações do Cálculo</div>
+                      <div style={{fontSize:11,opacity:0.7,marginTop:2}}>Folha de Pagamento · Cantina em Casa / Lumar Alimentos</div>
+                    </div>
+                    <button onClick={()=>setShowRegras(false)} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:13}}>✕ Fechar</button>
+                  </div>
+                  <div style={{padding:"24px"}}>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>📅 Período de Fechamento</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        O período cobre do <strong>dia 26 do mês anterior</strong> ao <strong>dia 25 do mês de referência</strong>.<br/>
+                        <em style={{color:C.muted,fontSize:12}}>Exemplo: Folha de Maio/2025 → período de 26/04/2025 a 25/05/2025.</em>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>📊 Status dos Dias</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        {[
+                          {s:"trabalhou",l:"Trabalhado",c:C.green,bg:"#E8F5EE",d:"Dia com registro de ponto (batida) dentro do horário previsto."},
+                          {s:"falta",l:"Falta",c:C.danger,bg:"#FEE2E2",d:"Dia previsto sem batida e sem justificativa. Gera perda de DSR na semana."},
+                          {s:"atestado",l:"Atestado",c:C.amber,bg:"#FFF8E7",d:"Afastamento médico justificado. Conta para CAJU, não gera falta nem perde DSR."},
+                          {s:"ferias",l:"Férias",c:"#3b82f6",bg:"#DBEAFE",d:"Período de férias. Conta para CAJU. Não gera falta."},
+                          {s:"folga",l:"Folga",c:"#8b5cf6",bg:"#EDE9FE",d:"Folga compensatória ou escala. Não conta como falta nem como dia trabalhado."},
+                          {s:"feriado",l:"Feriado",c:"#D4972A",bg:"#FFF8E7",d:"Feriado nacional, estadual ou municipal marcado. Não conta como falta. Se houver falta na mesma semana, o feriado também é perdido."},
+                        ].map((it,i)=>(
+                          <div key={i} style={{background:it.bg,border:`1.5px solid ${it.c}30`,borderRadius:8,padding:"10px 12px"}}>
+                            <div style={{fontWeight:800,color:it.c,fontSize:12,marginBottom:4}}>{it.l}</div>
+                            <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>{it.d}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>💤 DSR — Descanso Semanal Remunerado</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li>Toda semana em que o colaborador tiver <strong>pelo menos 1 falta injustificada</strong> gera perda de <strong>1 DSR</strong>.</li>
+                          <li>Feriados que caem na mesma semana de uma falta também são perdidos (exibidos como <strong>+Nf</strong> na coluna DSR).</li>
+                          <li>Atestados, férias e folgas <strong>não</strong> geram perda de DSR.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🍱 CAJU — Vale Alimentação</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li>Valor: <strong>R$ 5,00 por dia</strong> que conta como trabalhado, atestado ou férias.</li>
+                          <li>Dias de falta, folga e feriado <strong>não</strong> geram crédito CAJU.</li>
+                          <li>Colaboradores em <strong>período de experiência (90 dias)</strong> não recebem CAJU durante esse período.</li>
+                          <li>O fim da experiência é baseado na data cadastrada no campo <em>experiencia90</em> da planilha.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>⏱️ Horas Extras e Horas Falta</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li><strong>Horas Extras:</strong> Lidas diretamente do campo <em>Hora Extra</em> do CSV do ponto eletrônico.</li>
+                          <li><strong>Horas Falta:</strong> Calculadas pela diferença entre o horário previsto e o real registrado no ponto.</li>
+                          <li>Ambas são exibidas no formato <strong>HH:MM</strong>.</li>
+                          <li>A flag <strong>Banco de Horas</strong> indica que as horas extras estão sendo acumuladas em banco, e não pagas.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🎯 Prêmio Assiduidade</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        Marcado automaticamente como <strong>Sim</strong> quando o colaborador não possui nenhuma falta injustificada no período.
+                        Pode ser ajustado manualmente no painel individual de cada colaborador.
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🚌 Desconto Vale Transporte</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        Ativado automaticamente se o colaborador possuir valor de transporte cadastrado na planilha (<em>campo transporte {">"} 0</em>).
+                        Pode ser ajustado manualmente por colaborador.
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:0}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>💸 Descontos</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li><strong>Produtos:</strong> Valor de compras de produtos da empresa descontados em folha (inserido manualmente).</li>
+                          <li><strong>Adiantamento:</strong> Valor de adiantamento salarial a ser descontado (inserido manualmente).</li>
+                          <li><strong>Total Descontos:</strong> Soma de Produtos + Adiantamento.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>💼 Folha de Pagamento</div>
+                <div style={{fontSize:13,color:C.muted}}>Fechamento mensal do dia 26 ao 25 · cálculos automáticos a partir do ponto</div>
+              </div>
+              <button onClick={()=>setShowRegras(true)} style={{...s.btnOutline,fontSize:12,padding:"7px 14px",gap:6}}>
+                🧮 Como funciona o cálculo?
+              </button>
             </div>
 
             <div style={s.card}>
@@ -1724,6 +2015,7 @@ function doPost(e) {
         {k:"ferias",l:"🏖️ Férias"},
         {k:"atestados",l:"🏥 Atestados"},
         {k:"ponto_hist",l:"📊 Histórico Ponto"},
+        {k:"ajuda",l:"❓ Ajuda"},
       ];
 
       return(
@@ -1748,6 +2040,7 @@ function doPost(e) {
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
+              {page==="ajuda"&&<AjudaPage/>}
             </main>
           </div>
         </div>
