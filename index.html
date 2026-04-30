@@ -172,6 +172,327 @@ function doPost(e) {
 }`;
 
       // ============================================================
+      // DASHBOARD
+      // ============================================================
+      function DashboardPage() {
+        const hoje = new Date();
+        hoje.setHours(12, 0, 0, 0);
+
+        const colabAPI = (() => { try { return JSON.parse(localStorage.getItem("rh_colab_api") || "[]"); } catch(e) { return []; } })();
+        const marcacoes = (() => { try { return JSON.parse(localStorage.getItem("rh_folha_marc") || "{}"); } catch(e) { return {}; } })();
+
+        const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
+        const parseISODate = iso => { if (!iso) return null; const [y,m,d] = iso.split("-"); return new Date(+y, +m-1, +d, 12, 0, 0); };
+        const diffDias = dt => dt ? Math.round((dt - hoje) / 86400000) : null;
+        const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+        // ====== ANIVERSARIANTES ======
+        const getNasc = c => c.nascimento || c["DATA NASCIMENTO"] || c.dataNascimento || c["NASCIMENTO"] || c["DT_NASCIMENTO"] || c["DT NASCIMENTO"] || "";
+        const temCampoNasc = colabAPI.some(c => getNasc(c));
+
+        const aniversariantes = colabAPI.map(c => {
+          const nasc = getNasc(c).trim();
+          if (!nasc) return null;
+          let dia, mes;
+          if (nasc.includes("/")) { const p = nasc.split("/"); dia = +p[0]; mes = +p[1]; }
+          else if (nasc.includes("-")) { const p = nasc.split("-"); mes = +p[1]; dia = +p[2]; }
+          else return null;
+          if (!dia || !mes || mes > 12 || dia > 31) return null;
+          let anivRef = new Date(hoje.getFullYear(), mes-1, dia, 12, 0, 0);
+          let diff = diffDias(anivRef);
+          if (diff < -1) { anivRef = new Date(hoje.getFullYear()+1, mes-1, dia, 12, 0, 0); diff = diffDias(anivRef); }
+          return { nome: c.nome || c.NOME || "", funcao: c.funcao || "", dia, mes, diff };
+        }).filter(Boolean).sort((a,b) => a.diff - b.diff);
+
+        const anivHoje = aniversariantes.filter(a => a.diff === 0);
+        const anivSemana = aniversariantes.filter(a => a.diff > 0 && a.diff <= 6);
+        const anivProxSemana = aniversariantes.filter(a => a.diff >= 7 && a.diff <= 13);
+
+        // ====== EXPERIÊNCIAS ======
+        const experiencias = colabAPI.flatMap(c => {
+          const nome = c.nome || c.NOME || "";
+          const funcao = c.funcao || "";
+          return [
+            c.experiencia30 ? { nome, funcao, tipo:"30 dias", cor:C.green, iso: c.experiencia30, diff: diffDias(parseISODate(c.experiencia30)) } : null,
+            c.experiencia90 ? { nome, funcao, tipo:"90 dias", cor:"#8b5cf6", iso: c.experiencia90, diff: diffDias(parseISODate(c.experiencia90)) } : null,
+          ].filter(Boolean);
+        }).filter(e => e.diff !== null && e.diff >= -3 && e.diff <= 30)
+          .sort((a,b) => a.diff - b.diff);
+
+        // ====== ATESTADOS ======
+        const atestadosAtivos = (() => {
+          const resultado = [];
+          Object.entries(marcacoes).forEach(([nomeKey, dias]) => {
+            const dAtestado = Object.entries(dias)
+              .filter(([, st]) => st === "atestado")
+              .map(([iso]) => iso)
+              .sort();
+            if (!dAtestado.length) return;
+
+            const grupos = [];
+            let g = [dAtestado[0]];
+            for (let i = 1; i < dAtestado.length; i++) {
+              const prev = parseISODate(dAtestado[i-1]);
+              const curr = parseISODate(dAtestado[i]);
+              Math.round((curr - prev) / 86400000) <= 3 ? g.push(dAtestado[i]) : (grupos.push(g), g = [dAtestado[i]]);
+            }
+            grupos.push(g);
+
+            grupos.forEach(grupo => {
+              const fim = grupo[grupo.length - 1];
+              const inicio = grupo[0];
+              const diffFim = diffDias(parseISODate(fim));
+              if (diffFim < -14) return;
+
+              const dtRetorno = parseISODate(fim);
+              dtRetorno.setDate(dtRetorno.getDate() + 1);
+              while (dtRetorno.getDay() === 0 || dtRetorno.getDay() === 6) dtRetorno.setDate(dtRetorno.getDate() + 1);
+
+              const colab = colabAPI.find(c => normNome(c.nome || c.NOME || "") === nomeKey);
+              resultado.push({
+                nome: colab?.nome || colab?.NOME || nomeKey,
+                funcao: colab?.funcao || "",
+                inicio, fim,
+                retornoISO: toISO(dtRetorno),
+                diffRetorno: diffDias(dtRetorno),
+                diffFim
+              });
+            });
+          });
+          return resultado.sort((a,b) => a.diffRetorno - b.diffRetorno);
+        })();
+
+        const semDados = colabAPI.length === 0;
+
+        return (
+          <div>
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🏠 Dashboard</div>
+              <div style={{fontSize:13,color:C.muted,textTransform:"capitalize"}}>
+                {hoje.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long",year:"numeric"})}
+              </div>
+            </div>
+
+            {semDados && (
+              <div style={{...s.warnBox,marginBottom:18}}>
+                ⚠️ Nenhum colaborador carregado. Acesse <strong>Folha de Pagamento</strong> e clique em <strong>"Carregar colaboradores da planilha"</strong> para exibir os dados do dashboard.
+              </div>
+            )}
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:18}}>
+
+              {/* ---- ANIVERSARIANTES ---- */}
+              <div style={s.card}>
+                <div style={s.cardTitle}>🎂 Aniversariantes</div>
+
+                {anivHoje.length > 0 && (
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:800,color:"#B45309",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🎉 Hoje!</div>
+                    {anivHoje.map((a,i) => (
+                      <div key={i} style={{background:"#FFF3CD",border:"2px solid #F59E0B",borderRadius:10,padding:"11px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{fontSize:32,lineHeight:1}}>🎂</div>
+                        <div>
+                          <div style={{fontWeight:800,color:C.pri,fontSize:14}}>{a.nome}</div>
+                          {a.funcao && <div style={{fontSize:11,color:C.muted,marginTop:2}}>{a.funcao}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {anivSemana.length > 0 && (
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Esta semana</div>
+                    {anivSemana.map((a,i) => (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                        <div style={{width:38,height:38,borderRadius:8,background:C.rowAlt,border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:C.pri,lineHeight:1}}>{a.dia}</div>
+                          <div style={{fontSize:9,color:C.muted,fontWeight:700}}>{MESES[a.mes-1]}</div>
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:12,color:C.text}}>{a.nome}</div>
+                          {a.funcao && <div style={{fontSize:11,color:C.muted}}>{a.funcao}</div>}
+                        </div>
+                        <div style={{fontSize:11,color:C.acc,fontWeight:700,whiteSpace:"nowrap"}}>Em {a.diff} dia{a.diff>1?"s":""}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {anivProxSemana.length > 0 && (
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Próxima semana</div>
+                    {anivProxSemana.map((a,i) => (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${C.border}`,opacity:0.8}}>
+                        <div style={{width:36,height:36,borderRadius:7,background:"#F3F4F6",border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:800,color:C.muted,lineHeight:1}}>{a.dia}</div>
+                          <div style={{fontSize:9,color:C.muted,fontWeight:700}}>{MESES[a.mes-1]}</div>
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:600,fontSize:12,color:C.text}}>{a.nome}</div>
+                          {a.funcao && <div style={{fontSize:10,color:C.muted}}>{a.funcao}</div>}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted,whiteSpace:"nowrap"}}>Em {a.diff} dias</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {anivHoje.length === 0 && anivSemana.length === 0 && anivProxSemana.length === 0 && (
+                  <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"24px 0",lineHeight:1.8}}>
+                    {!temCampoNasc && colabAPI.length > 0
+                      ? <span>Sem campo de nascimento na planilha.<br/><span style={{fontSize:11}}>Adicione uma coluna <code>nascimento</code> (DD/MM/AAAA).</span></span>
+                      : "Nenhum aniversariante nos próximos 14 dias."
+                    }
+                  </div>
+                )}
+              </div>
+
+              {/* ---- EXPERIÊNCIAS ---- */}
+              <div style={s.card}>
+                <div style={s.cardTitle}>🆕 Períodos de Experiência</div>
+
+                {experiencias.length > 0 ? (
+                  <div>
+                    {experiencias.filter(e => e.diff === 0).map((e,i) => (
+                      <div key={i} style={{background:"#FEE2E2",border:`2px solid ${C.danger}`,borderRadius:9,padding:"10px 14px",marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                          <div>
+                            <div style={{fontWeight:800,color:C.danger,fontSize:13}}>{e.nome}</div>
+                            {e.funcao && <div style={{fontSize:10,color:"#991B1B",marginTop:1}}>{e.funcao}</div>}
+                          </div>
+                          <div style={{background:C.danger,color:"#fff",borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:800,whiteSpace:"nowrap"}}>🔔 Vence hoje</div>
+                        </div>
+                        <div style={{fontSize:11,color:"#7F1D1D",marginTop:6}}>Experiência de <strong>{e.tipo}</strong> · {fmtDate(e.iso)}</div>
+                      </div>
+                    ))}
+
+                    {experiencias.filter(e => e.diff > 0 && e.diff <= 7).length > 0 && (
+                      <div style={{marginBottom:10}}>
+                        <div style={{fontSize:11,fontWeight:700,color:C.amber,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>⚠️ Próximos 7 dias</div>
+                        {experiencias.filter(e => e.diff > 0 && e.diff <= 7).map((e,i) => (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                            <div style={{background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:6,padding:"3px 8px",fontSize:10,fontWeight:800,color:C.amber,flexShrink:0}}>{e.tipo}</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:12,color:C.text}}>{e.nome}</div>
+                              {e.funcao && <div style={{fontSize:10,color:C.muted}}>{e.funcao}</div>}
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{fontSize:11,fontWeight:800,color:C.amber}}>Em {e.diff} dia{e.diff>1?"s":""}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{fmtDate(e.iso)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {experiencias.filter(e => e.diff > 7).length > 0 && (
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Próximos 30 dias</div>
+                        {experiencias.filter(e => e.diff > 7).map((e,i) => (
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                            <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:6,padding:"3px 7px",fontSize:10,fontWeight:700,color:C.muted,flexShrink:0}}>{e.tipo}</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:600,fontSize:12,color:C.text}}>{e.nome}</div>
+                              {e.funcao && <div style={{fontSize:10,color:C.muted}}>{e.funcao}</div>}
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{fontSize:11,color:C.muted}}>Em {e.diff} dias</div>
+                              <div style={{fontSize:10,color:C.muted}}>{fmtDate(e.iso)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"24px 0"}}>
+                    {colabAPI.length === 0
+                      ? "Sem colaboradores carregados."
+                      : "Nenhum período de experiência vencendo nos próximos 30 dias."
+                    }
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ---- ATESTADOS ---- */}
+            <div style={s.card}>
+              <div style={s.cardTitle}>🏥 Atestados em Andamento</div>
+
+              {atestadosAtivos.length > 0 ? (
+                <div>
+                  {atestadosAtivos.filter(a => a.diffRetorno === 0).length > 0 && (
+                    <div style={{marginBottom:16}}>
+                      <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>✅ Retorno esperado HOJE — confirmar presença!</div>
+                      {atestadosAtivos.filter(a => a.diffRetorno === 0).map((a,i) => (
+                        <div key={i} style={{background:"#E8F5EE",border:`2px solid ${C.green}`,borderRadius:10,padding:"12px 16px",marginBottom:6,display:"flex",alignItems:"center",gap:14}}>
+                          <div style={{fontSize:32,lineHeight:1}}>🔔</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:800,color:C.pri,fontSize:14}}>{a.nome}</div>
+                            {a.funcao && <div style={{fontSize:11,color:C.muted,marginTop:1}}>{a.funcao}</div>}
+                            <div style={{fontSize:11,color:C.muted,marginTop:4}}>Atestado de <strong>{fmtDate(a.inicio)}</strong> a <strong>{fmtDate(a.fim)}</strong></div>
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <div style={{fontWeight:800,color:C.green,fontSize:13}}>Retorna hoje</div>
+                            <div style={{fontSize:11,color:C.muted}}>{fmtDate(a.retornoISO)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {atestadosAtivos.filter(a => a.diffRetorno > 0).length > 0 && (
+                    <div style={{marginBottom:16}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.amber,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>🏥 Afastados no momento</div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:10}}>
+                        {atestadosAtivos.filter(a => a.diffRetorno > 0).map((a,i) => (
+                          <div key={i} style={{background:C.amberBg,border:`1.5px solid ${C.amber}50`,borderRadius:9,padding:"11px 14px"}}>
+                            <div style={{fontWeight:700,color:C.pri,fontSize:13,marginBottom:1}}>{a.nome}</div>
+                            {a.funcao && <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{a.funcao}</div>}
+                            <div style={{fontSize:11,color:C.muted}}>Afastado desde <strong>{fmtDate(a.inicio)}</strong></div>
+                            <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.amber}30`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div style={{fontSize:10,color:C.muted}}>Retorno previsto</div>
+                              <div>
+                                <div style={{fontWeight:800,color:C.amber,fontSize:12,textAlign:"right"}}>{fmtDate(a.retornoISO)}</div>
+                                <div style={{fontSize:10,color:C.muted,textAlign:"right"}}>em {a.diffRetorno} dia{a.diffRetorno>1?"s":""}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {atestadosAtivos.filter(a => a.diffRetorno < 0).length > 0 && (
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Retornaram recentemente</div>
+                      {atestadosAtivos.filter(a => a.diffRetorno < 0).map((a,i) => (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"7px 0",borderBottom:`1px solid ${C.border}`,opacity:0.65}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:600,fontSize:12,color:C.text}}>{a.nome}</div>
+                            {a.funcao && <div style={{fontSize:10,color:C.muted}}>{a.funcao}</div>}
+                          </div>
+                          <div style={{textAlign:"right",fontSize:11,color:C.muted}}>
+                            <div>Retornou em {fmtDate(a.retornoISO)}</div>
+                            <div style={{fontSize:10}}>({Math.abs(a.diffRetorno)} dia{Math.abs(a.diffRetorno)>1?"s":""} atrás)</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"24px 0"}}>
+                  Nenhum atestado registrado no período atual.
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
       // PÁGINA DE AJUDA
       // ============================================================
       function AjudaPage() {
@@ -351,7 +672,7 @@ function doPost(e) {
       }
 
     function App(){
-      const [page,setPage]=useState("vt");
+      const [page,setPage]=useState("dashboard");
       const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
       const [responsavel,setResponsavel]=useState(()=>localStorage.getItem("rh_responsavel")||"");
       const [passagemStr,setPassagemStr]=useState(()=>localStorage.getItem("rh_passagem")||"4,30");
@@ -2010,6 +2331,7 @@ function doPost(e) {
       }
 
       const navItems=[
+        {k:"dashboard",l:"🏠 Início"},
         {k:"vt",l:"🚌 Vale Transporte"},
         {k:"folha",l:"💼 Folha de Pagto"},
         {k:"ferias",l:"🏖️ Férias"},
@@ -2035,6 +2357,7 @@ function doPost(e) {
               ))}
             </nav>
             <main style={s.main}>
+              {page==="dashboard"&&<DashboardPage/>}
               {page==="vt"&&vtPageContent}
               {page==="folha"&&<FolhaPage/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
