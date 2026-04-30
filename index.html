@@ -1776,7 +1776,7 @@ function doPost(e) {
       // ============================================================
       // MÓDULO COLABORADORES
       // ============================================================
-      function ColaboradoresPage({ empresaId, setColabAPI }) {
+      function ColaboradoresPage({ empresaId, setColabAPI, gasUrl }) {
         const [lista, setLista] = useState([]);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
@@ -1809,6 +1809,62 @@ function doPost(e) {
         };
 
         useEffect(()=>{ carregar(); },[empresaId]);
+
+        const parseDateBR = s => {
+          if(!s) return null;
+          const str = String(s).trim();
+          if(str.includes('/')) {
+            const [d,m,y] = str.split('/');
+            if(!d||!m||!y) return null;
+            return `${y.padStart(4,'0')}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+          }
+          if(str.includes('-')) return str; // já está em ISO
+          return null;
+        };
+
+        const sincronizarPlanilha = async () => {
+          const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
+          if(!url) {
+            setStatus({ok:false, msg:"❌ URL do Web App (GAS) não configurada. Acesse Vale Transporte → Salvar → Configurações do GAS."}); return;
+          }
+          setLoading(true); setStatus({ok:null, msg:"⏳ Buscando colaboradores na planilha..."});
+          try {
+            const res = await fetch(`${url}?acao=colaboradores`);
+            if(!res.ok) throw new Error(`Servidor retornou ${res.status}`);
+            const json = await res.json();
+            if(!json.ok) throw new Error(json.msg || "Resposta inválida do GAS");
+            const colab = json.colaboradores || [];
+            if(colab.length === 0) throw new Error("Nenhum colaborador encontrado na planilha");
+            setStatus({ok:null, msg:`⏳ Salvando ${colab.length} colaboradores no Supabase...`});
+            const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
+            const records = colab.map(c => {
+              const nome = (c.nome || c.NOME || "").trim();
+              const nomeKey = normNome(nome);
+              return {
+                id: `${empresaId}_${nomeKey}`,
+                empresa_id: empresaId,
+                nome,
+                nome_key: nomeKey,
+                funcao: c.funcao||null, setor: c.setor||null, cpf: c.cpf||null,
+                nascimento: parseDateBR(c.nascimento),
+                admissao: parseDateBR(c.admissao),
+                experiencia_30: parseDateBR(c.experiencia30),
+                experiencia_90: parseDateBR(c.experiencia90),
+                salario: Number(c.salario)||0, inss: Number(c.inss)||0,
+                fgts: Number(c.fgts)||0, transporte: Number(c.transporte)||0,
+                cafe_manha: Number(c.cafeManha)||0,
+                ativo: true, ultima_sync: new Date().toISOString()
+              };
+            });
+            const {error} = await _supa.from('colaboradores').upsert(records, {onConflict:'id'});
+            if(error) throw error;
+            setStatus({ok:true, msg:`✅ ${colab.length} colaboradores sincronizados com sucesso!`});
+            carregar();
+          } catch(e) {
+            setStatus({ok:false, msg:"❌ Erro ao sincronizar: " + e.message});
+          }
+          setLoading(false);
+        };
 
         const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); };
         const abrirEdicao = c => {
@@ -1921,10 +1977,11 @@ function doPost(e) {
               <div style={{fontSize:20,fontWeight:800,color:C.pri}}>👥 Colaboradores</div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={carregar} style={s.btnOutline} disabled={loading}>🔄 Atualizar</button>
+                <button onClick={sincronizarPlanilha} style={{...s.btnOutline,color:"#166534",borderColor:"#16A34A"}} disabled={loading}>📥 Sincronizar Planilha</button>
                 <button onClick={abrirNovo} style={s.btn}>+ Novo</button>
               </div>
             </div>
-            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok===true?"#DCFCE7":status.ok===false?"#FEE2E2":"#FEF9C3",color:status.ok===true?"#166534":status.ok===false?"#991B1B":"#713F12",fontSize:13,whiteSpace:"pre-line"}}>{status.msg}</div>}
             <input style={{...s.input,marginBottom:16}} placeholder="Buscar por nome ou função..." value={busca} onChange={e=>setBusca(e.target.value)}/>
             {loading?(
               <div style={{textAlign:"center",padding:40,color:C.muted}}>Carregando...</div>
@@ -3207,7 +3264,7 @@ function doPost(e) {
             </nav>
             <main style={s.main}>
               {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl} colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
-              {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI}/>}
+              {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
               {page==="vt"&&vtPageContent}
               {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
