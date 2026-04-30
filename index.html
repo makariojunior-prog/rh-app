@@ -353,11 +353,13 @@ function doPost(e) {
         const colabAPI  = dados.colabAPI;
         const marcacoes = dados.marcacoes;
 
-        const recarregar = () => setDados(lerStorage());
-
-        const buscarColaboradores = async () => {
+        const atualizar = async () => {
           const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
-          if (!url) { setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse Vale Transporte → Salvar → Configurações."}); return; }
+          if (!url) {
+            setDados(lerStorage());
+            setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse Vale Transporte → Salvar → Configurações do GAS."});
+            return;
+          }
           setLoadingColab(true);
           setBuscaStatus(null);
           try {
@@ -365,14 +367,14 @@ function doPost(e) {
             const json = await res.json();
             if (json.ok) {
               localStorage.setItem("rh_colab_api", JSON.stringify(json.colaboradores || []));
-              recarregar();
-              setBuscaStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores carregados.`});
+              setBuscaStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores atualizados.`});
             } else {
               setBuscaStatus({ok:false, msg:"Erro: " + (json.msg || "desconhecido")});
             }
           } catch(err) {
-            setBuscaStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App. Verifique se o GAS está implantado. Erro: " + err.message});
+            setBuscaStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App. Erro: " + err.message});
           } finally {
+            setDados(lerStorage());
             setLoadingColab(false);
           }
         };
@@ -480,12 +482,9 @@ function doPost(e) {
               </div>
             </div>
 
-            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-              <button onClick={recarregar} style={{...s.btnOutline,fontSize:12,padding:"5px 12px",gap:5}}>
-                🔄 Atualizar dashboard
-              </button>
-              <button onClick={buscarColaboradores} disabled={loadingColab} style={{...s.btnAcc,fontSize:12,padding:"5px 14px",gap:5,opacity:loadingColab?0.65:1}}>
-                {loadingColab ? "⏳ Carregando..." : "👥 Carregar colaboradores"}
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+              <button onClick={atualizar} disabled={loadingColab} style={{...s.btnAcc,fontSize:12,padding:"5px 14px",gap:5,opacity:loadingColab?0.65:1}}>
+                {loadingColab ? "⏳ Atualizando..." : "🔄 Atualizar dashboard"}
               </button>
             </div>
             {buscaStatus && (
