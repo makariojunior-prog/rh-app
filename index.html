@@ -984,26 +984,12 @@ function doPost(e) {
 
       const carregarPerfil = useCallback(async (uid) => {
         try {
-          const {data,error} = await _supa.from('perfis').select('*').eq('id',uid).single();
-          if(!error && data) {
+          const {data} = await _supa.from('perfis').select('*').eq('id',uid).single();
+          if(data) {
             setPerfil(data);
             if(data.empresa_id) setEmpresaId(data.empresa_id);
           } else {
-            // Primeiro acesso: verificar se é o primeiro usuário do sistema
-            const {count} = await _supa.from('perfis').select('*',{count:'exact',head:true});
-            if(count===0){
-              // Criar perfil admin automaticamente para o primeiro usuário
-              const {data:{user}} = await _supa.auth.getUser();
-              await _supa.from('perfis').insert({
-                id:uid, nome:user.email.split('@')[0], email:user.email,
-                empresa_id:'cantina', role:'admin',
-                paginas:['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist']
-              });
-              const {data:novoP} = await _supa.from('perfis').select('*').eq('id',uid).single();
-              if(novoP) setPerfil(novoP);
-            } else {
-              setPerfil(null);
-            }
+            setPerfil(null);
           }
         } catch(e) {
           setPerfil(null);
