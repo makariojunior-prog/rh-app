@@ -2016,22 +2016,33 @@ function doPost(e) {
           if(!form.nome.trim()||!form.email.trim()||!form.senha.trim()){
             setStatus({ok:false,msg:'Preencha nome, email e senha.'}); return;
           }
+          if(form.senha.length < 6){
+            setStatus({ok:false,msg:'A senha deve ter pelo menos 6 caracteres.'}); return;
+          }
           setLoading(true); setStatus(null);
           try {
-            const tmpCliente = supabase.createClient(SUPA_URL, SUPA_KEY,
-              {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-            const {data:{user},error:signUpErr} = await tmpCliente.auth.signUp({email:form.email.trim(),password:form.senha});
-            if(signUpErr) throw signUpErr;
-            const pagsFinal = form.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : form.paginas;
-            const {error:perfilErr} = await _supa.from('perfis').insert({
-              id:user.id, nome:form.nome.trim(), email:form.email.trim(),
-              empresa_id:empresaId, role:form.role, paginas:pagsFinal
+            // Cliente isolado: não afeta a sessão do admin
+            const tmpCliente = supabase.createClient(SUPA_URL, SUPA_KEY, {
+              auth: {
+                persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+                storage: { getItem:()=>null, setItem:()=>{}, removeItem:()=>{} }
+              }
             });
-            if(perfilErr) throw perfilErr;
-            setStatus({ok:true,msg:`✅ Acesso criado! Compartilhe: Email: ${form.email} · Senha: ${form.senha}`});
+            const {data, error: signUpErr} = await tmpCliente.auth.signUp({
+              email: form.email.trim(), password: form.senha
+            });
+            if(signUpErr) throw new Error('Erro ao criar conta: ' + signUpErr.message);
+            if(!data?.user) throw new Error('Este email já está cadastrado no sistema. Use um email diferente.');
+            const pagsFinal = form.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : form.paginas;
+            const {error: perfilErr} = await _supa.from('perfis').insert({
+              id: data.user.id, nome: form.nome.trim(), email: form.email.trim(),
+              empresa_id: empresaId, role: form.role, paginas: pagsFinal
+            });
+            if(perfilErr) throw new Error('Conta criada, mas erro ao salvar permissões: ' + perfilErr.message);
+            setStatus({ok:true, msg:`✅ Acesso criado!\n📧 Email: ${form.email}\n🔑 Senha: ${form.senha}`});
             setCriando(false); setForm(FORM_VAZIO); carregar();
           } catch(e) {
-            setStatus({ok:false,msg:'❌ Erro: '+e.message});
+            setStatus({ok:false, msg:'❌ ' + e.message});
           }
           setLoading(false);
         };
