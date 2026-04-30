@@ -126,48 +126,139 @@
     };
 
     const GAS_SCRIPT = `// ============================================================
-// Cole esta função no Apps Script da planilha RH
-// e publique como Web App (Executar como: Eu,
-// Quem tem acesso: Qualquer pessoa)
+// Google Apps Script — Planilha RH · Cantina em Casa / Lumar
+// Cole no editor de Apps Script e publique como Web App:
+//   Executar como: Eu
+//   Quem tem acesso: Qualquer pessoa
 // ============================================================
+
+var SHEET_ID = '1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU';
+var TZ = 'America/Sao_Paulo';
+
+function _resp(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Formata datas para ISO (YYYY-MM-DD) — usado em experiência, admissão
+function _fmtISO(val) {
+  if (!val) return '';
+  if (val instanceof Date) return Utilities.formatDate(val, TZ, 'yyyy-MM-dd');
+  var s = String(val).trim();
+  if (/^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(s)) { var p=s.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
+  return s;
+}
+
+// Formata nascimento para DD/MM/AAAA — legível no dashboard
+function _fmtNasc(val) {
+  if (!val) return '';
+  if (val instanceof Date) return Utilities.formatDate(val, TZ, 'dd/MM/yyyy');
+  var s = String(val).trim();
+  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) { var p=s.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+  return s;
+}
+
+// ---- GET: busca colaboradores + atestados ----
+function doGet(e) {
+  if (e.parameter.acao !== 'folha_dados') return _resp({ok:false, msg:'Ação desconhecida'});
+  try {
+    var ini = e.parameter.ini || '';
+    var fim = e.parameter.fim || '';
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+
+    // Colaboradores (aba COLABORADORES)
+    var abaC = ss.getSheetByName('COLABORADORES');
+    if (!abaC) return _resp({ok:false, msg:'Aba COLABORADORES não encontrada'});
+    var rows = abaC.getDataRange().getValues();
+    var hdr = rows[0].map(function(h){ return String(h).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim(); });
+
+    function ci(n){ var i=hdr.indexOf(n); return i>=0?i:-1; }
+    function rv(r){ return [].slice.call(arguments,1).reduce(function(v,n){ return v!==''?v:(ci(n)>=0?String(r[ci(n)]||'').trim():''); },''); }
+
+    var colaboradores = [];
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      var nome = String(r[0]||'').trim();
+      if (!nome) continue;
+      colaboradores.push({
+        nome:          nome,
+        funcao:        rv(r,'funcao','funcao','func'),
+        setor:         rv(r,'setor'),
+        admissao:      _fmtISO(r[ci('admissao')] !== undefined && ci('admissao')>=0 ? r[ci('admissao')] : ''),
+        salario:       Number(ci('salario')>=0 ? r[ci('salario')] : 0) || 0,
+        transporte:    Number(ci('transporte')>=0 ? r[ci('transporte')] : 0) || 0,
+        experiencia30: _fmtISO(ci('experiencia30')>=0 ? r[ci('experiencia30')] : (ci('exp 30')>=0?r[ci('exp 30')]:'') ),
+        experiencia90: _fmtISO(ci('experiencia90')>=0 ? r[ci('experiencia90')] : (ci('exp 90')>=0?r[ci('exp 90')]:'') ),
+        nascimento:    _fmtNasc(r[13])   // Coluna N (índice 13)
+      });
+    }
+
+    // Atestados (aba ATESTADOS, se existir)
+    var atestados = [];
+    var abaAt = ss.getSheetByName('ATESTADOS');
+    if (abaAt) {
+      var atRows = abaAt.getDataRange().getValues();
+      var atHdr  = atRows[0].map(function(h){ return String(h).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').trim(); });
+      var aiN = atHdr.indexOf('nome');
+      var aiI = atHdr.indexOf('inicio') >= 0 ? atHdr.indexOf('inicio') : atHdr.indexOf('data inicio');
+      var aiF = atHdr.indexOf('fim')    >= 0 ? atHdr.indexOf('fim')    : atHdr.indexOf('data fim');
+      for (var j = 1; j < atRows.length; j++) {
+        var ar = atRows[j];
+        if (aiN < 0 || !ar[aiN]) continue;
+        var iniISO = _fmtISO(aiI>=0 ? ar[aiI] : '');
+        var fimISO = _fmtISO(aiF>=0 ? ar[aiF] : '');
+        if (!iniISO || !fimISO) continue;
+        if (fimISO >= ini && iniISO <= fim) {
+          atestados.push({ nome: String(ar[aiN]).trim(), inicio: iniISO, fim: fimISO });
+        }
+      }
+    }
+
+    return _resp({ ok: true, colaboradores: colaboradores, atestados: atestados });
+  } catch(err) {
+    return _resp({ok: false, msg: err.message});
+  }
+}
+
+// ---- POST: salva VT ou Folha ----
 function doPost(e) {
   try {
     var dados = JSON.parse(e.postData.contents);
-    var ss = SpreadsheetApp.openById('1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU');
-    var aba = ss.getSheetByName('VT');
-    if (!aba) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ok:false,msg:'Aba VT não encontrada'}))
-        .setMimeType(ContentService.MimeType.JSON);
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var reg = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm');
+
+    if (dados.tipo === 'folha') {
+      var nomAba = 'FOLHA' + (dados.ano || new Date().getFullYear());
+      var aba = ss.getSheetByName(nomAba) || ss.insertSheet(nomAba);
+      if (aba.getLastRow() === 0) {
+        aba.appendRow(['Período','Colaborador','Função','Dias Trab.','Faltas','Atestados',
+          'Férias','H.Extras','DSR Perd.','Caju Dias','Caju R$','Produtos R$','Adiant. R$',
+          'Total Desc. R$','Banco Horas','Dias Faltas','Registrado em']);
+      }
+      dados.folha.forEach(function(r) {
+        aba.appendRow([dados.periodo, r.nome, r.funcao, r.diasTrabalhados, r.faltas,
+          r.atestados, r.ferias, r.horasExtras, r.dsrPerdidos, r.cajuDias,
+          r.cajuValor, r.produtos, r.adiantamento, r.totalDesconto,
+          r.bancoHoras ? 'Sim' : 'Não', (r.diasFaltas||[]).join(' | '), reg]);
+      });
+      return _resp({ok:true, msg:'Folha salva com sucesso.'});
     }
-    // Cria cabeçalho se a aba estiver vazia
-    if (aba.getLastRow() === 0) {
-      aba.appendRow([
-        'Semana Início','Semana Fim','Colaborador','Escala',
-        'Dias Trabalhados','Passagens','Valor Calculado','Valor Pago',
-        'Afastado','Registrado em'
-      ]);
+
+    // VT
+    var abaVT = ss.getSheetByName('VT');
+    if (!abaVT) return _resp({ok:false, msg:'Aba VT não encontrada'});
+    if (abaVT.getLastRow() === 0) {
+      abaVT.appendRow(['Semana Início','Semana Fim','Colaborador','Escala',
+        'Dias Trabalhados','Passagens','Valor Calculado','Valor Pago','Afastado','Registrado em']);
     }
-    var registrado = Utilities.formatDate(
-      new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm'
-    );
     dados.employees.forEach(function(emp) {
-      aba.appendRow([
-        dados.semanaIni, dados.semanaFim,
-        emp.nome, emp.escala,
-        emp.diasTrabalhados, emp.diasTrabalhados * 2,
-        emp.valorCalculado, emp.valorPago,
-        emp.afastado ? 'Sim' : 'Não',
-        registrado
-      ]);
+      abaVT.appendRow([dados.semanaIni, dados.semanaFim, emp.nome, emp.escala,
+        emp.diasTrabalhados, emp.diasTrabalhados * 2, emp.valorCalculado,
+        emp.valorPago, emp.afastado ? 'Sim' : 'Não', reg]);
     });
-    return ContentService
-      .createTextOutput(JSON.stringify({ok:true,msg:'Salvo com sucesso'}))
-      .setMimeType(ContentService.MimeType.JSON);
+    return _resp({ok:true, msg:'VT salvo com sucesso.'});
   } catch(err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ok:false,msg:err.message}))
-      .setMimeType(ContentService.MimeType.JSON);
+    return _resp({ok:false, msg: err.message});
   }
 }`;
 
@@ -185,13 +276,15 @@ function doPost(e) {
         const parseISODate = iso => { if (!iso) return null; const [y,m,d] = iso.split("-"); return new Date(+y, +m-1, +d, 12, 0, 0); };
         const diffDias = dt => dt ? Math.round((dt - hoje) / 86400000) : null;
         const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+        const MESES_FULL = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
         // ====== ANIVERSARIANTES ======
-        const getNasc = c => c.nascimento || c["DATA NASCIMENTO"] || c.dataNascimento || c["NASCIMENTO"] || c["DT_NASCIMENTO"] || c["DT NASCIMENTO"] || "";
+        // nascimento vem como DD/MM/AAAA do GAS (coluna N)
+        const getNasc = c => (c.nascimento || "").trim();
         const temCampoNasc = colabAPI.some(c => getNasc(c));
 
         const aniversariantes = colabAPI.map(c => {
-          const nasc = getNasc(c).trim();
+          const nasc = getNasc(c);
           if (!nasc) return null;
           let dia, mes;
           if (nasc.includes("/")) { const p = nasc.split("/"); dia = +p[0]; mes = +p[1]; }
@@ -204,9 +297,18 @@ function doPost(e) {
           return { nome: c.nome || c.NOME || "", funcao: c.funcao || "", dia, mes, diff };
         }).filter(Boolean).sort((a,b) => a.diff - b.diff);
 
-        const anivHoje = aniversariantes.filter(a => a.diff === 0);
-        const anivSemana = aniversariantes.filter(a => a.diff > 0 && a.diff <= 6);
-        const anivProxSemana = aniversariantes.filter(a => a.diff >= 7 && a.diff <= 13);
+        // Limites de semana: usa domingo como fim de semana
+        const dow = hoje.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+        const diasAteSunday = dow === 0 ? 0 : 7 - dow;       // dias até o domingo desta semana
+        const fimProxSemana = diasAteSunday + 7;              // domingo da próxima semana
+        const mesAtual = hoje.getMonth() + 1;
+        const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 12, 0, 0);
+        const diasAteFimMes = Math.round((ultimoDiaMes - hoje) / 86400000);
+
+        const anivHoje       = aniversariantes.filter(a => a.diff === 0);
+        const anivEstaSemana = aniversariantes.filter(a => a.diff > 0 && a.diff <= diasAteSunday);
+        const anivProxSemana = aniversariantes.filter(a => a.diff > diasAteSunday && a.diff <= fimProxSemana);
+        const anivDoMes      = aniversariantes.filter(a => a.mes === mesAtual && a.diff > fimProxSemana && a.diff <= diasAteFimMes);
 
         // ====== EXPERIÊNCIAS ======
         const experiencias = colabAPI.flatMap(c => {
@@ -283,7 +385,7 @@ function doPost(e) {
 
               {/* ---- ANIVERSARIANTES ---- */}
               <div style={s.card}>
-                <div style={s.cardTitle}>🎂 Aniversariantes</div>
+                <div style={s.cardTitle}>🎂 Aniversariantes — {MESES_FULL[mesAtual-1]}</div>
 
                 {anivHoje.length > 0 && (
                   <div style={{marginBottom:14}}>
@@ -300,14 +402,14 @@ function doPost(e) {
                   </div>
                 )}
 
-                {anivSemana.length > 0 && (
-                  <div style={{marginBottom:10}}>
-                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Esta semana</div>
-                    {anivSemana.map((a,i) => (
+                {anivEstaSemana.length > 0 && (
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.pri,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>Esta semana</div>
+                    {anivEstaSemana.map((a,i) => (
                       <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
-                        <div style={{width:38,height:38,borderRadius:8,background:C.rowAlt,border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          <div style={{fontSize:14,fontWeight:800,color:C.pri,lineHeight:1}}>{a.dia}</div>
-                          <div style={{fontSize:9,color:C.muted,fontWeight:700}}>{MESES[a.mes-1]}</div>
+                        <div style={{width:38,height:38,borderRadius:8,background:"#FFF8E7",border:`1px solid ${C.amber}40`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <div style={{fontSize:14,fontWeight:800,color:C.amber,lineHeight:1}}>{a.dia}</div>
+                          <div style={{fontSize:9,color:C.amber,fontWeight:700}}>{MESES[a.mes-1]}</div>
                         </div>
                         <div style={{flex:1}}>
                           <div style={{fontWeight:700,fontSize:12,color:C.text}}>{a.nome}</div>
@@ -320,12 +422,12 @@ function doPost(e) {
                 )}
 
                 {anivProxSemana.length > 0 && (
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Próxima semana</div>
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>Próxima semana</div>
                     {anivProxSemana.map((a,i) => (
-                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${C.border}`,opacity:0.8}}>
-                        <div style={{width:36,height:36,borderRadius:7,background:"#F3F4F6",border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          <div style={{fontSize:13,fontWeight:800,color:C.muted,lineHeight:1}}>{a.dia}</div>
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                        <div style={{width:36,height:36,borderRadius:7,background:C.rowAlt,border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:800,color:C.pri,lineHeight:1}}>{a.dia}</div>
                           <div style={{fontSize:9,color:C.muted,fontWeight:700}}>{MESES[a.mes-1]}</div>
                         </div>
                         <div style={{flex:1}}>
@@ -338,11 +440,30 @@ function doPost(e) {
                   </div>
                 )}
 
-                {anivHoje.length === 0 && anivSemana.length === 0 && anivProxSemana.length === 0 && (
+                {anivDoMes.length > 0 && (
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>Resto do mês</div>
+                    {anivDoMes.map((a,i) => (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.border}`,opacity:0.75}}>
+                        <div style={{width:34,height:34,borderRadius:6,background:"#F3F4F6",border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <div style={{fontSize:12,fontWeight:800,color:C.muted,lineHeight:1}}>{a.dia}</div>
+                          <div style={{fontSize:9,color:C.muted,fontWeight:700}}>{MESES[a.mes-1]}</div>
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:600,fontSize:12,color:C.text}}>{a.nome}</div>
+                          {a.funcao && <div style={{fontSize:10,color:C.muted}}>{a.funcao}</div>}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted,whiteSpace:"nowrap"}}>Dia {a.dia}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {anivHoje.length === 0 && anivEstaSemana.length === 0 && anivProxSemana.length === 0 && anivDoMes.length === 0 && (
                   <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"24px 0",lineHeight:1.8}}>
                     {!temCampoNasc && colabAPI.length > 0
-                      ? <span>Sem campo de nascimento na planilha.<br/><span style={{fontSize:11}}>Adicione uma coluna <code>nascimento</code> (DD/MM/AAAA).</span></span>
-                      : "Nenhum aniversariante nos próximos 14 dias."
+                      ? <span>Coluna <code>nascimento</code> não encontrada na planilha.<br/><span style={{fontSize:11}}>Verifique se o GAS está atualizado e reimplantado.</span></span>
+                      : "Nenhum aniversariante este mês."
                     }
                   </div>
                 )}
@@ -1761,6 +1882,7 @@ function doPost(e) {
               experiencia30: c.experiencia30 || "",
               experiencia90: c.experiencia90 || "",
               admissao: c.admissao || "",
+              nascimento: c.nascimento || "",
               fonteCadastro: true, fonteCSV: false, dadosCSV: null
             });
           });
