@@ -4,10 +4,9 @@
   <meta charset="UTF-8" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
-    const _supa = supabase.createClient(
-      'https://taicaxtjtikdajmhtsxc.supabase.co',
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhaWNheHRqdGlrZGFqbWh0c3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjgwNzcsImV4cCI6MjA5MzAwNDA3N30.G923g-1cmjrQZi7EoOcZcP1PieO9AKmk4mMMUgT4hbE'
-    );
+    const SUPA_URL = 'https://taicaxtjtikdajmhtsxc.supabase.co';
+    const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhaWNheHRqdGlrZGFqbWh0c3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjgwNzcsImV4cCI6MjA5MzAwNDA3N30.G923g-1cmjrQZi7EoOcZcP1PieO9AKmk4mMMUgT4hbE';
+    const _supa = supabase.createClient(SUPA_URL, SUPA_KEY);
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RH · Cantina em Casa / Lumar</title>
@@ -953,6 +952,9 @@ function doPost(e) {
       const [copiedCsv,setCopiedCsv]=useState(false);
       const [colabAPI,setColabAPI]=useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
       const [empresaId,setEmpresaId]=useState(()=>localStorage.getItem("rh_empresa_id")||"cantina");
+      const [usuario, setUsuario] = useState(null);
+      const [perfil, setPerfil] = useState(null);
+      const [loadingAuth, setLoadingAuth] = useState(true);
 
       useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
       useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
@@ -979,6 +981,47 @@ function doPost(e) {
         }
         _carregarColab();
       },[empresaId]);
+
+      const carregarPerfil = useCallback(async (uid) => {
+        try {
+          const {data,error} = await _supa.from('perfis').select('*').eq('id',uid).single();
+          if(!error && data) {
+            setPerfil(data);
+            if(data.empresa_id) setEmpresaId(data.empresa_id);
+          } else {
+            // Primeiro acesso: verificar se é o primeiro usuário do sistema
+            const {count} = await _supa.from('perfis').select('*',{count:'exact',head:true});
+            if(count===0){
+              // Criar perfil admin automaticamente para o primeiro usuário
+              const {data:{user}} = await _supa.auth.getUser();
+              await _supa.from('perfis').insert({
+                id:uid, nome:user.email.split('@')[0], email:user.email,
+                empresa_id:'cantina', role:'admin',
+                paginas:['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist']
+              });
+              const {data:novoP} = await _supa.from('perfis').select('*').eq('id',uid).single();
+              if(novoP) setPerfil(novoP);
+            } else {
+              setPerfil(null);
+            }
+          }
+        } catch(e) {
+          setPerfil(null);
+        }
+        setLoadingAuth(false);
+      },[]);
+
+      useEffect(()=>{
+        _supa.auth.getSession().then(({data:{session}})=>{
+          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
+          else setLoadingAuth(false);
+        });
+        const {data:{subscription}} = _supa.auth.onAuthStateChange((event,session)=>{
+          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
+          else { setUsuario(null); setPerfil(null); setLoadingAuth(false); }
+        });
+        return ()=>subscription.unsubscribe();
+      },[]);
 
       const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
 
@@ -1701,6 +1744,50 @@ function doPost(e) {
       );
 
       // ============================================================
+      // LOGIN
+      // ============================================================
+      function LoginPage() {
+        const [email, setEmail] = useState('');
+        const [senha, setSenha] = useState('');
+        const [loading, setLoading] = useState(false);
+        const [erro, setErro] = useState(null);
+
+        const entrar = async () => {
+          if(!email.trim()||!senha.trim()){ setErro('Preencha email e senha.'); return; }
+          setLoading(true); setErro(null);
+          const {error} = await _supa.auth.signInWithPassword({email:email.trim(), password:senha});
+          if(error) setErro('Email ou senha incorretos.');
+          setLoading(false);
+        };
+
+        return (
+          <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div style={{background:C.card,borderRadius:16,padding:'40px 44px',width:380,boxShadow:'0 8px 32px rgba(0,0,0,0.12)',border:`1px solid ${C.border}`}}>
+              <div style={{textAlign:'center',marginBottom:32}}>
+                <div style={{fontSize:32,marginBottom:8}}>🏠</div>
+                <div style={{fontSize:22,fontWeight:800,color:C.pri,marginBottom:4}}>RH · Cantina em Casa</div>
+                <div style={{fontSize:13,color:C.muted}}>Lumar Alimentos</div>
+              </div>
+              {erro && <div style={{background:'#FEE2E2',color:'#991B1B',borderRadius:8,padding:'10px 14px',fontSize:13,marginBottom:16}}>{erro}</div>}
+              <div style={{marginBottom:14}}>
+                <label style={s.label}>Email</label>
+                <input style={s.input} type="email" placeholder="seu@email.com" value={email}
+                  onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()} autoFocus/>
+              </div>
+              <div style={{marginBottom:24}}>
+                <label style={s.label}>Senha</label>
+                <input style={s.input} type="password" placeholder="••••••••" value={senha}
+                  onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()}/>
+              </div>
+              <button onClick={entrar} disabled={loading} style={{...s.btn,width:'100%',justifyContent:'center',padding:'11px',fontSize:14}}>
+                {loading ? 'Entrando...' : 'Entrar'}
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
       // MÓDULO COLABORADORES
       // ============================================================
       function ColaboradoresPage({ empresaId, setColabAPI }) {
@@ -1723,10 +1810,16 @@ function doPost(e) {
         });
 
         const carregar = async () => {
-          setLoading(true);
-          const {data,error} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
-          if(!error){ setLista(data||[]); setColabAPI((data||[]).map(mapearParaApp)); }
-          setLoading(false);
+          setLoading(true); setStatus(null);
+          try {
+            const {data,error} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
+            if(error) throw error;
+            setLista(data||[]); setColabAPI((data||[]).map(mapearParaApp));
+          } catch(e) {
+            setStatus({ok:false, msg:'❌ Erro ao carregar: '+e.message});
+          } finally {
+            setLoading(false);
+          }
         };
 
         useEffect(()=>{ carregar(); },[empresaId]);
@@ -1887,6 +1980,246 @@ function doPost(e) {
               </div>
             )}
             <div style={{fontSize:12,color:C.muted,marginTop:4}}>{lista.length} colaborador{lista.length!==1?"es":""} ativo{lista.length!==1?"s":""}</div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MÓDULO ACESSOS (admin only)
+      // ============================================================
+      function AcessosPage({ perfil: adminPerfil, empresaId }) {
+        const TODAS_PAGINAS = [
+          {k:'dashboard',  l:'🏠 Início'},
+          {k:'colaboradores', l:'👥 Colaboradores'},
+          {k:'vt',         l:'🚌 Vale Transporte'},
+          {k:'folha',      l:'💼 Folha de Pagamento'},
+          {k:'ferias',     l:'🏖️ Férias'},
+          {k:'atestados',  l:'🏥 Atestados'},
+          {k:'ponto_hist', l:'📊 Histórico Ponto'},
+        ];
+
+        const [lista, setLista] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [status, setStatus] = useState(null);
+        const [criando, setCriando] = useState(false);
+        const [editando, setEditando] = useState(null);
+        const [form, setForm] = useState({});
+
+        const FORM_VAZIO = {nome:'',email:'',senha:'',role:'usuario',paginas:['dashboard']};
+
+        const carregar = async () => {
+          setLoading(true);
+          try {
+            const {data,error} = await _supa.from('perfis').select('*').eq('empresa_id',empresaId).order('nome');
+            if(error) throw error;
+            setLista(data||[]);
+          } catch(e) {
+            setStatus({ok:false,msg:'❌ Erro: '+e.message});
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        useEffect(()=>{ carregar(); },[]);
+
+        const togglePagina = (k) => {
+          setForm(p=>({...p,paginas: p.paginas.includes(k) ? p.paginas.filter(x=>x!==k) : [...p.paginas,k]}));
+        };
+
+        const criarAcesso = async () => {
+          if(!form.nome.trim()||!form.email.trim()||!form.senha.trim()){
+            setStatus({ok:false,msg:'Preencha nome, email e senha.'}); return;
+          }
+          setLoading(true); setStatus(null);
+          try {
+            const tmpCliente = supabase.createClient(SUPA_URL, SUPA_KEY,
+              {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+            const {data:{user},error:signUpErr} = await tmpCliente.auth.signUp({email:form.email.trim(),password:form.senha});
+            if(signUpErr) throw signUpErr;
+            const pagsFinal = form.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : form.paginas;
+            const {error:perfilErr} = await _supa.from('perfis').insert({
+              id:user.id, nome:form.nome.trim(), email:form.email.trim(),
+              empresa_id:empresaId, role:form.role, paginas:pagsFinal
+            });
+            if(perfilErr) throw perfilErr;
+            setStatus({ok:true,msg:`✅ Acesso criado! Compartilhe: Email: ${form.email} · Senha: ${form.senha}`});
+            setCriando(false); setForm(FORM_VAZIO); carregar();
+          } catch(e) {
+            setStatus({ok:false,msg:'❌ Erro: '+e.message});
+          }
+          setLoading(false);
+        };
+
+        const salvarEdicao = async () => {
+          setLoading(true); setStatus(null);
+          try {
+            const pagsFinal = editando.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : editando.paginas;
+            const {error} = await _supa.from('perfis').update({
+              nome:editando.nome, role:editando.role, paginas:pagsFinal
+            }).eq('id',editando.id);
+            if(error) throw error;
+            setStatus({ok:true,msg:'✅ Permissões atualizadas.'});
+            setEditando(null); carregar();
+          } catch(e) {
+            setStatus({ok:false,msg:'❌ Erro: '+e.message});
+          }
+          setLoading(false);
+        };
+
+        const removerAcesso = async (p) => {
+          if(!window.confirm(`Remover acesso de "${p.nome}"?`)) return;
+          setLoading(true);
+          const {error} = await _supa.from('perfis').delete().eq('id',p.id);
+          if(!error){ setStatus({ok:true,msg:`✅ Acesso de ${p.nome} removido.`}); carregar(); }
+          else setStatus({ok:false,msg:'❌ Erro: '+error.message});
+          setLoading(false);
+        };
+
+        const CheckPaginas = ({paginas, onChange}) => (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginTop:6}}>
+            {TODAS_PAGINAS.map(p=>(
+              <label key={p.k} style={{display:'flex',alignItems:'center',gap:7,fontSize:13,cursor:'pointer',padding:'5px 8px',borderRadius:6,background:paginas.includes(p.k)?'#EDE9E1':'transparent'}}>
+                <input type="checkbox" checked={paginas.includes(p.k)} onChange={()=>onChange(p.k)} style={{cursor:'pointer'}}/>
+                {p.l}
+              </label>
+            ))}
+          </div>
+        );
+
+        if(editando) return (
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+              <button onClick={()=>setEditando(null)} style={s.btnOutline}>← Voltar</button>
+              <div style={{fontSize:18,fontWeight:800,color:C.pri}}>✏️ Editar Acesso: {editando.nome}</div>
+            </div>
+            {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13}}>{status.msg}</div>}
+            <div style={s.card}>
+              <div style={{marginBottom:14}}>
+                <label style={s.label}>Nome</label>
+                <input style={s.input} value={editando.nome} onChange={e=>setEditando(p=>({...p,nome:e.target.value}))}/>
+              </div>
+              <div style={{marginBottom:16}}>
+                <label style={s.label}>Perfil de acesso</label>
+                <div style={{display:'flex',gap:10,marginTop:6}}>
+                  {['admin','usuario'].map(r=>(
+                    <label key={r} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer',padding:'7px 14px',borderRadius:7,border:`1.5px solid ${editando.role===r?C.pri:C.border}`,background:editando.role===r?'#EDE9E1':'transparent',fontWeight:editando.role===r?700:400}}>
+                      <input type="radio" name="role_edit" checked={editando.role===r} onChange={()=>setEditando(p=>({...p,role:r}))} style={{cursor:'pointer'}}/>
+                      {r==='admin'?'👑 Administrador':'👤 Usuário'}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {editando.role==='usuario'&&(
+                <div style={{marginBottom:16}}>
+                  <label style={s.label}>Páginas permitidas</label>
+                  <CheckPaginas paginas={editando.paginas||[]} onChange={k=>setEditando(p=>({...p,paginas:p.paginas.includes(k)?p.paginas.filter(x=>x!==k):[...p.paginas,k]}))}/>
+                </div>
+              )}
+              {editando.role==='admin'&&<div style={{...s.infoBox,marginBottom:16}}>Administradores têm acesso a todas as páginas automaticamente.</div>}
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={salvarEdicao} style={s.btn} disabled={loading}>{loading?'Salvando...':'💾 Salvar'}</button>
+                <button onClick={()=>setEditando(null)} style={s.btnOutline}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+
+        if(criando) return (
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+              <button onClick={()=>{setCriando(false);setStatus(null);}} style={s.btnOutline}>← Voltar</button>
+              <div style={{fontSize:18,fontWeight:800,color:C.pri}}>➕ Novo Acesso</div>
+            </div>
+            {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13,wordBreak:'break-word'}}>{status.msg}</div>}
+            <div style={s.card}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Nome *</label>
+                  <input style={s.input} placeholder="Nome completo" value={form.nome} onChange={e=>setForm(p=>({...p,nome:e.target.value}))}/>
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Email *</label>
+                  <input style={s.input} type="email" placeholder="email@exemplo.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <label style={s.label}>Senha temporária *</label>
+                  <input style={s.input} placeholder="Mínimo 6 caracteres" value={form.senha} onChange={e=>setForm(p=>({...p,senha:e.target.value}))}/>
+                </div>
+              </div>
+              <div style={{marginBottom:16}}>
+                <label style={s.label}>Perfil de acesso</label>
+                <div style={{display:'flex',gap:10,marginTop:6}}>
+                  {['admin','usuario'].map(r=>(
+                    <label key={r} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer',padding:'7px 14px',borderRadius:7,border:`1.5px solid ${form.role===r?C.pri:C.border}`,background:form.role===r?'#EDE9E1':'transparent',fontWeight:form.role===r?700:400}}>
+                      <input type="radio" name="role_new" checked={form.role===r} onChange={()=>setForm(p=>({...p,role:r}))} style={{cursor:'pointer'}}/>
+                      {r==='admin'?'👑 Administrador':'👤 Usuário'}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {form.role==='usuario'&&(
+                <div style={{marginBottom:16}}>
+                  <label style={s.label}>Páginas permitidas</label>
+                  <CheckPaginas paginas={form.paginas} onChange={togglePagina}/>
+                </div>
+              )}
+              {form.role==='admin'&&<div style={{...s.infoBox,marginBottom:16}}>Administradores têm acesso a todas as páginas automaticamente.</div>}
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={criarAcesso} style={s.btn} disabled={loading}>{loading?'Criando...':'✅ Criar Acesso'}</button>
+                <button onClick={()=>{setCriando(false);setStatus(null);}} style={s.btnOutline}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+
+        return (
+          <div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🔐 Gerenciar Acessos</div>
+              <button onClick={()=>{setForm(FORM_VAZIO);setCriando(true);setStatus(null);}} style={s.btn}>+ Novo Acesso</button>
+            </div>
+            {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13,wordBreak:'break-word'}}>{status.msg}</div>}
+            {loading?(
+              <div style={{textAlign:'center',padding:40,color:C.muted}}>Carregando...</div>
+            ):(
+              <div style={s.card}>
+                {lista.length===0?(
+                  <div style={{textAlign:'center',padding:'32px 0',color:C.muted,fontSize:13}}>Nenhum usuário com acesso cadastrado.</div>
+                ):(
+                  <table style={s.table}>
+                    <thead>
+                      <tr>
+                        <th style={s.th}>Nome</th>
+                        <th style={s.th}>Email</th>
+                        <th style={s.th}>Perfil</th>
+                        <th style={s.th}>Páginas</th>
+                        <th style={s.th}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lista.map(p=>(
+                        <tr key={p.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                          <td style={{...s.td,fontWeight:600}}>{p.nome} {p.id===adminPerfil?.id&&<span style={{fontSize:10,color:C.muted}}>(você)</span>}</td>
+                          <td style={{...s.td,fontSize:12,color:C.muted}}>{p.email}</td>
+                          <td style={s.td}>
+                            <span style={{display:'inline-block',padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:p.role==='admin'?'#FEF3C7':'#DBEAFE',color:p.role==='admin'?'#92400E':'#1E40AF'}}>
+                              {p.role==='admin'?'👑 Admin':'👤 Usuário'}
+                            </span>
+                          </td>
+                          <td style={{...s.td,fontSize:12,color:C.muted,maxWidth:200}}>
+                            {p.role==='admin'?'Todas':(p.paginas||[]).length+' página(s)'}
+                          </td>
+                          <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                            <button onClick={()=>setEditando({...p})} style={{...s.btnOutline,fontSize:11,padding:'4px 10px',marginRight:6}}>✏️ Editar</button>
+                            {p.id!==adminPerfil?.id&&<button onClick={()=>removerAcesso(p)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'4px 10px',cursor:'pointer'}}>Remover</button>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
           </div>
         );
       }
@@ -2831,16 +3164,26 @@ function doPost(e) {
         );
       }
 
+      const isAdmin = perfil?.role === 'admin';
+      const paginasPermitidas = isAdmin
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','acessos','ajuda']
+        : [...(perfil?.paginas||['dashboard']),'ajuda'];
+
       const navItems=[
-        {k:"dashboard",l:"🏠 Início"},
-        {k:"colaboradores",l:"👥 Colaboradores"},
-        {k:"vt",l:"🚌 Vale Transporte"},
-        {k:"folha",l:"💼 Folha de Pagto"},
-        {k:"ferias",l:"🏖️ Férias"},
-        {k:"atestados",l:"🏥 Atestados"},
-        {k:"ponto_hist",l:"📊 Histórico Ponto"},
-        {k:"ajuda",l:"❓ Ajuda"},
-      ];
+        {k:'dashboard',l:'🏠 Início'},
+        {k:'colaboradores',l:'👥 Colaboradores'},
+        {k:'vt',l:'🚌 Vale Transporte'},
+        {k:'folha',l:'💼 Folha de Pagto'},
+        {k:'ferias',l:'🏖️ Férias'},
+        {k:'atestados',l:'🏥 Atestados'},
+        {k:'ponto_hist',l:'📊 Histórico Ponto'},
+        {k:'acessos',l:'🔐 Acessos'},
+        {k:'ajuda',l:'❓ Ajuda'},
+      ].filter(n=>paginasPermitidas.includes(n.k));
+
+      if(loadingAuth) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg,color:C.muted,fontSize:14}}>Carregando...</div>;
+      if(!usuario) return <LoginPage/>;
+      if(!perfil) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg}}><div style={{textAlign:'center'}}><div style={{fontSize:40,marginBottom:16}}>🚫</div><div style={{fontWeight:700,fontSize:16,color:C.pri,marginBottom:8}}>Acesso não autorizado</div><div style={{color:C.muted,fontSize:13,marginBottom:20}}>Seu usuário não tem um perfil configurado.<br/>Solicite ao administrador do sistema.</div><button onClick={()=>_supa.auth.signOut()} style={s.btnOutline}>Sair</button></div></div>;
 
       return(
         <div style={s.wrap}>
@@ -2849,6 +3192,13 @@ function doPost(e) {
             <div>
               <div style={{fontSize:16,fontWeight:800,letterSpacing:"-0.01em"}}>RH · Cantina em Casa / Lumar</div>
               <div style={{fontSize:11,opacity:0.65,marginTop:1}}>Sistema de Recursos Humanos</div>
+            </div>
+            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:12}}>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:12,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>{perfil?.nome}</div>
+                <div style={{fontSize:10,color:'rgba(255,255,255,0.55)'}}>{perfil?.role==='admin'?'👑 Admin':'👤 Usuário'}</div>
+              </div>
+              <button onClick={()=>_supa.auth.signOut()} style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.85)',borderRadius:7,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>Sair</button>
             </div>
           </header>
           <div style={s.body}>
@@ -2866,6 +3216,7 @@ function doPost(e) {
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
+              {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="ajuda"&&<AjudaPage/>}
             </main>
           </div>
