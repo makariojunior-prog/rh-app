@@ -345,19 +345,17 @@ function doPost(e) {
       // ============================================================
       // DASHBOARD
       // ============================================================
-      function DashboardPage({ onNavegar, gasUrl }) {
+      function DashboardPage({ onNavegar, gasUrl, colabAPI, setColabAPI }) {
         const hoje = new Date();
         hoje.setHours(12, 0, 0, 0);
 
         const lerStorage = () => ({
-          colabAPI:  (() => { try { return JSON.parse(localStorage.getItem("rh_colab_api")   || "[]"); } catch(e) { return []; } })(),
           marcacoes: (() => { try { return JSON.parse(localStorage.getItem("rh_folha_marc")  || "{}"); } catch(e) { return {}; } })(),
         });
 
         const [dados, setDados] = useState(lerStorage);
         const [loadingColab, setLoadingColab] = useState(false);
         const [buscaStatus, setBuscaStatus] = useState(null);
-        const colabAPI  = dados.colabAPI;
         const marcacoes = dados.marcacoes;
 
         const atualizar = async () => {
@@ -374,6 +372,7 @@ function doPost(e) {
             const json = await res.json();
             if (json.ok) {
               localStorage.setItem("rh_colab_api", JSON.stringify(json.colaboradores || []));
+              setColabAPI(json.colaboradores || []);
               setBuscaStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores atualizados.`});
             } else {
               setBuscaStatus({ok:false, msg:"Erro: " + (json.msg || "desconhecido")});
@@ -598,7 +597,7 @@ function doPost(e) {
                           <code style={{fontSize:11}}>{colabAPI.length > 0 ? Object.keys(colabAPI[0]).join(", ") : "—"}</code>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <button onClick={recarregar} style={{...s.btn,fontSize:12,padding:"6px 14px"}}>🔄 Atualizar dados</button>
+                          <button onClick={atualizar} style={{...s.btn,fontSize:12,padding:"6px 14px"}}>🔄 Atualizar dados</button>
                           {onNavegar && <button onClick={()=>onNavegar("folha")} style={{...s.btnOutline,fontSize:12,padding:"6px 14px"}}>Ir para Folha e recarregar →</button>}
                         </div>
                       </div>
@@ -952,6 +951,8 @@ function doPost(e) {
       const [gasStatus,setGasStatus]=useState(null);
       const [copiedScript,setCopiedScript]=useState(false);
       const [copiedCsv,setCopiedCsv]=useState(false);
+      const [colabAPI,setColabAPI]=useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
+      const [empresaId,setEmpresaId]=useState(()=>localStorage.getItem("rh_empresa_id")||"cantina");
 
       useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
       useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
@@ -961,6 +962,23 @@ function doPost(e) {
       useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
       useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
       useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
+      useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
+      useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
+      useEffect(()=>{
+        async function _carregarColab(){
+          const {data,error}=await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
+          if(!error && data && data.length>0){
+            setColabAPI(data.map(c=>({
+              nome:c.nome, admissao:c.admissao||'', experiencia30:c.experiencia_30||'',
+              experiencia90:c.experiencia_90||'', setor:c.setor||'', funcao:c.funcao||'',
+              cpf:c.cpf||'', nascimento:c.nascimento||'',
+              salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
+              transporte:Number(c.transporte)||0, cafeManha:Number(c.cafe_manha)||0, id_supa:c.id
+            })));
+          }
+        }
+        _carregarColab();
+      },[empresaId]);
 
       const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
 
@@ -1682,6 +1700,197 @@ function doPost(e) {
         </div>
       );
 
+      // ============================================================
+      // MÓDULO COLABORADORES
+      // ============================================================
+      function ColaboradoresPage({ empresaId, setColabAPI }) {
+        const [lista, setLista] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [status, setStatus] = useState(null);
+        const [editando, setEditando] = useState(null);
+        const [form, setForm] = useState({});
+        const [busca, setBusca] = useState("");
+
+        const FORM_VAZIO = { nome:"", funcao:"", setor:"", cpf:"", nascimento:"", admissao:"",
+          experiencia30:"", experiencia90:"", salario:"", inss:"", fgts:"", transporte:"", cafeManha:"" };
+
+        const mapearParaApp = c => ({
+          nome:c.nome, admissao:c.admissao||'', experiencia30:c.experiencia_30||'',
+          experiencia90:c.experiencia_90||'', setor:c.setor||'', funcao:c.funcao||'',
+          cpf:c.cpf||'', nascimento:c.nascimento||'',
+          salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
+          transporte:Number(c.transporte)||0, cafeManha:Number(c.cafe_manha)||0, id_supa:c.id
+        });
+
+        const carregar = async () => {
+          setLoading(true);
+          const {data,error} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
+          if(!error){ setLista(data||[]); setColabAPI((data||[]).map(mapearParaApp)); }
+          setLoading(false);
+        };
+
+        useEffect(()=>{ carregar(); },[empresaId]);
+
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); };
+        const abrirEdicao = c => {
+          setForm({
+            nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
+            nascimento:c.nascimento||'', admissao:c.admissao||'',
+            experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
+            salario:String(c.salario||''), inss:String(c.inss||''), fgts:String(c.fgts||''),
+            transporte:String(c.transporte||''), cafeManha:String(c.cafe_manha||'')
+          });
+          setEditando(c); setStatus(null);
+        };
+
+        const salvar = async () => {
+          if(!form.nome.trim()){ setStatus({ok:false,msg:"Nome é obrigatório."}); return; }
+          setLoading(true); setStatus(null);
+          try {
+            const payload = {
+              empresa_id:empresaId,
+              nome:form.nome.trim(),
+              nome_key:form.nome.trim().normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim(),
+              funcao:form.funcao.trim()||null, setor:form.setor.trim()||null,
+              cpf:form.cpf.trim()||null, nascimento:form.nascimento||null,
+              admissao:form.admissao||null, experiencia_30:form.experiencia30||null,
+              experiencia_90:form.experiencia90||null,
+              salario:parseFloat(String(form.salario).replace(",","."))||0,
+              inss:parseFloat(String(form.inss).replace(",","."))||0,
+              fgts:parseFloat(String(form.fgts).replace(",","."))||0,
+              transporte:parseFloat(String(form.transporte).replace(",","."))||0,
+              cafe_manha:parseFloat(String(form.cafeManha).replace(",","."))||0,
+              ativo:true, atualizado_em:new Date().toISOString()
+            };
+            let data, error;
+            if(editando.novo){
+              payload.id = crypto.randomUUID();
+              ({data,error} = await _supa.from('colaboradores').insert(payload).select().single());
+            } else {
+              ({data,error} = await _supa.from('colaboradores').update(payload).eq('id',editando.id).select().single());
+            }
+            if(error) throw error;
+            const novaLista = editando.novo
+              ? [...lista, data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
+              : lista.map(x=>x.id===editando.id?data:x);
+            setLista(novaLista);
+            setColabAPI(novaLista.map(mapearParaApp));
+            setStatus({ok:true, msg:editando.novo?"✅ Colaborador adicionado.":"✅ Alterações salvas."});
+            setEditando(null);
+          } catch(err){ setStatus({ok:false,msg:"❌ Erro: "+err.message}); }
+          setLoading(false);
+        };
+
+        const desativar = async c => {
+          if(!window.confirm(`Desativar "${c.nome}"? Ele não aparecerá mais na folha.`)) return;
+          setLoading(true);
+          const {error} = await _supa.from('colaboradores').update({ativo:false,atualizado_em:new Date().toISOString()}).eq('id',c.id);
+          if(!error){
+            const novaLista = lista.filter(x=>x.id!==c.id);
+            setLista(novaLista); setColabAPI(novaLista.map(mapearParaApp));
+            setStatus({ok:true,msg:`✅ ${c.nome} desativado.`});
+          } else { setStatus({ok:false,msg:"❌ Erro: "+error.message}); }
+          setLoading(false);
+        };
+
+        const F = ({label,campo,type="text",placeholder=""}) => (
+          <div style={{marginBottom:14}}>
+            <label style={s.label}>{label}</label>
+            <input type={type} style={s.input} placeholder={placeholder}
+              value={form[campo]||''}
+              onChange={e=>setForm(p=>({...p,[campo]:e.target.value}))}
+            />
+          </div>
+        );
+
+        const filtrados = lista.filter(c=>!busca||(c.nome||'').toLowerCase().includes(busca.toLowerCase())||(c.funcao||'').toLowerCase().includes(busca.toLowerCase()));
+
+        if(editando) return (
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+              <button onClick={()=>setEditando(null)} style={s.btnOutline}>← Voltar</button>
+              <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{editando.novo?"➕ Novo Colaborador":"✏️ Editar: "+editando.nome}</div>
+            </div>
+            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+            <div style={s.card}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                <F label="Nome *" campo="nome" placeholder="Nome completo"/>
+                <F label="CPF" campo="cpf" placeholder="000.000.000-00"/>
+                <F label="Função" campo="funcao" placeholder="Ex: Auxiliar de Cozinha"/>
+                <F label="Setor" campo="setor" placeholder="Ex: Produção"/>
+                <F label="Data de Nascimento" campo="nascimento" type="date"/>
+                <F label="Data de Admissão" campo="admissao" type="date"/>
+                <F label="Fim Experiência 30d" campo="experiencia30" type="date"/>
+                <F label="Fim Experiência 90d" campo="experiencia90" type="date"/>
+                <F label="Salário (R$)" campo="salario" placeholder="0,00"/>
+                <F label="INSS (R$)" campo="inss" placeholder="0,00"/>
+                <F label="FGTS (R$)" campo="fgts" placeholder="0,00"/>
+                <F label="Vale Transporte (R$)" campo="transporte" placeholder="0,00"/>
+                <F label="Café da Manhã (R$)" campo="cafeManha" placeholder="0,00"/>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:8}}>
+                <button onClick={salvar} style={s.btn} disabled={loading}>{loading?"Salvando...":"💾 Salvar"}</button>
+                <button onClick={()=>setEditando(null)} style={s.btnOutline}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+
+        return (
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>👥 Colaboradores</div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={carregar} style={s.btnOutline} disabled={loading}>🔄 Atualizar</button>
+                <button onClick={abrirNovo} style={s.btn}>+ Novo</button>
+              </div>
+            </div>
+            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+            <input style={{...s.input,marginBottom:16}} placeholder="Buscar por nome ou função..." value={busca} onChange={e=>setBusca(e.target.value)}/>
+            {loading?(
+              <div style={{textAlign:"center",padding:40,color:C.muted}}>Carregando...</div>
+            ):(
+              <div style={s.card}>
+                {filtrados.length===0?(
+                  <div style={{textAlign:"center",padding:"32px 0",color:C.muted,fontSize:13}}>
+                    {lista.length===0?"Nenhum colaborador cadastrado. Clique em \"+ Novo\" para adicionar.":"Nenhum resultado encontrado."}
+                  </div>
+                ):(
+                  <table style={s.table}>
+                    <thead>
+                      <tr>
+                        <th style={s.th}>Nome</th>
+                        <th style={s.th}>Função</th>
+                        <th style={s.th}>Setor</th>
+                        <th style={{...s.th,textAlign:"right"}}>Salário</th>
+                        <th style={{...s.th,textAlign:"right"}}>VT</th>
+                        <th style={s.th}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtrados.map(c=>(
+                        <tr key={c.id} style={{background:"#fff",borderBottom:`1px solid ${C.border}`}}>
+                          <td style={{...s.td,fontWeight:600}}>{c.nome}</td>
+                          <td style={{...s.td,color:C.muted,fontSize:12}}>{c.funcao||"—"}</td>
+                          <td style={{...s.td,color:C.muted,fontSize:12}}>{c.setor||"—"}</td>
+                          <td style={{...s.td,textAlign:"right",fontSize:12}}>{c.salario>0?fmtBRL(c.salario):"—"}</td>
+                          <td style={{...s.td,textAlign:"right",fontSize:12}}>{c.transporte>0?fmtBRL(c.transporte):"—"}</td>
+                          <td style={{...s.td,textAlign:"right",whiteSpace:"nowrap"}}>
+                            <button onClick={()=>abrirEdicao(c)} style={{...s.btnOutline,fontSize:11,padding:"4px 10px",marginRight:6}}>✏️ Editar</button>
+                            <button onClick={()=>desativar(c)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Desativar</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+            <div style={{fontSize:12,color:C.muted,marginTop:4}}>{lista.length} colaborador{lista.length!==1?"es":""} ativo{lista.length!==1?"s":""}</div>
+          </div>
+        );
+      }
+
       function PlaceholderPage({title,icon}){
         return(
           <div>
@@ -1699,7 +1908,7 @@ function doPost(e) {
       // ============================================================
       // MÓDULO FOLHA DE PAGAMENTO
       // ============================================================
-      function FolhaPage() {
+      function FolhaPage({ colabAPI, setColabAPI }) {
         const GAS_URL = gasUrl || "https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec";
 
         const hoje = new Date();
@@ -1707,7 +1916,6 @@ function doPost(e) {
           const m = hoje.getMonth()+1; const y = hoje.getFullYear();
           return `${String(m).padStart(2,"0")}/${y}`;
         });
-        const [colabAPI, setColabAPI] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
         const [folhaData, setFolhaData] = useState({});
         const [marcacoes, setMarcacoes] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_folha_marc")||"{}");}catch(e){return {};} });
         const [feriados, setFeriados] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_feriados")||"[]");}catch(e){return [];} });
@@ -1720,7 +1928,6 @@ function doPost(e) {
         const [loadingAPI, setLoadingAPI] = useState(false);
         const [showRegras, setShowRegras] = useState(false);
 
-        useEffect(()=>{localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI));},[colabAPI]);
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
         useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
         useEffect(()=>{localStorage.setItem("rh_folha_ajustes",JSON.stringify(ajustes));},[ajustes]);
@@ -2626,6 +2833,7 @@ function doPost(e) {
 
       const navItems=[
         {k:"dashboard",l:"🏠 Início"},
+        {k:"colaboradores",l:"👥 Colaboradores"},
         {k:"vt",l:"🚌 Vale Transporte"},
         {k:"folha",l:"💼 Folha de Pagto"},
         {k:"ferias",l:"🏖️ Férias"},
@@ -2651,9 +2859,10 @@ function doPost(e) {
               ))}
             </nav>
             <main style={s.main}>
-              {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl}/>}
+              {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl} colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
+              {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI}/>}
               {page==="vt"&&vtPageContent}
-              {page==="folha"&&<FolhaPage/>}
+              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
@@ -2667,16 +2876,5 @@ function doPost(e) {
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App/>);
   </script>
-<script>
-  async function testarSupabase() {
-    const { data, error } = await _supa.from('empresas').select('*');
-    if (error) {
-      console.error('❌ Erro Supabase:', error.message);
-    } else {
-      console.log('✅ Supabase conectado! Empresas:', data);
-    }
-  }
-  testarSupabase();
-</script>
 </body>
 </html>
