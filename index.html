@@ -1504,6 +1504,38 @@ function doPost(e) {
                   <div style={{...s.successBox,marginTop:12}}>✅ Dados copiados! Cole na aba VT da planilha (Ctrl+V).</div>
                 )}
               </div>
+
+              <div style={s.card}>
+                <div style={s.cardTitle}>⚙️ Configuração do Google Apps Script</div>
+                <div style={s.infoBox}>
+                  Cole o script abaixo no <strong>Apps Script</strong> da sua planilha e publique como <strong>Web App</strong>
+                  (Executar como: <em>Eu</em> · Acesso: <em>Qualquer pessoa</em>).<br/>
+                  Sempre que atualizar o script, crie uma <strong>Nova versão</strong> antes de reimplantar.
+                </div>
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+                  <button
+                    onClick={()=>{
+                      navigator.clipboard.writeText(GAS_SCRIPT).then(()=>{
+                        setCopiedScript(true);
+                        setTimeout(()=>setCopiedScript(false),2500);
+                      });
+                    }}
+                    style={{...s.btnAcc,fontSize:12,padding:"7px 16px"}}
+                  >
+                    {copiedScript?"✅ Copiado!":"📋 Copiar script completo"}
+                  </button>
+                </div>
+                <pre style={{...s.codeBlock,maxHeight:340,overflowY:"auto",fontSize:11}}>{GAS_SCRIPT}</pre>
+                <div style={{marginTop:10}}>
+                  <label style={s.label}>URL do Web App (cole aqui após implantar)</label>
+                  <input
+                    style={s.input}
+                    value={gasUrl}
+                    onChange={e=>setGasUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                  />
+                </div>
+              </div>
             </div>
           )}
 
