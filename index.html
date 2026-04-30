@@ -338,7 +338,7 @@ function doPost(e) {
       // ============================================================
       // DASHBOARD
       // ============================================================
-      function DashboardPage({ onNavegar }) {
+      function DashboardPage({ onNavegar, gasUrl }) {
         const hoje = new Date();
         hoje.setHours(12, 0, 0, 0);
 
@@ -348,10 +348,34 @@ function doPost(e) {
         });
 
         const [dados, setDados] = useState(lerStorage);
+        const [loadingColab, setLoadingColab] = useState(false);
+        const [buscaStatus, setBuscaStatus] = useState(null);
         const colabAPI  = dados.colabAPI;
         const marcacoes = dados.marcacoes;
 
         const recarregar = () => setDados(lerStorage());
+
+        const buscarColaboradores = async () => {
+          const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
+          if (!url) { setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse Vale Transporte → Salvar → Configurações."}); return; }
+          setLoadingColab(true);
+          setBuscaStatus(null);
+          try {
+            const res = await fetch(`${url}?acao=colaboradores`);
+            const json = await res.json();
+            if (json.ok) {
+              localStorage.setItem("rh_colab_api", JSON.stringify(json.colaboradores || []));
+              recarregar();
+              setBuscaStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores carregados.`});
+            } else {
+              setBuscaStatus({ok:false, msg:"Erro: " + (json.msg || "desconhecido")});
+            }
+          } catch(err) {
+            setBuscaStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App. Verifique se o GAS está implantado. Erro: " + err.message});
+          } finally {
+            setLoadingColab(false);
+          }
+        };
 
         const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
         const parseISODate = iso => { if (!iso) return null; const [y,m,d] = iso.split("-"); return new Date(+y, +m-1, +d, 12, 0, 0); };
@@ -456,11 +480,19 @@ function doPost(e) {
               </div>
             </div>
 
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               <button onClick={recarregar} style={{...s.btnOutline,fontSize:12,padding:"5px 12px",gap:5}}>
                 🔄 Atualizar dashboard
               </button>
+              <button onClick={buscarColaboradores} disabled={loadingColab} style={{...s.btnAcc,fontSize:12,padding:"5px 14px",gap:5,opacity:loadingColab?0.65:1}}>
+                {loadingColab ? "⏳ Carregando..." : "👥 Carregar colaboradores"}
+              </button>
             </div>
+            {buscaStatus && (
+              <div style={{...(buscaStatus.ok ? s.successBox : s.warnBox), marginBottom:14}}>
+                {buscaStatus.msg}
+              </div>
+            )}
 
             {semDados && (
               <div style={{...s.warnBox,marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
@@ -2613,7 +2645,7 @@ function doPost(e) {
               ))}
             </nav>
             <main style={s.main}>
-              {page==="dashboard"&&<DashboardPage onNavegar={setPage}/>}
+              {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl}/>}
               {page==="vt"&&vtPageContent}
               {page==="folha"&&<FolhaPage/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
