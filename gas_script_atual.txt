@@ -1,0 +1,224 @@
+// ============================================================
+// RegistroVT.gs v3 — Web App do RH
+// Suporta:
+//   GET ?acao=colaboradores    → lista colaboradores ativos com todos os campos
+//   GET ?acao=atestados        → atestados no período (?ini=yyyy-mm-dd&fim=yyyy-mm-dd)
+//   GET ?acao=folha_dados      → combina colaboradores + atestados em 1 chamada
+//   POST tipo=vt               → grava VT na aba VT
+//   POST tipo=folha            → grava folha na aba FOLHA{ANO}
+// ============================================================
+// Publicar: Implantar → Gerenciar implantações → editar → Nova versão → Implantar
+// ============================================================
+
+var SPREADSHEET_ID = '1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU';
+
+function _resp(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function _fmtDate(d) {
+  if (!d) return '';
+  if (d instanceof Date) return Utilities.formatDate(d, 'America/Sao_Paulo', 'yyyy-MM-dd');
+  return String(d);
+}
+
+function _isoToDate(iso) {
+  if (!iso) return null;
+  var parts = String(iso).split('-');
+  if (parts.length !== 3) return null;
+  return new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+}
+
+// ---------------------------------------------------------------
+// GET
+// ---------------------------------------------------------------
+function doGet(e) {
+  try {
+    var acao = (e && e.parameter && e.parameter.acao) || 'folha_dados';
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+    if (acao === 'colaboradores' || acao === 'folha_dados') {
+      var resp = { ok: true };
+      resp.colaboradores = _lerColaboradores(ss);
+
+      if (acao === 'folha_dados') {
+        var ini = e.parameter.ini || '';
+        var fim = e.parameter.fim || '';
+        resp.atestados = _lerAtestados(ss, ini, fim);
+      }
+      return _resp(resp);
+    }
+
+    if (acao === 'atestados') {
+      var ini = e.parameter.ini || '';
+      var fim = e.parameter.fim || '';
+      return _resp({ ok: true, atestados: _lerAtestados(ss, ini, fim) });
+    }
+
+    return _resp({ ok: false, msg: 'Ação desconhecida: ' + acao });
+  } catch (err) {
+    return _resp({ ok: false, msg: err.message });
+  }
+}
+
+// ---------------------------------------------------------------
+// Leitura de COLABORADORES
+// ---------------------------------------------------------------
+function _lerColaboradores(ss) {
+  var aba = ss.getSheetByName('COLABORADORES');
+  if (!aba) throw new Error('Aba COLABORADORES não encontrada');
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return [];
+
+  var dados = aba.getRange(2, 1, ultimaLinha - 1, 37).getValues();
+  var lista = [];
+  for (var i = 0; i < dados.length; i++) {
+    var linha = dados[i];
+    var nome = linha[1];         // col B - NOME
+    var encerramento = linha[6]; // col G - ENCERRAMENTO
+    if (!nome || String(nome).trim() === '') continue;
+    if (encerramento && String(encerramento).trim() !== '') continue; // pula desligados
+
+    lista.push({
+      nome:                   String(nome).trim(),
+      telefone:               linha[2]  ? String(linha[2]).trim()  : '',  // C
+      chavePix:               linha[3]  ? String(linha[3]).trim()  : '',  // D
+      email:                  linha[4]  ? String(linha[4]).trim()  : '',  // E
+      admissao:               _fmtDate(linha[5]),                         // F
+      experiencia30:          _fmtDate(linha[7]),                         // H
+      experiencia90:          _fmtDate(linha[8]),                         // I
+      setor:                  linha[9]  ? String(linha[9]).trim()  : '',  // J
+      funcao:                 linha[10] ? String(linha[10]).trim() : '',  // K
+      cpf:                    linha[12] ? String(linha[12]).trim() : '',  // M
+      nascimento:             _fmtDate(linha[13]),                        // N
+      salario:                linha[14] || 0,                             // O
+      inss:                   linha[16] || 0,                             // Q
+      fgts:                   linha[17] || 0,                             // R
+      transporte:             linha[18] || 0,                             // S
+      contaSalario:           !!linha[24],                                // Y
+      aditivoContrato:        !!linha[25],                                // Z
+      usoArmario:             !!linha[26],                                // AA
+      lgpd:                   !!linha[27],                                // AB
+      imagem:                 !!linha[28],                                // AC
+      camera:                 !!linha[29],                                // AD
+      epiUniforme:            !!linha[30],                                // AE
+      acompanhamentoProducao: !!linha[31],                                // AF
+      usoCelular:             !!linha[32],                                // AG
+      usoVeiculo:             !!linha[33],                                // AH
+      termoConfidencialidade: !!linha[34],                                // AI
+      termoAssiduidade:       !!linha[35],                                // AJ
+      termoMudancaHorario:    !!linha[36]                                 // AK
+    });
+  }
+  return lista;
+}
+
+// ---------------------------------------------------------------
+// Leitura de ATESTADOS no período
+// ---------------------------------------------------------------
+function _lerAtestados(ss, isoIni, isoFim) {
+  var aba = ss.getSheetByName('ATESTADOS');
+  if (!aba) return [];
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return [];
+
+  var dataIni = _isoToDate(isoIni);
+  var dataFim = _isoToDate(isoFim);
+
+  var dados = aba.getRange(2, 1, ultimaLinha - 1, 6).getValues();
+  var lista = [];
+  for (var i = 0; i < dados.length; i++) {
+    var linha = dados[i];
+    var nome   = linha[0]; // A - NOME
+    var setor  = linha[1]; // B - SETOR
+    var cid    = linha[2]; // C - CID
+    var inicio = linha[3]; // D - INÍCIO
+    var fim    = linha[4]; // E - FIM
+    var obs    = linha[5]; // F - OBSERVAÇÕES
+    if (!nome || !inicio) continue;
+
+    var dIni = inicio instanceof Date ? inicio : null;
+    var dFim = fim    instanceof Date ? fim    : dIni;
+    if (!dIni) continue;
+
+    if (dataIni && dataFim) {
+      if (dFim < dataIni || dIni > dataFim) continue;
+    }
+
+    lista.push({
+      nome:   String(nome).trim(),
+      setor:  setor ? String(setor).trim() : '',
+      cid:    cid   ? String(cid).trim()   : '',
+      inicio: _fmtDate(dIni),
+      fim:    _fmtDate(dFim),
+      obs:    obs   ? String(obs).trim()   : ''
+    });
+  }
+  return lista;
+}
+
+// ---------------------------------------------------------------
+// POST
+// ---------------------------------------------------------------
+function doPost(e) {
+  try {
+    var dados = JSON.parse(e.postData.contents);
+    var tipo  = dados.tipo || 'vt';
+    var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var agora = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm');
+
+    if (tipo === 'vt') {
+      var aba = ss.getSheetByName('VT');
+      if (!aba) return _resp({ok:false, msg:'Aba VT não encontrada'});
+      if (aba.getLastRow() === 0) {
+        aba.appendRow(['Semana Início','Semana Fim','Colaborador','Escala','Dias Trabalhados','Passagens','Valor Calculado','Valor Pago','Afastado','Registrado em']);
+      }
+      dados.employees.forEach(function(emp) {
+        aba.appendRow([
+          dados.semanaIni, dados.semanaFim,
+          emp.nome, emp.escala,
+          emp.diasTrabalhados, emp.diasTrabalhados * 2,
+          emp.valorCalculado, emp.valorPago,
+          emp.afastado ? 'Sim' : 'Não', agora
+        ]);
+      });
+      return _resp({ok:true, msg:'VT salvo com ' + dados.employees.length + ' registros'});
+    }
+
+    if (tipo === 'folha') {
+      var ano    = dados.periodo ? dados.periodo.substring(3) : new Date().getFullYear();
+      var nomeAba = 'FOLHA' + ano;
+      var aba = ss.getSheetByName(nomeAba);
+      if (!aba) aba = ss.insertSheet(nomeAba);
+      if (aba.getLastRow() === 0) {
+        aba.appendRow([
+          'Período','Colaborador','Função','Dias Trabalhados','Faltas Injust.','Atestados','Férias','Folgas',
+          'Horas Extras','Horas Faltas','DSR Perdidos','Feriados Perdidos','Caju (dias)','Caju (R$)',
+          'Prêmio Assiduidade','Descontar VT','Produtos (R$)','Adiantamento (R$)','Total Desconto (R$)',
+          'Banco Horas','Dias Faltas','Observações','Registrado em'
+        ]);
+      }
+      dados.colaboradores.forEach(function(c) {
+        aba.appendRow([
+          dados.periodo, c.nome, c.funcao || '',
+          c.diasTrabalhados, c.faltas, c.atestados, c.ferias, c.folgas,
+          c.horasExtras, c.horasFaltas, c.dsrPerdidos, c.feriadosPerdidos,
+          c.cajuDias, c.cajuValor,
+          c.premioAssiduidade ? 'Sim' : 'Não',
+          c.descontarVT       ? 'Sim' : 'Não',
+          c.produtos || 0, c.adiantamento || 0, c.totalDesconto,
+          c.bancoHoras ? 'Sim' : 'Não',
+          (c.diasFaltas || []).join(', '),
+          c.observacoes || '', agora
+        ]);
+      });
+      return _resp({ok:true, msg:'Folha ' + dados.periodo + ' salva com ' + dados.colaboradores.length + ' registros'});
+    }
+
+    return _resp({ok:false, msg:'Tipo desconhecido: ' + tipo});
+  } catch (err) {
+    return _resp({ok:false, msg:err.message});
+  }
+}

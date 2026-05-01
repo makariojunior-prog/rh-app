@@ -199,6 +199,12 @@ function doGet(e) {
 // ---------------------------------------------------------------
 // Leitura de COLABORADORES
 // ---------------------------------------------------------------
+function _bool(v) {
+  if (typeof v === 'boolean') return v;
+  var s = String(v).trim().toUpperCase();
+  return s === 'SIM' || s === 'TRUE' || s === '1' || s === 'X' || s === 'YES';
+}
+
 function _lerColaboradores(ss) {
   var aba = ss.getSheetByName('COLABORADORES');
   if (!aba) throw new Error('Aba COLABORADORES não encontrada');
@@ -230,19 +236,19 @@ function _lerColaboradores(ss) {
       inss:                   linha[16] || 0,                             // Q
       fgts:                   linha[17] || 0,                             // R
       transporte:             linha[18] || 0,                             // S
-      contaSalario:           !!linha[24],                                // Y
-      aditivoContrato:        !!linha[25],                                // Z
-      usoArmario:             !!linha[26],                                // AA
-      lgpd:                   !!linha[27],                                // AB
-      imagem:                 !!linha[28],                                // AC
-      camera:                 !!linha[29],                                // AD
-      epiUniforme:            !!linha[30],                                // AE
-      acompanhamentoProducao: !!linha[31],                                // AF
-      usoCelular:             !!linha[32],                                // AG
-      usoVeiculo:             !!linha[33],                                // AH
-      termoConfidencialidade: !!linha[34],                                // AI
-      termoAssiduidade:       !!linha[35],                                // AJ
-      termoMudancaHorario:    !!linha[36]                                 // AK
+      contaSalario:           _bool(linha[24]),                          // Y
+      aditivoContrato:        _bool(linha[25]),                          // Z
+      usoArmario:             _bool(linha[26]),                          // AA
+      lgpd:                   _bool(linha[27]),                          // AB
+      imagem:                 _bool(linha[28]),                          // AC
+      camera:                 _bool(linha[29]),                          // AD
+      epiUniforme:            _bool(linha[30]),                          // AE
+      acompanhamentoProducao: _bool(linha[31]),                          // AF
+      usoCelular:             _bool(linha[32]),                          // AG
+      usoVeiculo:             _bool(linha[33]),                          // AH
+      termoConfidencialidade: _bool(linha[34]),                          // AI
+      termoAssiduidade:       _bool(linha[35]),                          // AJ
+      termoMudancaHorario:    _bool(linha[36])                           // AK
     });
   }
   return lista;
@@ -1009,6 +1015,8 @@ function doPost(e) {
 
       function ColaboradoresPage({ empresaId, setColabAPI, gasUrl }) {
         const [lista, setLista] = useState([]);
+        const [listaDesligados, setListaDesligados] = useState([]);
+        const [mostrarDesligados, setMostrarDesligados] = useState(false);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
         const [editando, setEditando] = useState(null);
@@ -1050,6 +1058,8 @@ function doPost(e) {
             const {data,error} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
             if(error) throw error;
             setLista(data||[]);
+            const {data:dataD} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',false).order('nome');
+            setListaDesligados(dataD||[]);
             // Merge datas do cache local (nascimento etc. podem não estar no Supabase ainda)
             const nacCache = {};
             try { JSON.parse(localStorage.getItem("rh_colab_api")||"[]").forEach(c=>{ nacCache[normNome(c.nome)]={nascimento:c.nascimento||'',admissao:c.admissao||'',experiencia30:c.experiencia30||'',experiencia90:c.experiencia90||''}; }); } catch(e){}
@@ -1149,6 +1159,8 @@ function doPost(e) {
             setColabAPI(colabParaApp);
             const {data:supaColab} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
             setLista(supaColab||[]);
+            const {data:supaD} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',false).order('nome');
+            setListaDesligados(supaD||[]);
             setStatus({ok:true, msg:`✅ ${colab.length} colaboradores sincronizados com sucesso!`});
           } catch(e) {
             setStatus({ok:false, msg:"❌ Erro ao sincronizar: " + e.message});
@@ -1224,6 +1236,19 @@ function doPost(e) {
           setLoading(false);
         };
 
+        const reativar = async c => {
+          if(!window.confirm('Reativar "'+c.nome+'"?')) return;
+          setLoading(true);
+          const {error} = await _supa.from('colaboradores').update({ativo:true,atualizado_em:new Date().toISOString()}).eq('id',c.id);
+          if(!error){
+            setListaDesligados(prev=>prev.filter(x=>x.id!==c.id));
+            const novaLista = [...lista,{...c,ativo:true}].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
+            setLista(novaLista); setColabAPI(novaLista.map(mapearParaApp));
+            setStatus({ok:true,msg:'✅ '+c.nome+' reativado.'});
+          } else { setStatus({ok:false,msg:'❌ Erro: '+error.message}); }
+          setLoading(false);
+        };
+
         const desativar = async c => {
           if(!window.confirm(`Desativar "${c.nome}"? Ele não aparecerá mais na folha.`)) return;
           setLoading(true);
@@ -1231,6 +1256,7 @@ function doPost(e) {
           if(!error){
             const novaLista = lista.filter(x=>x.id!==c.id);
             setLista(novaLista); setColabAPI(novaLista.map(mapearParaApp));
+            setListaDesligados(prev=>[...prev,{...c,ativo:false}].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')));
             setStatus({ok:true,msg:`✅ ${c.nome} desativado.`});
           } else { setStatus({ok:false,msg:"❌ Erro: "+error.message}); }
           setLoading(false);
@@ -1366,7 +1392,10 @@ function doPost(e) {
                     <tbody>
                       {filtrados.map(c=>(
                         <tr key={c.id} style={{background:"#fff",borderBottom:`1px solid ${C.border}`}}>
-                          <td style={{...s.td,fontWeight:600}}>{c.nome}</td>
+                          <td style={{...s.td,fontWeight:600}}>
+                            {c.nome}
+                            {(function(){var h=new Date().toISOString().slice(0,10);return c.experiencia_90&&c.experiencia_90>=h?React.createElement('span',{style:{marginLeft:8,fontSize:10,background:"#EDE9FE",color:"#6D28D9",padding:"2px 7px",borderRadius:10,fontWeight:700,verticalAlign:"middle"}},"experiência"):null;})()}
+                          </td>
                           <td style={{...s.td,color:C.muted,fontSize:12}}>{c.funcao||"—"}</td>
                           <td style={{...s.td,color:C.muted,fontSize:12}}>{c.setor||"—"}</td>
                           <td style={{...s.td,textAlign:"right",fontSize:12}}>{c.salario>0?fmtBRL(c.salario):"—"}</td>
@@ -1382,7 +1411,40 @@ function doPost(e) {
                 )}
               </div>
             )}
-            <div style={{fontSize:12,color:C.muted,marginTop:4}}>{lista.length} colaborador{lista.length!==1?"es":""} ativo{lista.length!==1?"s":""}</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:4}}>
+              {lista.length} colaborador{lista.length!==1?"es":""} ativo{lista.length!==1?"s":""}
+              {listaDesligados.length>0?" · "+listaDesligados.length+" desligado"+(listaDesligados.length!==1?"s":""):""}
+            </div>
+
+            {listaDesligados.length>0&&(
+              <div style={{marginTop:16}}>
+                <button onClick={()=>setMostrarDesligados(p=>!p)}
+                  style={{background:"none",border:"1px solid "+C.border,borderRadius:6,padding:"6px 14px",fontSize:12,cursor:"pointer",color:C.muted,fontWeight:600,display:"flex",alignItems:"center",gap:6}}>
+                  {mostrarDesligados?"▲ Ocultar":"▶ Ver"} desligados ({listaDesligados.length})
+                </button>
+                {mostrarDesligados&&(
+                  <div style={{marginTop:8,border:"1px solid "+C.border,borderRadius:8,overflow:"hidden",opacity:0.85}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"#F9FAFB"}}>
+                        <th style={s.th}>Nome</th><th style={s.th}>Função</th><th style={s.th}>Setor</th><th style={{...s.th,textAlign:"right"}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {listaDesligados.map(c=>(
+                          <tr key={c.id} style={{background:"#fff",borderTop:"1px solid "+C.border}}>
+                            <td style={{...s.td,fontWeight:600,color:C.muted}}>{c.nome}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{c.funcao||"—"}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{c.setor||"—"}</td>
+                            <td style={{...s.td,textAlign:"right"}}>
+                              <button onClick={()=>reativar(c)} style={{background:"none",border:"1px solid #86EFAC",color:"#16A34A",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>↩ Reativar</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       }
