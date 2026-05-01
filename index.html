@@ -991,6 +991,8 @@ function doPost(e) {
         const FORM_VAZIO = { nome:"", funcao:"", setor:"", cpf:"", nascimento:"", admissao:"",
           experiencia30:"", experiencia90:"", salario:"", inss:"", fgts:"", transporte:"", cafeManha:"" };
 
+        const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/\s+/g," ").trim();
+
         const mapearParaApp = c => ({
           nome:c.nome, admissao:c.admissao||'', experiencia30:c.experiencia_30||'',
           experiencia90:c.experiencia_90||'', setor:c.setor||'', funcao:c.funcao||'',
@@ -1004,7 +1006,19 @@ function doPost(e) {
           try {
             const {data,error} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
             if(error) throw error;
-            setLista(data||[]); setColabAPI((data||[]).map(mapearParaApp));
+            setLista(data||[]);
+            // Merge datas do cache local (nascimento etc. podem não estar no Supabase ainda)
+            const nacCache = {};
+            try { JSON.parse(localStorage.getItem("rh_colab_api")||"[]").forEach(c=>{ nacCache[normNome(c.nome)]={nascimento:c.nascimento||'',admissao:c.admissao||'',experiencia30:c.experiencia30||'',experiencia90:c.experiencia90||''}; }); } catch(e){}
+            setColabAPI((data||[]).map(c=>{
+              const mapped = mapearParaApp(c);
+              const cache = nacCache[normNome(c.nome)]||{};
+              if(!mapped.nascimento) mapped.nascimento = cache.nascimento||'';
+              if(!mapped.admissao)   mapped.admissao   = cache.admissao||'';
+              if(!mapped.experiencia30) mapped.experiencia30 = cache.experiencia30||'';
+              if(!mapped.experiencia90) mapped.experiencia90 = cache.experiencia90||'';
+              return mapped;
+            }));
           } catch(e) {
             setStatus({ok:false, msg:'❌ Erro ao carregar: '+e.message});
           } finally {
@@ -1040,7 +1054,6 @@ function doPost(e) {
             const colab = json.colaboradores || [];
             if(colab.length === 0) throw new Error("Nenhum colaborador encontrado na planilha");
             setStatus({ok:null, msg:`⏳ Salvando ${colab.length} colaboradores no Supabase...`});
-            const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
             const records = colab.map(c => {
               const nome = (c.nome || c.NOME || "").trim();
               const nomeKey = normNome(nome);
@@ -1050,20 +1063,26 @@ function doPost(e) {
                 nome,
                 nome_key: nomeKey,
                 funcao: c.funcao||null, setor: c.setor||null, cpf: c.cpf||null,
-                nascimento: parseDateBR(c.nascimento),
-                admissao: parseDateBR(c.admissao),
-                experiencia_30: parseDateBR(c.experiencia30),
-                experiencia_90: parseDateBR(c.experiencia90),
                 salario: Number(c.salario)||0, inss: Number(c.inss)||0,
                 fgts: Number(c.fgts)||0, transporte: Number(c.transporte)||0,
                 cafe_manha: Number(c.cafeManha)||0,
-                ativo: true, ultima_sync: new Date().toISOString()
+                ativo: true, atualizado_em: new Date().toISOString()
               };
             });
             const {error} = await _supa.from('colaboradores').upsert(records, {onConflict:'id'});
             if(error) throw error;
+            // Populate colabAPI from GAS data (preserves nascimento/datas even sem colunas no Supabase)
+            const colabParaApp = colab.map(c=>({
+              nome:(c.nome||c.NOME||"").trim(), funcao:c.funcao||'', setor:c.setor||'',
+              cpf:c.cpf||'', nascimento:c.nascimento||'', admissao:c.admissao||'',
+              experiencia30:c.experiencia30||'', experiencia90:c.experiencia90||'',
+              salario:Number(c.salario)||0, inss:Number(c.inss)||0,
+              fgts:Number(c.fgts)||0, transporte:Number(c.transporte)||0, cafeManha:Number(c.cafeManha)||0
+            }));
+            setColabAPI(colabParaApp);
+            const {data:supaColab} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
+            setLista(supaColab||[]);
             setStatus({ok:true, msg:`✅ ${colab.length} colaboradores sincronizados com sucesso!`});
-            carregar();
           } catch(e) {
             setStatus({ok:false, msg:"❌ Erro ao sincronizar: " + e.message});
           }
@@ -1089,11 +1108,9 @@ function doPost(e) {
             const payload = {
               empresa_id:empresaId,
               nome:form.nome.trim(),
-              nome_key:form.nome.trim().normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim(),
+              nome_key:normNome(form.nome.trim()),
               funcao:form.funcao.trim()||null, setor:form.setor.trim()||null,
-              cpf:form.cpf.trim()||null, nascimento:form.nascimento||null,
-              admissao:form.admissao||null, experiencia_30:form.experiencia30||null,
-              experiencia_90:form.experiencia90||null,
+              cpf:form.cpf.trim()||null,
               salario:parseFloat(String(form.salario).replace(",","."))||0,
               inss:parseFloat(String(form.inss).replace(",","."))||0,
               fgts:parseFloat(String(form.fgts).replace(",","."))||0,
@@ -1109,9 +1126,17 @@ function doPost(e) {
               ({data,error} = await _supa.from('colaboradores').update(payload).eq('id',editando.id).select().single());
             }
             if(error) throw error;
+            // Mescla datas do formulário (não salvas no Supabase até colunas serem adicionadas)
+            const recordCompleto = {
+              ...data,
+              nascimento: form.nascimento||null,
+              admissao: form.admissao||null,
+              experiencia_30: form.experiencia30||null,
+              experiencia_90: form.experiencia90||null,
+            };
             const novaLista = editando.novo
-              ? [...lista, data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
-              : lista.map(x=>x.id===editando.id?data:x);
+              ? [...lista, recordCompleto].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
+              : lista.map(x=>x.id===editando.id?recordCompleto:x);
             setLista(novaLista);
             setColabAPI(novaLista.map(mapearParaApp));
             setStatus({ok:true, msg:editando.novo?"✅ Colaborador adicionado.":"✅ Alterações salvas."});
