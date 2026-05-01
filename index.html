@@ -361,7 +361,7 @@ function doPost(e) {
           const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
           if (!url) {
             setDados(lerStorage());
-            setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse Vale Transporte → Salvar → Configurações do GAS."});
+            setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse ⚙️ Configurações para configurar a URL do Web App."});
             return;
           }
           setLoadingColab(true);
@@ -500,8 +500,8 @@ function doPost(e) {
 
             {semDados && (
               <div style={{...s.warnBox,marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                <span>⚠️ Nenhum colaborador carregado. Acesse <strong>Folha de Pagamento</strong> e clique em <strong>"Carregar colaboradores da planilha"</strong>.</span>
-                {onNavegar && <button onClick={()=>onNavegar("folha")} style={{...s.btn,fontSize:12,padding:"6px 14px",flexShrink:0}}>Ir para Folha →</button>}
+                <span>⚠️ Nenhum colaborador carregado. Acesse <strong>Colaboradores</strong> e clique em <strong>"Sincronizar Planilha"</strong> ou <strong>"Atualizar dashboard"</strong>.</span>
+                {onNavegar && <button onClick={()=>onNavegar("colaboradores")} style={{...s.btn,fontSize:12,padding:"6px 14px",flexShrink:0}}>Ir para Colaboradores →</button>}
               </div>
             )}
 
@@ -930,805 +930,6 @@ function doPost(e) {
         );
       }
 
-    function App(){
-      const [page,setPage]=useState("dashboard");
-      const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
-      const [responsavel,setResponsavel]=useState(()=>localStorage.getItem("rh_responsavel")||"");
-      const [passagemStr,setPassagemStr]=useState(()=>localStorage.getItem("rh_passagem")||"4,30");
-      const [semanaIni,setSemanaIni]=useState(()=>localStorage.getItem("rh_semanaIni")||"");
-      const [semanaFim,setSemanaFim]=useState(()=>localStorage.getItem("rh_semanaFim")||"");
-      const [employees,setEmployees]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_employees")||"[]"); }catch(e){ return []; } });
-      const [historico,setHistorico]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_historico")||"[]"); }catch(e){ return []; } });
-      const [novoNome,setNovoNome]=useState("");
-      const [novaEscala,setNovaEscala]=useState("SEG-SEX");
-      const [csvStatus,setCsvStatus]=useState(null);
-      const [drag,setDrag]=useState(false);
-      const [vtTab,setVtTab]=useState("import");
-      // Novos estados
-      const [feriadosDia,setFeriadosDia]=useState({});
-      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec");
-      const [gasStatus,setGasStatus]=useState(null);
-      const [copiedScript,setCopiedScript]=useState(false);
-      const [copiedCsv,setCopiedCsv]=useState(false);
-      const [colabAPI,setColabAPI]=useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
-      const [empresaId,setEmpresaId]=useState(()=>localStorage.getItem("rh_empresa_id")||"cantina");
-      const [usuario, setUsuario] = useState(null);
-      const [perfil, setPerfil] = useState(null);
-      const [loadingAuth, setLoadingAuth] = useState(true);
-
-      useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
-      useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
-      useEffect(()=>{ localStorage.setItem("rh_passagem",passagemStr); },[passagemStr]);
-      useEffect(()=>{ localStorage.setItem("rh_semanaIni",semanaIni); },[semanaIni]);
-      useEffect(()=>{ localStorage.setItem("rh_semanaFim",semanaFim); },[semanaFim]);
-      useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
-      useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
-      useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
-      useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
-      useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
-      useEffect(()=>{
-        async function _carregarColab(){
-          const {data,error}=await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
-          if(!error && data && data.length>0){
-            setColabAPI(data.map(c=>({
-              nome:c.nome, admissao:c.admissao||'', experiencia30:c.experiencia_30||'',
-              experiencia90:c.experiencia_90||'', setor:c.setor||'', funcao:c.funcao||'',
-              cpf:c.cpf||'', nascimento:c.nascimento||'',
-              salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
-              transporte:Number(c.transporte)||0, cafeManha:Number(c.cafe_manha)||0, id_supa:c.id
-            })));
-          }
-        }
-        _carregarColab();
-      },[empresaId]);
-
-      const carregarPerfil = useCallback(async (uid) => {
-        try {
-          const {data} = await _supa.from('perfis').select('*').eq('id',uid).single();
-          if(data) {
-            setPerfil(data);
-            if(data.empresa_id) setEmpresaId(data.empresa_id);
-          } else {
-            setPerfil(null);
-          }
-        } catch(e) {
-          setPerfil(null);
-        }
-        setLoadingAuth(false);
-      },[]);
-
-      useEffect(()=>{
-        _supa.auth.getSession().then(({data:{session}})=>{
-          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
-          else setLoadingAuth(false);
-        });
-        const {data:{subscription}} = _supa.auth.onAuthStateChange((event,session)=>{
-          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
-          else { setUsuario(null); setPerfil(null); setLoadingAuth(false); }
-        });
-        return ()=>subscription.unsubscribe();
-      },[]);
-
-      const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
-
-      // getDias respeita feriados e afastamento
-      const getDias=(emp)=>{
-        if(emp.afastado) return 0;
-        const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-        return dias.filter(d=>emp.presente?.[d]&&!feriadosDia[d]).length;
-      };
-
-      // getValorFinal usa valorPago se preenchido, senão calcula
-      const getValorFinal=(emp)=>{
-        if(emp.afastado) return 0;
-        const vp=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
-        if(vp) return parseFloat(String(emp.valorPago).replace(",","."))||0;
-        return getDias(emp)*2*valorPassagem;
-      };
-
-      const total=employees.reduce((s,e)=>s+getValorFinal(e),0);
-      const semanaLabel=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"— período não definido —";
-
-      const toggleFeriado=(dia)=>setFeriadosDia(p=>({...p,[dia]:!p[dia]}));
-      const toggleAtt=(id,dia)=>setEmployees(p=>p.map(e=>e.id===id?{...e,presente:{...e.presente,[dia]:!e.presente?.[dia]}}:e));
-      const toggleAfastado=(id)=>setEmployees(p=>p.map(e=>e.id===id?{...e,afastado:!e.afastado}:e));
-      const setValorPago=(id,val)=>setEmployees(p=>p.map(e=>e.id===id?{...e,valorPago:val}:e));
-      const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
-      const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
-      const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{},afastado:false,valorPago:""}]); setNovoNome(""); };
-
-      const carregarDoHistorico=useCallback((entrada)=>{
-        setEmployees(entrada.employees.map(e=>({afastado:false,valorPago:"",...e})));
-        setSemanaIni(entrada.semanaIni);
-        setSemanaFim(entrada.semanaFim);
-        setCsvStatus({ok:true,msg:`✅ Semana ${entrada.label} carregada do histórico.`});
-      },[]);
-
-      const handleFile=useCallback((file)=>{
-        if(!file){ return; }
-        if(!file.name.toLowerCase().endsWith(".csv")){ setCsvStatus({ok:false,msg:"Selecione um arquivo .csv exportado do ponto eletrônico."}); return; }
-        const reader=new FileReader();
-        reader.onload=(e)=>{
-          try{
-            const bytes=new Uint8Array(e.target.result);
-            const text=new TextDecoder("iso-8859-1").decode(bytes);
-            const {employees:emps,semanaIni:ini,semanaFim:fim}=parseCSV(text);
-            setEmployees(emps.map((emp,i)=>({...emp,id:i+1})));
-            setSemanaIni(ini);
-            setSemanaFim(fim);
-            setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores importados. Período: ${fmtDate(ini)} a ${fmtDate(fim)}.`});
-            const lbl=`${fmtDate(ini)} a ${fmtDate(fim)}`;
-            setHistorico(prev=>{
-              const sem=prev.filter(h=>h.semanaIni!==ini||h.semanaFim!==fim);
-              return [{id:Date.now(),label:lbl,semanaIni:ini,semanaFim:fim,employees:emps.map((e,i)=>({...e,id:i+1})),importadoEm:new Date().toLocaleString("pt-BR")},...sem].slice(0,12);
-            });
-          }catch(err){
-            setCsvStatus({ok:false,msg:`Erro ao processar arquivo: ${err.message}`});
-          }
-        };
-        reader.readAsArrayBuffer(file);
-      },[]);
-
-      const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
-
-      // Exportar CSV para download
-      const exportarCSV=useCallback(()=>{
-        if(employees.length===0) return;
-        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias Trabalhados","Passagens","Valor Calculado","Valor Pago","Afastado"];
-        const rows=employees.map(emp=>[
-          semanaIni,semanaFim,emp.nome,emp.escala,
-          getDias(emp),getDias(emp)*2,
-          (getDias(emp)*2*valorPassagem).toFixed(2).replace(".",","),
-          getValorFinal(emp).toFixed(2).replace(".",","),
-          emp.afastado?"Sim":"Não"
-        ]);
-        const csv=[header,...rows].map(r=>r.join(";")).join("\n");
-        const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url;
-        a.download=`VT_${semanaIni}_${semanaFim}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      },[employees,semanaIni,semanaFim,valorPassagem]);
-
-      // Copiar CSV para clipboard
-      const copiarCSV=useCallback(()=>{
-        if(employees.length===0) return;
-        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias","Passagens","Vlr Calculado","Vlr Pago","Afastado"];
-        const rows=employees.map(emp=>[
-          fmtDate(semanaIni),fmtDate(semanaFim),emp.nome,emp.escala,
-          getDias(emp),getDias(emp)*2,
-          getValorFinal(emp).toFixed(2).replace(".",","),
-          getValorFinal(emp).toFixed(2).replace(".",","),
-          emp.afastado?"Sim":"Não"
-        ]);
-        const tsv=[header,...rows].map(r=>r.join("\t")).join("\n");
-        navigator.clipboard.writeText(tsv).then(()=>{
-          setCopiedCsv(true);
-          setTimeout(()=>setCopiedCsv(false),2500);
-        });
-      },[employees,semanaIni,semanaFim,valorPassagem]);
-
-      // Salvar na planilha via GAS web app
-      const salvarNaPlanilha=useCallback(async()=>{
-        if(!gasUrl.trim()){ setGasStatus({ok:false,msg:"Cole a URL do Web App antes de salvar."}); return; }
-        if(employees.length===0){ setGasStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
-        const payload={
-          semanaIni,semanaFim,
-          employees:employees.map(emp=>({
-            nome:emp.nome,escala:emp.escala,
-            afastado:emp.afastado||false,
-            diasTrabalhados:getDias(emp),
-            valorCalculado:getDias(emp)*2*valorPassagem,
-            valorPago:getValorFinal(emp),
-          }))
-        };
-        setGasStatus({ok:null,msg:"Enviando dados..."});
-        try{
-          // no-cors: dados chegam ao GAS mas não conseguimos ler a resposta
-          await fetch(gasUrl,{
-            method:"POST",
-            mode:"no-cors",
-            body:JSON.stringify(payload),
-          });
-          setGasStatus({ok:true,msg:"✅ Dados enviados! Verifique a aba VT na planilha para confirmar o registro."});
-        }catch(err){
-          setGasStatus({ok:false,msg:`Erro: ${err.message}. Tente exportar o CSV manualmente.`});
-        }
-      },[gasUrl,employees,semanaIni,semanaFim,valorPassagem]);
-
-      const printRecibo=useCallback(()=>{
-        const vp=parseFloat(passagemStr.replace(",","."))||0;
-        const fd=feriadosDia;
-        const getD=(emp)=>{
-          if(emp.afastado) return 0;
-          const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-          return dias.filter(d=>emp.presente?.[d]&&!fd[d]).length;
-        };
-        const getV=(emp)=>{
-          if(emp.afastado) return 0;
-          const pago=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
-          if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0;
-          return getD(emp)*2*vp;
-        };
-        const tot=employees.reduce((s,e)=>s+getV(e),0);
-        const periodo=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"—";
-        const linhas=employees.map((emp,i)=>{
-          const d=getD(emp); const v=getV(emp);
-          const calculado=d*2*vp;
-          const manualNote=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado?`<span style="font-size:7pt;color:#888">(calc: ${fmtBRL(calculado)})</span>`:"";
-          const badge=emp.escala==="SEG-SAB"?"background:#FFF8E7;color:#D4972A":"background:#E8F5EE;color:#219653";
-          const afastadoStyle=emp.afastado?"opacity:0.5;text-decoration:line-through;":"";
-          return `<tr style="background:${i%2===0?"#fff":"#f9f9f9"};${afastadoStyle}">
-            <td style="text-align:center;color:#888;width:20px">${i+1}</td>
-            <td style="font-weight:600;font-size:7.5pt">${emp.nome}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}</td>
-            <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
-            <td style="text-align:center;font-weight:700;width:36px">${d}</td>
-            <td style="text-align:center;color:#666;width:36px">${d*2}</td>
-            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:60px">${fmtBRL(v)} ${manualNote}</td>
-            <td style="border-left:1px solid #ccc;width:150px">
-              <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
-              <div style="font-size:7pt;color:#999;margin-top:2px">Data: ___/___/______</div>
-            </td>
-          </tr>`;
-        }).join("");
-        const totalPass=employees.reduce((s,e)=>s+getD(e)*2,0);
-        const html=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-        <title>Recibo VT — ${periodo}</title>
-        <style>
-          *{box-sizing:border-box;margin:0;padding:0}
-          body{font-family:Arial,sans-serif;font-size:9pt;color:#111;padding:8mm 10mm}
-          table{width:100%;border-collapse:collapse;margin-bottom:10px}
-          th{background:#EDE9E1;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:4px 5px;border:1px solid #ccc;color:#555}
-          td{padding:4px 5px;border:1px solid #ddd;vertical-align:middle;font-size:8pt}
-          thead{display:table-header-group}
-          tfoot{display:table-footer-group}
-          tr{page-break-inside:avoid}
-          .tfoot-row td{background:#1B3A2B!important;color:#fff;font-weight:800;font-size:10pt;padding:7px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-          .resumo{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-          .resumo-item{flex:1;min-width:90px;border:1px solid #ddd;border-radius:6px;padding:7px 10px}
-          .resumo-item.hl{border-left:4px solid #1B3A2B;background:#EAF5F0}
-          .resumo-label{font-size:7pt;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-          .resumo-val{font-size:13pt;font-weight:800;color:#1B3A2B}
-          .assinaturas{display:flex;gap:30px;margin-top:16px;padding-top:12px;border-top:1px dashed #ccc}
-          .assin-item{flex:1}
-          .assin-linha{border-bottom:1px solid #666;height:30px}
-          .assin-label{text-align:center;font-size:8pt;color:#888;margin-top:4px}
-          @media print{body{padding:5mm 7mm}}
-        </style></head><body>
-        <div style="border-bottom:3px solid #1B3A2B;padding-bottom:8px;margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:flex-end">
-            <div>
-              <div style="font-size:15pt;font-weight:800;color:#1B3A2B">${empresa}</div>
-              <div style="font-size:8pt;color:#888;margin-top:2px">R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:8pt;color:#888">Período de referência</div>
-              <div style="font-size:11pt;font-weight:700;color:#1B3A2B">${periodo}</div>
-              ${responsavel?`<div style="font-size:8pt;color:#888">Resp.: ${responsavel}</div>`:""}
-            </div>
-          </div>
-          <div style="margin-top:8px;font-size:11pt;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:.07em">Recibo de Vale Transporte</div>
-        </div>
-        <table>
-          <thead><tr>
-            <th style="width:20px">#</th>
-            <th style="text-align:left">Nome do Colaborador</th>
-            <th style="width:56px">Escala</th>
-            <th style="width:36px">Dias</th>
-            <th style="width:36px">Pass.</th>
-            <th style="width:60px">Valor</th>
-            <th style="width:150px;text-align:left">Assinatura / Data</th>
-          </tr></thead>
-          <tbody>${linhas}</tbody>
-        </table>
-        <div class="resumo">
-          <div class="resumo-item"><div class="resumo-label">Colaboradores</div><div class="resumo-val">${employees.length}</div></div>
-          <div class="resumo-item"><div class="resumo-label">Total passagens</div><div class="resumo-val">${totalPass}</div></div>
-          <div class="resumo-item"><div class="resumo-label">Valor/passagem</div><div class="resumo-val">${fmtBRL(vp)}</div></div>
-          <div class="resumo-item hl"><div class="resumo-label">Total a pagar</div><div class="resumo-val">${fmtBRL(tot)}</div></div>
-        </div>
-        <div class="assinaturas">
-          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Responsável pelo Pagamento</div><div class="assin-label">Data: ___/___/______</div></div>
-          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Conferência</div><div class="assin-label">Data: ___/___/______</div></div>
-        </div>
-        </body></html>`;
-        const old=document.getElementById("__print_iframe");
-        if(old) old.remove();
-        const iframe=document.createElement("iframe");
-        iframe.id="__print_iframe";
-        iframe.style.cssText="position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none";
-        document.body.appendChild(iframe);
-        iframe.contentDocument.open();
-        iframe.contentDocument.write(html);
-        iframe.contentDocument.close();
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); },2000);
-      },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr,feriadosDia]);
-
-      const vtTabs=[
-        {k:"import",l:"📂 Importar CSV"},
-        {k:"manual",l:"✏️ Manual"},
-        {k:"ponto",l:"📋 Ponto"},
-        {k:"recibo",l:"🖨️ Recibo"},
-        {k:"hist",l:"📚 Histórico"},
-        {k:"sheets",l:"💾 Salvar pagamento do VT"},
-      ];
-
-      const vtPageContent=(
-        <div>
-          <div style={{marginBottom:20}}>
-            <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🚌 Vale Transporte</div>
-            <div style={{fontSize:13,color:C.muted}}>Controle semanal de presença e geração de recibo</div>
-          </div>
-
-          <div style={s.card}>
-            <div style={s.cardTitle}>⚙️ Configurações</div>
-            <div style={s.grid3}>
-              <div><label style={s.label}>Empresa</label><input style={s.input} value={empresa} onChange={e=>setEmpresa(e.target.value)}/></div>
-              <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
-              <div>
-                <label style={s.label}>Valor da passagem (R$)</label>
-                <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
-                <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
-              </div>
-            </div>
-            <div style={{...s.grid2,marginTop:12}}>
-              <div><label style={s.label}>Semana — Início</label><input style={s.input} type="date" value={semanaIni} onChange={e=>setSemanaIni(e.target.value)}/></div>
-              <div><label style={s.label}>Semana — Fim</label><input style={s.input} type="date" value={semanaFim} onChange={e=>setSemanaFim(e.target.value)}/></div>
-            </div>
-          </div>
-
-          <div style={{display:"flex",gap:4,marginBottom:18,borderBottom:`1px solid ${C.border}`,paddingBottom:0,overflowX:"auto"}}>
-            {vtTabs.map(t=>(
-              <button key={t.k} style={{...s.btn,background:vtTab===t.k?C.pri:"transparent",color:vtTab===t.k?"#fff":C.muted,border:"none",borderRadius:"7px 7px 0 0",fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}} onClick={()=>setVtTab(t.k)}>{t.l}</button>
-            ))}
-          </div>
-
-          {/* ── TAB IMPORT ── */}
-          {vtTab==="import"&&(
-            <div style={s.card}>
-              <div style={s.cardTitle}>📂 Importar arquivo do ponto eletrônico</div>
-              <div style={s.infoBox}><strong>Formato esperado:</strong> arquivo <code>.csv</code> com separador <code>;</code> exportado pelo sistema de ponto. Presença detectada pela coluna <strong>1ª Batida</strong>.</div>
-              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDrop} onClick={()=>document.getElementById("csvInput").click()}>
-                <div style={{fontSize:32,marginBottom:8}}>📄</div>
-                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o arquivo CSV aqui</div>
-                <div style={{fontSize:13}}>ou clique para selecionar</div>
-                <input id="csvInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-              </div>
-              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
-              {employees.length>0&&(
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
-                  <span style={{fontSize:13,fontWeight:600,color:C.pri}}>{employees.length} colaboradores · Semana: <strong>{semanaLabel}</strong></span>
-                  <button style={s.btnAcc} onClick={()=>setVtTab("ponto")}>Ver Ponto →</button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB MANUAL ── */}
-          {vtTab==="manual"&&(
-            <div style={s.card}>
-              <div style={s.cardTitle}>✏️ Cadastro manual de colaboradores</div>
-              <div style={s.infoBox}>Use quando o arquivo do ponto não estiver disponível. Vá para a aba <strong>Ponto</strong> para marcar as presenças.</div>
-              {employees.length===0?(
-                <div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:13}}>Nenhum colaborador ainda.</div>
-              ):(
-                <table style={{...s.table,marginBottom:14}}>
-                  <thead><tr>
-                    <th style={{...s.th,width:32}}>#</th>
-                    <th style={s.th}>Nome</th>
-                    <th style={{...s.th,width:160}}>Escala</th>
-                    <th style={{...s.th,width:70}}></th>
-                  </tr></thead>
-                  <tbody>
-                    {employees.map((emp,i)=>(
-                      <tr key={emp.id} style={s.row(i)}>
-                        <td style={{...s.tdC,color:C.muted}}>{i+1}</td>
-                        <td style={s.td}><input style={{...s.input,fontSize:12}} value={emp.nome} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,nome:e.target.value}:x))}/></td>
-                        <td style={s.td}>
-                          <select style={{...s.select,width:"100%",fontSize:12}} value={emp.escala} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,escala:e.target.value}:x))}>
-                            <option value="SEG-SEX">Seg → Sex</option>
-                            <option value="SEG-SAB">Seg → Sáb</option>
-                          </select>
-                        </td>
-                        <td style={s.tdC}><button style={s.btnSm} onClick={()=>removeEmp(emp.id)}>✕</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              <hr style={s.divider}/>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <div style={{flex:1,minWidth:180}}><input style={s.input} placeholder="Nome do colaborador" value={novoNome} onChange={e=>setNovoNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEmp()}/></div>
-                <select style={{...s.select,minWidth:140}} value={novaEscala} onChange={e=>setNovaEscala(e.target.value)}>
-                  <option value="SEG-SEX">Seg → Sex</option>
-                  <option value="SEG-SAB">Seg → Sáb</option>
-                </select>
-                <button style={s.btn} onClick={addEmp}>＋ Adicionar</button>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB PONTO ── */}
-          {vtTab==="ponto"&&(
-            <div>
-              {employees.length===0?(
-                <div style={{...s.card,textAlign:"center",color:C.muted,padding:"32px"}}>Importe o CSV ou cadastre colaboradores primeiro.</div>
-              ):(
-                <div style={s.card}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
-                    <div style={s.cardTitle}>📋 Semana: <span style={{color:C.acc,marginLeft:6}}>{semanaLabel}</span></div>
-                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                      {Object.values(feriadosDia).some(Boolean)&&(
-                        <div style={{fontSize:11,background:C.amberBg,color:C.amber,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",fontWeight:700}}>
-                          ⚠️ {Object.values(feriadosDia).filter(Boolean).length} dia(s) como feriado/folga
-                        </div>
-                      )}
-                      <div style={{fontSize:12,color:C.muted,background:C.rowAlt,borderRadius:7,padding:"6px 12px",border:`1px solid ${C.border}`}}>
-                        ✅ presente &nbsp;|&nbsp; ⬜ falta &nbsp;|&nbsp; — fora da escala
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Legenda das novas colunas */}
-                  <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
-                    <div style={{fontSize:11,background:"#FEF3F2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 10px",color:"#991B1B"}}>
-                      🏖️ <strong>Afastado</strong>: férias / atestado / licença → zera o VT
-                    </div>
-                    <div style={{fontSize:11,background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",color:"#6E4C1E"}}>
-                      🎯 <strong>Pago R$</strong>: valor ajustado (ex: arredondamento) — substitui o calculado
-                    </div>
-                    <div style={{fontSize:11,background:C.feriado,border:`1px solid #D4B483`,borderRadius:6,padding:"4px 10px",color:"#8B6914"}}>
-                      📅 <strong>Feriado/Folga</strong>: marque o dia no cabeçalho — descontado de todos
-                    </div>
-                  </div>
-
-                  <div style={{overflowX:"auto"}}>
-                    <table style={s.table}>
-                      <thead>
-                        <tr>
-                          <th style={{...s.th,minWidth:200}}>Colaborador</th>
-                          <th style={{...s.th,width:80,textAlign:"center"}}>Escala</th>
-                          {DIAS_SS.map(d=>(
-                            <th key={d} style={feriadosDia[d]?{...s.thFeriado,minWidth:60}:{...s.thC,minWidth:60}}>
-                              <div>{DIA_LABEL[d]}</div>
-                              {/* Marcar todos */}
-                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:6,alignItems:"center"}}>
-                                <input type="checkbox" title={`Marcar todos — ${DIA_LABEL_FULL[d]}`} style={{width:11,height:11,cursor:"pointer"}} onChange={e=>setAllDay(d,e.target.checked)}/>
-                              </div>
-                              {/* Feriado toggle */}
-                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:3,alignItems:"center"}}>
-                                <input
-                                  type="checkbox"
-                                  title={`Marcar ${DIA_LABEL_FULL[d]} como feriado/folga`}
-                                  checked={feriadosDia[d]||false}
-                                  onChange={()=>toggleFeriado(d)}
-                                  style={{width:11,height:11,cursor:"pointer",accentColor:C.amber}}
-                                />
-                                <span style={{fontSize:8,color:feriadosDia[d]?"#8B6914":C.muted,fontWeight:700}}>FER</span>
-                              </div>
-                            </th>
-                          ))}
-                          <th style={{...s.thC,minWidth:44}}>Dias</th>
-                          <th style={{...s.thC,minWidth:76}}>VT Calc.</th>
-                          <th style={{...s.thC,minWidth:80,background:"#EEF5E9",color:C.green}}>Pago R$</th>
-                          <th style={{...s.thC,minWidth:76,background:"#EEF5E9",color:C.green}}>Total</th>
-                          <th style={{...s.thC,minWidth:72,background:"#FEF3F2",color:"#991B1B"}}>Afastado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {employees.map((emp,i)=>{
-                          const diasEmp=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-                          const dias=getDias(emp);
-                          const calcVal=dias*2*valorPassagem;
-                          const finalVal=getValorFinal(emp);
-                          const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
-                          return(
-                            <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.55:1}}>
-                              <td style={{...s.td,fontWeight:600,fontSize:12,textDecoration:emp.afastado?"line-through":"none"}}>
-                                {emp.nome}
-                                {emp.afastado&&<span style={{marginLeft:6,fontSize:10,background:"#FEE2E2",color:"#991B1B",borderRadius:10,padding:"1px 5px",fontWeight:700}}>Afastado</span>}
-                              </td>
-                              <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
-                              {DIAS_SS.map(d=>{
-                                const works=diasEmp.includes(d);
-                                const checked=emp.presente?.[d]||false;
-                                const isFeriado=feriadosDia[d];
-                                const bgCell=isFeriado?"#F5EFDF":!works?"#F0ECE8":checked&&!emp.afastado?"#E6F5EC":undefined;
-                                return(
-                                  <td key={d} style={{...s.tdC,background:bgCell,transition:"background 0.15s"}}>
-                                    {works&&!isFeriado&&!emp.afastado?(
-                                      <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
-                                    ):isFeriado?(
-                                      <span style={{color:"#C8A843",fontSize:13}}>🎌</span>
-                                    ):(
-                                      <span style={{color:"#CCC",fontSize:12}}>—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                              <td style={{...s.tdC,fontWeight:700,color:dias>0&&!emp.afastado?C.pri:C.muted}}>{dias}</td>
-                              <td style={{...s.tdC,fontSize:12,color:emp.afastado?C.muted:C.muted,textDecoration:temAjuste?"line-through":"none"}}>
-                                {fmtBRL(calcVal)}
-                              </td>
-                              {/* Coluna Pago R$ */}
-                              <td style={{...s.tdC,background:"#F7FBF4"}}>
-                                {!emp.afastado?(
-                                  <input
-                                    type="text"
-                                    value={emp.valorPago||""}
-                                    placeholder="auto"
-                                    onChange={e=>setValorPago(emp.id,e.target.value)}
-                                    style={{...s.inputSm,width:72,textAlign:"center",background:temAjuste?"#FFFBF0":"#FAFAF8",border:temAjuste?`1.5px solid ${C.amber}`:`1.5px solid ${C.border}`,color:temAjuste?C.amber:C.muted}}
-                                  />
-                                ):(
-                                  <span style={{color:"#CCC",fontSize:12}}>—</span>
-                                )}
-                              </td>
-                              {/* Coluna Total (valor final) */}
-                              <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:12,background:"#F7FBF4"}}>
-                                {fmtBRL(finalVal)}
-                              </td>
-                              {/* Coluna Afastado */}
-                              <td style={{...s.tdC,background:"#FFF8F8"}}>
-                                <input
-                                  type="checkbox"
-                                  checked={emp.afastado||false}
-                                  onChange={()=>toggleAfastado(emp.id)}
-                                  style={{width:16,height:16,cursor:"pointer",accentColor:"#A93226"}}
-                                  title="Marcar como afastado (férias, atestado ou licença)"
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr style={{background:"#EDE9E1"}}>
-                          <td style={{...s.td,fontWeight:800,fontSize:13}} colSpan={2}>TOTAL</td>
-                          <td colSpan={DIAS_SS.length}/>
-                          <td style={{...s.tdC,fontWeight:800}}>{employees.reduce((s,e)=>s+getDias(e),0)}</td>
-                          <td style={{...s.tdC,fontWeight:700,fontSize:12,color:C.muted}}>{fmtBRL(employees.reduce((s,e)=>s+getDias(e)*2*valorPassagem,0))}</td>
-                          <td style={{background:"#F7FBF4"}}/>
-                          <td style={{...s.tdC,fontWeight:900,color:C.pri,fontSize:14,background:"#F7FBF4"}}>{fmtBRL(total)}</td>
-                          <td style={{background:"#FFF8F8"}}/>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB RECIBO ── */}
-          {vtTab==="recibo"&&(
-            <div>
-              <div style={s.card}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                  <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
-                  <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
-                </div>
-                <div>
-                  <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-                      <div>
-                        <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{empresa}</div>
-                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:11,color:C.muted}}>Período de referência</div>
-                        <div style={{fontSize:14,fontWeight:700,color:C.pri}}>{semanaLabel}</div>
-                        {responsavel&&<div style={{fontSize:11,color:C.muted}}>Resp.: {responsavel}</div>}
-                      </div>
-                    </div>
-                    <div style={{marginTop:10,fontSize:14,fontWeight:800,textAlign:"center",textTransform:"uppercase",letterSpacing:"0.07em"}}>Recibo de Vale Transporte</div>
-                  </div>
-                  <table style={{...s.table,marginBottom:16,fontSize:12}}>
-                    <thead><tr>
-                      <th style={{...s.th,width:28}}>#</th>
-                      <th style={s.th}>Nome do Colaborador</th>
-                      <th style={s.thC}>Escala</th>
-                      <th style={s.thC}>Dias</th>
-                      <th style={s.thC}>Passagens</th>
-                      <th style={s.thC}>VT Calc.</th>
-                      <th style={{...s.thC,color:C.green}}>Valor Pago</th>
-                      <th style={{...s.th,minWidth:180}}>Assinatura / Data</th>
-                    </tr></thead>
-                    <tbody>
-                      {employees.map((emp,i)=>{
-                        const dias=getDias(emp);
-                        const calcVal=dias*2*valorPassagem;
-                        const finalVal=getValorFinal(emp);
-                        const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
-                        return(
-                          <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.5:1}}>
-                            <td style={{...s.tdC,color:C.muted,fontSize:11}}>{i+1}</td>
-                            <td style={{...s.td,fontWeight:600,textDecoration:emp.afastado?"line-through":"none"}}>
-                              {emp.nome}
-                              {emp.afastado&&<span style={{marginLeft:6,fontSize:10,color:"#A93226"}}>(Afastado)</span>}
-                            </td>
-                            <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
-                            <td style={{...s.tdC,fontWeight:700}}>{dias}</td>
-                            <td style={{...s.tdC,color:C.muted}}>{dias*2}</td>
-                            <td style={{...s.tdC,color:C.muted,textDecoration:temAjuste?"line-through":"none",fontSize:11}}>{fmtBRL(calcVal)}</td>
-                            <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:13}}>
-                              {fmtBRL(finalVal)}
-                              {temAjuste&&<div style={{fontSize:9,color:C.amber,fontWeight:700}}>ajustado</div>}
-                            </td>
-                            <td style={{...s.td,borderLeft:`1px solid ${C.border}`}}>
-                              <div style={{borderBottom:"1px solid #AAA",height:26,marginTop:6}}/>
-                              <div style={{fontSize:10,color:C.muted,marginTop:3}}>Data: ___/___/______</div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{background:C.pri}}>
-                        <td colSpan={6} style={{padding:"10px 12px",fontWeight:800,fontSize:13,color:"#fff"}}>TOTAL GERAL</td>
-                        <td style={{textAlign:"center",fontWeight:900,fontSize:14,color:C.acc,padding:10}}>{fmtBRL(total)}</td>
-                        <td style={{background:"#fff",borderLeft:`1px solid ${C.border}`}}/>
-                      </tr>
-                    </tfoot>
-                  </table>
-                  <div style={{display:"flex",gap:14,marginBottom:16,flexWrap:"wrap"}}>
-                    {[
-                      {l:"Colaboradores",v:`${employees.length}`},
-                      {l:"Total passagens",v:`${employees.reduce((x,e)=>x+getDias(e)*2,0)} pass.`},
-                      {l:"Valor/passagem",v:fmtBRL(valorPassagem)},
-                      {l:"Total a pagar",v:fmtBRL(total),hl:true},
-                    ].map((it,i)=>(
-                      <div key={i} style={{flex:1,minWidth:100,background:it.hl?"#EAF5F0":C.rowAlt,border:`1px solid ${C.border}`,borderLeft:it.hl?`4px solid ${C.pri}`:undefined,borderRadius:8,padding:"10px 14px"}}>
-                        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
-                        <div style={{fontSize:15,fontWeight:800,color:it.hl?C.pri:C.text}}>{it.v}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{display:"flex",gap:28,marginTop:24,paddingTop:14,borderTop:`1px dashed ${C.border}`}}>
-                    {["Responsável pelo Pagamento","Conferência"].map((l,i)=>(
-                      <div key={i} style={{flex:1}}>
-                        <div style={{borderBottom:"1px solid #666",height:36}}/>
-                        <div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:5}}>{l}</div>
-                        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginTop:2}}>Data: ___/___/______</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{display:"flex",justifyContent:"flex-end"}}>
-                <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB HISTÓRICO ── */}
-          {vtTab==="hist"&&(
-            <div style={s.card}>
-              <div style={s.cardTitle}>📚 Histórico de Semanas</div>
-              <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
-              {historico.length===0?(
-                <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
-              ):(
-                <table style={s.table}>
-                  <thead><tr>
-                    <th style={s.th}>Período</th>
-                    <th style={s.thC}>Colaboradores</th>
-                    <th style={s.thC}>Total VT</th>
-                    <th style={s.th}>Importado em</th>
-                    <th style={s.thC}></th>
-                  </tr></thead>
-                  <tbody>
-                    {historico.map((h,i)=>{
-                      const vp2=parseFloat(passagemStr.replace(",","."))||0;
-                      const getD2=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
-                      const getV2=(emp)=>{ const pago=emp.valorPago!==undefined&&emp.valorPago!==""; if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0; return getD2(emp)*2*vp2; };
-                      const tot2=h.employees.reduce((acc,e)=>acc+(e.afastado?0:getV2(e)),0);
-                      const ativo=h.semanaIni===semanaIni&&h.semanaFim===semanaFim;
-                      return(
-                        <tr key={h.id} style={{...s.row(i),outline:ativo?`2px solid ${C.acc}`:"none",outlineOffset:-1}}>
-                          <td style={{...s.td,fontWeight:ativo?700:400}}>
-                            {ativo&&<span style={{fontSize:10,background:C.acc,color:"#fff",borderRadius:20,padding:"1px 7px",marginRight:6,fontWeight:700}}>ATIVA</span>}
-                            {h.label}
-                          </td>
-                          <td style={s.tdC}>{h.employees.length}</td>
-                          <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(tot2)}</td>
-                          <td style={{...s.td,fontSize:11,color:C.muted}}>{h.importadoEm}</td>
-                          <td style={s.tdC}>
-                            <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>{carregarDoHistorico(h);setVtTab("ponto");}}>Carregar</button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-              {historico.length>0&&(
-                <div style={{marginTop:12,textAlign:"right"}}>
-                  <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={()=>{ if(window.confirm("Apagar todo o histórico salvo?")) setHistorico([]); }}>🗑️ Limpar histórico</button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB GOOGLE SHEETS ── */}
-          {vtTab==="sheets"&&(
-            <div>
-              <div style={s.card}>
-                <div style={s.cardTitle}>💾 Salvar pagamento do VT</div>
-                <div style={s.infoBox}>
-                  Salve o pagamento da semana diretamente na aba <strong>VT</strong> da planilha, ou exporte como CSV.
-                </div>
-                {employees.length===0&&(
-                  <div style={{fontSize:12,color:C.muted,marginBottom:14,padding:"10px 14px",background:C.rowAlt,borderRadius:7,border:`1px solid ${C.border}`}}>
-                    ⚠️ Carregue os dados na aba <strong>Ponto</strong> primeiro.
-                  </div>
-                )}
-                <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
-                  <button
-                    style={{...s.btnAcc,opacity:employees.length===0?0.5:1,fontSize:14,padding:"11px 24px"}}
-                    onClick={salvarNaPlanilha}
-                    disabled={employees.length===0}
-                  >
-                    💾 Salvar automaticamente
-                  </button>
-                  <button style={{...s.btn,opacity:employees.length===0?0.5:1}} onClick={exportarCSV} disabled={employees.length===0}>
-                    ⬇️ Baixar CSV
-                  </button>
-                  <button style={{...s.btnOutline,opacity:employees.length===0?0.5:1}} onClick={copiarCSV} disabled={employees.length===0}>
-                    {copiedCsv?"✅ Copiado!":"📋 Copiar dados"}
-                  </button>
-                </div>
-                {gasStatus&&(
-                  <div style={{...(gasStatus.ok===true?s.successBox:gasStatus.ok===false?s.warnBox:s.infoBox),marginTop:14,marginBottom:0}}>
-                    {gasStatus.msg}
-                  </div>
-                )}
-                {copiedCsv&&!gasStatus&&(
-                  <div style={{...s.successBox,marginTop:12}}>✅ Dados copiados! Cole na aba VT da planilha (Ctrl+V).</div>
-                )}
-              </div>
-
-              <div style={s.card}>
-                <div style={s.cardTitle}>⚙️ Configuração do Google Apps Script</div>
-                <div style={s.infoBox}>
-                  Cole o script abaixo no <strong>Apps Script</strong> da sua planilha e publique como <strong>Web App</strong>
-                  (Executar como: <em>Eu</em> · Acesso: <em>Qualquer pessoa</em>).<br/>
-                  Sempre que atualizar o script, crie uma <strong>Nova versão</strong> antes de reimplantar.
-                </div>
-                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-                  <button
-                    onClick={()=>{
-                      navigator.clipboard.writeText(GAS_SCRIPT).then(()=>{
-                        setCopiedScript(true);
-                        setTimeout(()=>setCopiedScript(false),2500);
-                      });
-                    }}
-                    style={{...s.btnAcc,fontSize:12,padding:"7px 16px"}}
-                  >
-                    {copiedScript?"✅ Copiado!":"📋 Copiar script completo"}
-                  </button>
-                </div>
-                <pre style={{...s.codeBlock,maxHeight:340,overflowY:"auto",fontSize:11}}>{GAS_SCRIPT}</pre>
-                <div style={{marginTop:10}}>
-                  <label style={s.label}>URL do Web App (cole aqui após implantar)</label>
-                  <input
-                    style={s.input}
-                    value={gasUrl}
-                    onChange={e=>setGasUrl(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      );
-
       // ============================================================
       // LOGIN
       // ============================================================
@@ -1825,7 +1026,7 @@ function doPost(e) {
         const sincronizarPlanilha = async () => {
           const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
           if(!url) {
-            setStatus({ok:false, msg:"❌ URL do Web App (GAS) não configurada. Acesse Vale Transporte → Salvar → Configurações do GAS."}); return;
+            setStatus({ok:false, msg:"❌ URL do Web App (GAS) não configurada. Acesse ⚙️ Configurações para configurar a URL do Web App."}); return;
           }
           setLoading(true); setStatus({ok:null, msg:"⏳ Buscando colaboradores na planilha..."});
           try {
@@ -2295,7 +1496,7 @@ function doPost(e) {
       // ============================================================
       // MÓDULO FOLHA DE PAGAMENTO
       // ============================================================
-      function FolhaPage({ colabAPI, setColabAPI }) {
+      function FolhaPage({ colabAPI, setColabAPI, gasUrl }) {
         const GAS_URL = gasUrl || "https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec";
 
         const hoje = new Date();
@@ -3218,9 +2419,834 @@ function doPost(e) {
         );
       }
 
+
+      // ============================================================
+      // MÓDULO CONFIGURAÇÕES (admin only)
+      // ============================================================
+      function ConfiguracoesPage({ gasUrl, setGasUrl, empresa, setEmpresa, responsavel, setResponsavel, passagemStr, setPassagemStr, copiedScript, setCopiedScript }) {
+        return (
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:20}}>⚙️ Configurações</div>
+
+            <div style={s.card}>
+              <div style={s.cardTitle}>🔧 Google Apps Script (Web App)</div>
+              <div style={s.infoBox}>
+                Cole o script abaixo no <strong>Apps Script</strong> da sua planilha e publique como <strong>Web App</strong>
+                {' '}(Executar como: <em>Eu</em> · Acesso: <em>Qualquer pessoa</em>).{' '}
+                Sempre que atualizar o script, crie uma <strong>Nova versão</strong> antes de reimplantar.
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+                <button
+                  onClick={()=>{ navigator.clipboard.writeText(GAS_SCRIPT).then(()=>{ setCopiedScript(true); setTimeout(()=>setCopiedScript(false),2500); }); }}
+                  style={{...s.btnAcc,fontSize:12,padding:"7px 16px"}}
+                >
+                  {copiedScript?"✅ Copiado!":"📋 Copiar script completo"}
+                </button>
+              </div>
+              <pre style={{...s.codeBlock,maxHeight:380,overflowY:"auto",fontSize:11}}>{GAS_SCRIPT}</pre>
+              <div style={{marginTop:12}}>
+                <label style={s.label}>URL do Web App (cole aqui após implantar)</label>
+                <input
+                  style={s.input}
+                  value={gasUrl}
+                  onChange={e=>setGasUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                />
+              </div>
+            </div>
+
+            <div style={s.card}>
+              <div style={s.cardTitle}>🏢 Empresa</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Nome da empresa</label>
+                  <input style={s.input} value={empresa} onChange={e=>setEmpresa(e.target.value)} placeholder="Nome da empresa"/>
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Responsável</label>
+                  <input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/>
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Valor da passagem (R$)</label>
+                  <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="4,30"/>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+    function App(){
+      const [page,setPage]=useState("dashboard");
+      const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
+      const [responsavel,setResponsavel]=useState(()=>localStorage.getItem("rh_responsavel")||"");
+      const [passagemStr,setPassagemStr]=useState(()=>localStorage.getItem("rh_passagem")||"4,30");
+      const [semanaIni,setSemanaIni]=useState(()=>localStorage.getItem("rh_semanaIni")||"");
+      const [semanaFim,setSemanaFim]=useState(()=>localStorage.getItem("rh_semanaFim")||"");
+      const [employees,setEmployees]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_employees")||"[]"); }catch(e){ return []; } });
+      const [historico,setHistorico]=useState(()=>{ try{ return JSON.parse(localStorage.getItem("rh_historico")||"[]"); }catch(e){ return []; } });
+      const [novoNome,setNovoNome]=useState("");
+      const [novaEscala,setNovaEscala]=useState("SEG-SEX");
+      const [csvStatus,setCsvStatus]=useState(null);
+      const [drag,setDrag]=useState(false);
+      const [vtTab,setVtTab]=useState("import");
+      // Novos estados
+      const [feriadosDia,setFeriadosDia]=useState({});
+      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec");
+      const [gasStatus,setGasStatus]=useState(null);
+      const [copiedScript,setCopiedScript]=useState(false);
+      const [copiedCsv,setCopiedCsv]=useState(false);
+      const [colabAPI,setColabAPI]=useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
+      const [empresaId,setEmpresaId]=useState(()=>localStorage.getItem("rh_empresa_id")||"cantina");
+      const [usuario, setUsuario] = useState(null);
+      const [perfil, setPerfil] = useState(null);
+      const [loadingAuth, setLoadingAuth] = useState(true);
+
+      useEffect(()=>{ localStorage.setItem("rh_empresa",empresa); },[empresa]);
+      useEffect(()=>{ localStorage.setItem("rh_responsavel",responsavel); },[responsavel]);
+      useEffect(()=>{ localStorage.setItem("rh_passagem",passagemStr); },[passagemStr]);
+      useEffect(()=>{ localStorage.setItem("rh_semanaIni",semanaIni); },[semanaIni]);
+      useEffect(()=>{ localStorage.setItem("rh_semanaFim",semanaFim); },[semanaFim]);
+      useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
+      useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
+      useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
+      useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
+      useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
+      useEffect(()=>{
+        async function _carregarColab(){
+          const {data,error}=await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
+          if(!error && data && data.length>0){
+            setColabAPI(data.map(c=>({
+              nome:c.nome, admissao:c.admissao||'', experiencia30:c.experiencia_30||'',
+              experiencia90:c.experiencia_90||'', setor:c.setor||'', funcao:c.funcao||'',
+              cpf:c.cpf||'', nascimento:c.nascimento||'',
+              salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
+              transporte:Number(c.transporte)||0, cafeManha:Number(c.cafe_manha)||0, id_supa:c.id
+            })));
+          }
+        }
+        _carregarColab();
+      },[empresaId]);
+
+      const carregarPerfil = useCallback(async (uid) => {
+        try {
+          const {data} = await _supa.from('perfis').select('*').eq('id',uid).single();
+          if(data) {
+            setPerfil(data);
+            if(data.empresa_id) setEmpresaId(data.empresa_id);
+          } else {
+            setPerfil(null);
+          }
+        } catch(e) {
+          setPerfil(null);
+        }
+        setLoadingAuth(false);
+      },[]);
+
+      useEffect(()=>{
+        _supa.auth.getSession().then(({data:{session}})=>{
+          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
+          else setLoadingAuth(false);
+        });
+        const {data:{subscription}} = _supa.auth.onAuthStateChange((event,session)=>{
+          if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
+          else { setUsuario(null); setPerfil(null); setLoadingAuth(false); }
+        });
+        return ()=>subscription.unsubscribe();
+      },[]);
+
+      const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
+
+      // getDias respeita feriados e afastamento
+      const getDias=(emp)=>{
+        if(emp.afastado) return 0;
+        const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
+        return dias.filter(d=>emp.presente?.[d]&&!feriadosDia[d]).length;
+      };
+
+      // getValorFinal usa valorPago se preenchido, senão calcula
+      const getValorFinal=(emp)=>{
+        if(emp.afastado) return 0;
+        const vp=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
+        if(vp) return parseFloat(String(emp.valorPago).replace(",","."))||0;
+        return getDias(emp)*2*valorPassagem;
+      };
+
+      const total=employees.reduce((s,e)=>s+getValorFinal(e),0);
+      const semanaLabel=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"— período não definido —";
+
+      const toggleFeriado=(dia)=>setFeriadosDia(p=>({...p,[dia]:!p[dia]}));
+      const toggleAtt=(id,dia)=>setEmployees(p=>p.map(e=>e.id===id?{...e,presente:{...e.presente,[dia]:!e.presente?.[dia]}}:e));
+      const toggleAfastado=(id)=>setEmployees(p=>p.map(e=>e.id===id?{...e,afastado:!e.afastado}:e));
+      const setValorPago=(id,val)=>setEmployees(p=>p.map(e=>e.id===id?{...e,valorPago:val}:e));
+      const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
+      const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
+      const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{},afastado:false,valorPago:""}]); setNovoNome(""); };
+
+      const carregarDoHistorico=useCallback((entrada)=>{
+        setEmployees(entrada.employees.map(e=>({afastado:false,valorPago:"",...e})));
+        setSemanaIni(entrada.semanaIni);
+        setSemanaFim(entrada.semanaFim);
+        setCsvStatus({ok:true,msg:`✅ Semana ${entrada.label} carregada do histórico.`});
+      },[]);
+
+      const handleFile=useCallback((file)=>{
+        if(!file){ return; }
+        if(!file.name.toLowerCase().endsWith(".csv")){ setCsvStatus({ok:false,msg:"Selecione um arquivo .csv exportado do ponto eletrônico."}); return; }
+        const reader=new FileReader();
+        reader.onload=(e)=>{
+          try{
+            const bytes=new Uint8Array(e.target.result);
+            const text=new TextDecoder("iso-8859-1").decode(bytes);
+            const {employees:emps,semanaIni:ini,semanaFim:fim}=parseCSV(text);
+            setEmployees(emps.map((emp,i)=>({...emp,id:i+1})));
+            setSemanaIni(ini);
+            setSemanaFim(fim);
+            setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores importados. Período: ${fmtDate(ini)} a ${fmtDate(fim)}.`});
+            const lbl=`${fmtDate(ini)} a ${fmtDate(fim)}`;
+            setHistorico(prev=>{
+              const sem=prev.filter(h=>h.semanaIni!==ini||h.semanaFim!==fim);
+              return [{id:Date.now(),label:lbl,semanaIni:ini,semanaFim:fim,employees:emps.map((e,i)=>({...e,id:i+1})),importadoEm:new Date().toLocaleString("pt-BR")},...sem].slice(0,12);
+            });
+          }catch(err){
+            setCsvStatus({ok:false,msg:`Erro ao processar arquivo: ${err.message}`});
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      },[]);
+
+      const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
+
+      // Exportar CSV para download
+      const exportarCSV=useCallback(()=>{
+        if(employees.length===0) return;
+        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias Trabalhados","Passagens","Valor Calculado","Valor Pago","Afastado"];
+        const rows=employees.map(emp=>[
+          semanaIni,semanaFim,emp.nome,emp.escala,
+          getDias(emp),getDias(emp)*2,
+          (getDias(emp)*2*valorPassagem).toFixed(2).replace(".",","),
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          emp.afastado?"Sim":"Não"
+        ]);
+        const csv=[header,...rows].map(r=>r.join(";")).join("\n");
+        const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;
+        a.download=`VT_${semanaIni}_${semanaFim}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },[employees,semanaIni,semanaFim,valorPassagem]);
+
+      // Copiar CSV para clipboard
+      const copiarCSV=useCallback(()=>{
+        if(employees.length===0) return;
+        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias","Passagens","Vlr Calculado","Vlr Pago","Afastado"];
+        const rows=employees.map(emp=>[
+          fmtDate(semanaIni),fmtDate(semanaFim),emp.nome,emp.escala,
+          getDias(emp),getDias(emp)*2,
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          getValorFinal(emp).toFixed(2).replace(".",","),
+          emp.afastado?"Sim":"Não"
+        ]);
+        const tsv=[header,...rows].map(r=>r.join("\t")).join("\n");
+        navigator.clipboard.writeText(tsv).then(()=>{
+          setCopiedCsv(true);
+          setTimeout(()=>setCopiedCsv(false),2500);
+        });
+      },[employees,semanaIni,semanaFim,valorPassagem]);
+
+      // Salvar na planilha via GAS web app
+      const salvarNaPlanilha=useCallback(async()=>{
+        if(!gasUrl.trim()){ setGasStatus({ok:false,msg:"Cole a URL do Web App antes de salvar."}); return; }
+        if(employees.length===0){ setGasStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
+        const payload={
+          semanaIni,semanaFim,
+          employees:employees.map(emp=>({
+            nome:emp.nome,escala:emp.escala,
+            afastado:emp.afastado||false,
+            diasTrabalhados:getDias(emp),
+            valorCalculado:getDias(emp)*2*valorPassagem,
+            valorPago:getValorFinal(emp),
+          }))
+        };
+        setGasStatus({ok:null,msg:"Enviando dados..."});
+        try{
+          // no-cors: dados chegam ao GAS mas não conseguimos ler a resposta
+          await fetch(gasUrl,{
+            method:"POST",
+            mode:"no-cors",
+            body:JSON.stringify(payload),
+          });
+          setGasStatus({ok:true,msg:"✅ Dados enviados! Verifique a aba VT na planilha para confirmar o registro."});
+        }catch(err){
+          setGasStatus({ok:false,msg:`Erro: ${err.message}. Tente exportar o CSV manualmente.`});
+        }
+      },[gasUrl,employees,semanaIni,semanaFim,valorPassagem]);
+
+      const printRecibo=useCallback(()=>{
+        const vp=parseFloat(passagemStr.replace(",","."))||0;
+        const fd=feriadosDia;
+        const getD=(emp)=>{
+          if(emp.afastado) return 0;
+          const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
+          return dias.filter(d=>emp.presente?.[d]&&!fd[d]).length;
+        };
+        const getV=(emp)=>{
+          if(emp.afastado) return 0;
+          const pago=emp.valorPago!==undefined&&emp.valorPago!==""&&emp.valorPago!==null;
+          if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0;
+          return getD(emp)*2*vp;
+        };
+        const tot=employees.reduce((s,e)=>s+getV(e),0);
+        const periodo=semanaIni&&semanaFim?`${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}`:"—";
+        const linhas=employees.map((emp,i)=>{
+          const d=getD(emp); const v=getV(emp);
+          const calculado=d*2*vp;
+          const manualNote=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado?`<span style="font-size:7pt;color:#888">(calc: ${fmtBRL(calculado)})</span>`:"";
+          const badge=emp.escala==="SEG-SAB"?"background:#FFF8E7;color:#D4972A":"background:#E8F5EE;color:#219653";
+          const afastadoStyle=emp.afastado?"opacity:0.5;text-decoration:line-through;":"";
+          return `<tr style="background:${i%2===0?"#fff":"#f9f9f9"};${afastadoStyle}">
+            <td style="text-align:center;color:#888;width:20px">${i+1}</td>
+            <td style="font-weight:600;font-size:7.5pt">${emp.nome}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}</td>
+            <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
+            <td style="text-align:center;font-weight:700;width:36px">${d}</td>
+            <td style="text-align:center;color:#666;width:36px">${d*2}</td>
+            <td style="text-align:center;font-weight:800;color:#1B3A2B;width:60px">${fmtBRL(v)} ${manualNote}</td>
+            <td style="border-left:1px solid #ccc;width:150px">
+              <div style="border-bottom:1px solid #999;height:20px;margin-top:4px"></div>
+              <div style="font-size:7pt;color:#999;margin-top:2px">Data: ___/___/______</div>
+            </td>
+          </tr>`;
+        }).join("");
+        const totalPass=employees.reduce((s,e)=>s+getD(e)*2,0);
+        const html=`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+        <title>Recibo VT — ${periodo}</title>
+        <style>
+          *{box-sizing:border-box;margin:0;padding:0}
+          body{font-family:Arial,sans-serif;font-size:9pt;color:#111;padding:8mm 10mm}
+          table{width:100%;border-collapse:collapse;margin-bottom:10px}
+          th{background:#EDE9E1;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:4px 5px;border:1px solid #ccc;color:#555}
+          td{padding:4px 5px;border:1px solid #ddd;vertical-align:middle;font-size:8pt}
+          thead{display:table-header-group}
+          tfoot{display:table-footer-group}
+          tr{page-break-inside:avoid}
+          .tfoot-row td{background:#1B3A2B!important;color:#fff;font-weight:800;font-size:10pt;padding:7px 10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          .resumo{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+          .resumo-item{flex:1;min-width:90px;border:1px solid #ddd;border-radius:6px;padding:7px 10px}
+          .resumo-item.hl{border-left:4px solid #1B3A2B;background:#EAF5F0}
+          .resumo-label{font-size:7pt;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+          .resumo-val{font-size:13pt;font-weight:800;color:#1B3A2B}
+          .assinaturas{display:flex;gap:30px;margin-top:16px;padding-top:12px;border-top:1px dashed #ccc}
+          .assin-item{flex:1}
+          .assin-linha{border-bottom:1px solid #666;height:30px}
+          .assin-label{text-align:center;font-size:8pt;color:#888;margin-top:4px}
+          @media print{body{padding:5mm 7mm}}
+        </style></head><body>
+        <div style="border-bottom:3px solid #1B3A2B;padding-bottom:8px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-end">
+            <div>
+              <div style="font-size:15pt;font-weight:800;color:#1B3A2B">${empresa}</div>
+              <div style="font-size:8pt;color:#888;margin-top:2px">R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:8pt;color:#888">Período de referência</div>
+              <div style="font-size:11pt;font-weight:700;color:#1B3A2B">${periodo}</div>
+              ${responsavel?`<div style="font-size:8pt;color:#888">Resp.: ${responsavel}</div>`:""}
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:11pt;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:.07em">Recibo de Vale Transporte</div>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:20px">#</th>
+            <th style="text-align:left">Nome do Colaborador</th>
+            <th style="width:56px">Escala</th>
+            <th style="width:36px">Dias</th>
+            <th style="width:36px">Pass.</th>
+            <th style="width:60px">Valor</th>
+            <th style="width:150px;text-align:left">Assinatura / Data</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+        <div class="resumo">
+          <div class="resumo-item"><div class="resumo-label">Colaboradores</div><div class="resumo-val">${employees.length}</div></div>
+          <div class="resumo-item"><div class="resumo-label">Total passagens</div><div class="resumo-val">${totalPass}</div></div>
+          <div class="resumo-item"><div class="resumo-label">Valor/passagem</div><div class="resumo-val">${fmtBRL(vp)}</div></div>
+          <div class="resumo-item hl"><div class="resumo-label">Total a pagar</div><div class="resumo-val">${fmtBRL(tot)}</div></div>
+        </div>
+        <div class="assinaturas">
+          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Responsável pelo Pagamento</div><div class="assin-label">Data: ___/___/______</div></div>
+          <div class="assin-item"><div class="assin-linha"></div><div class="assin-label">Conferência</div><div class="assin-label">Data: ___/___/______</div></div>
+        </div>
+        </body></html>`;
+        const old=document.getElementById("__print_iframe");
+        if(old) old.remove();
+        const iframe=document.createElement("iframe");
+        iframe.id="__print_iframe";
+        iframe.style.cssText="position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none";
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(html);
+        iframe.contentDocument.close();
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(()=>{ if(iframe.parentNode) iframe.remove(); },2000);
+      },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr,feriadosDia]);
+
+      const vtTabs=[
+        {k:"import",l:"📂 Importar CSV"},
+        {k:"manual",l:"✏️ Manual"},
+        {k:"ponto",l:"📋 Ponto"},
+        {k:"recibo",l:"🖨️ Recibo"},
+        {k:"hist",l:"📚 Histórico"},
+        {k:"sheets",l:"💾 Salvar pagamento do VT"},
+      ];
+
+      const vtPageContent=(
+        <div>
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🚌 Vale Transporte</div>
+            <div style={{fontSize:13,color:C.muted}}>Controle semanal de presença e geração de recibo</div>
+          </div>
+
+          <div style={s.card}>
+            <div style={s.cardTitle}>⚙️ Configurações</div>
+            <div style={s.grid3}>
+              <div><label style={s.label}>Empresa</label><input style={s.input} value={empresa} onChange={e=>setEmpresa(e.target.value)}/></div>
+              <div><label style={s.label}>Responsável</label><input style={s.input} value={responsavel} onChange={e=>setResponsavel(e.target.value)} placeholder="Nome do responsável"/></div>
+              <div>
+                <label style={s.label}>Valor da passagem (R$)</label>
+                <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="5,50"/>
+                <div style={{fontSize:11,color:C.muted,marginTop:4}}>1 presença = 2 × R$ {passagemStr} = <strong>{fmtBRL(valorPassagem*2)}</strong></div>
+              </div>
+            </div>
+            <div style={{...s.grid2,marginTop:12}}>
+              <div><label style={s.label}>Semana — Início</label><input style={s.input} type="date" value={semanaIni} onChange={e=>setSemanaIni(e.target.value)}/></div>
+              <div><label style={s.label}>Semana — Fim</label><input style={s.input} type="date" value={semanaFim} onChange={e=>setSemanaFim(e.target.value)}/></div>
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:4,marginBottom:18,borderBottom:`1px solid ${C.border}`,paddingBottom:0,overflowX:"auto"}}>
+            {vtTabs.map(t=>(
+              <button key={t.k} style={{...s.btn,background:vtTab===t.k?C.pri:"transparent",color:vtTab===t.k?"#fff":C.muted,border:"none",borderRadius:"7px 7px 0 0",fontSize:12,padding:"8px 14px",whiteSpace:"nowrap"}} onClick={()=>setVtTab(t.k)}>{t.l}</button>
+            ))}
+          </div>
+
+          {/* ── TAB IMPORT ── */}
+          {vtTab==="import"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>📂 Importar arquivo do ponto eletrônico</div>
+              <div style={s.infoBox}><strong>Formato esperado:</strong> arquivo <code>.csv</code> com separador <code>;</code> exportado pelo sistema de ponto. Presença detectada pela coluna <strong>1ª Batida</strong>.</div>
+              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDrop} onClick={()=>document.getElementById("csvInput").click()}>
+                <div style={{fontSize:32,marginBottom:8}}>📄</div>
+                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o arquivo CSV aqui</div>
+                <div style={{fontSize:13}}>ou clique para selecionar</div>
+                <input id="csvInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+              </div>
+              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
+              {employees.length>0&&(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:13,fontWeight:600,color:C.pri}}>{employees.length} colaboradores · Semana: <strong>{semanaLabel}</strong></span>
+                  <button style={s.btnAcc} onClick={()=>setVtTab("ponto")}>Ver Ponto →</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB MANUAL ── */}
+          {vtTab==="manual"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>✏️ Cadastro manual de colaboradores</div>
+              <div style={s.infoBox}>Use quando o arquivo do ponto não estiver disponível. Vá para a aba <strong>Ponto</strong> para marcar as presenças.</div>
+              {employees.length===0?(
+                <div style={{textAlign:"center",color:C.muted,padding:"20px 0",fontSize:13}}>Nenhum colaborador ainda.</div>
+              ):(
+                <table style={{...s.table,marginBottom:14}}>
+                  <thead><tr>
+                    <th style={{...s.th,width:32}}>#</th>
+                    <th style={s.th}>Nome</th>
+                    <th style={{...s.th,width:160}}>Escala</th>
+                    <th style={{...s.th,width:70}}></th>
+                  </tr></thead>
+                  <tbody>
+                    {employees.map((emp,i)=>(
+                      <tr key={emp.id} style={s.row(i)}>
+                        <td style={{...s.tdC,color:C.muted}}>{i+1}</td>
+                        <td style={s.td}><input style={{...s.input,fontSize:12}} value={emp.nome} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,nome:e.target.value}:x))}/></td>
+                        <td style={s.td}>
+                          <select style={{...s.select,width:"100%",fontSize:12}} value={emp.escala} onChange={e=>setEmployees(p=>p.map(x=>x.id===emp.id?{...x,escala:e.target.value}:x))}>
+                            <option value="SEG-SEX">Seg → Sex</option>
+                            <option value="SEG-SAB">Seg → Sáb</option>
+                          </select>
+                        </td>
+                        <td style={s.tdC}><button style={s.btnSm} onClick={()=>removeEmp(emp.id)}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <hr style={s.divider}/>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:180}}><input style={s.input} placeholder="Nome do colaborador" value={novoNome} onChange={e=>setNovoNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEmp()}/></div>
+                <select style={{...s.select,minWidth:140}} value={novaEscala} onChange={e=>setNovaEscala(e.target.value)}>
+                  <option value="SEG-SEX">Seg → Sex</option>
+                  <option value="SEG-SAB">Seg → Sáb</option>
+                </select>
+                <button style={s.btn} onClick={addEmp}>＋ Adicionar</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB PONTO ── */}
+          {vtTab==="ponto"&&(
+            <div>
+              {employees.length===0?(
+                <div style={{...s.card,textAlign:"center",color:C.muted,padding:"32px"}}>Importe o CSV ou cadastre colaboradores primeiro.</div>
+              ):(
+                <div style={s.card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                    <div style={s.cardTitle}>📋 Semana: <span style={{color:C.acc,marginLeft:6}}>{semanaLabel}</span></div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      {Object.values(feriadosDia).some(Boolean)&&(
+                        <div style={{fontSize:11,background:C.amberBg,color:C.amber,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",fontWeight:700}}>
+                          ⚠️ {Object.values(feriadosDia).filter(Boolean).length} dia(s) como feriado/folga
+                        </div>
+                      )}
+                      <div style={{fontSize:12,color:C.muted,background:C.rowAlt,borderRadius:7,padding:"6px 12px",border:`1px solid ${C.border}`}}>
+                        ✅ presente &nbsp;|&nbsp; ⬜ falta &nbsp;|&nbsp; — fora da escala
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Legenda das novas colunas */}
+                  <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                    <div style={{fontSize:11,background:"#FEF3F2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 10px",color:"#991B1B"}}>
+                      🏖️ <strong>Afastado</strong>: férias / atestado / licença → zera o VT
+                    </div>
+                    <div style={{fontSize:11,background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",color:"#6E4C1E"}}>
+                      🎯 <strong>Pago R$</strong>: valor ajustado (ex: arredondamento) — substitui o calculado
+                    </div>
+                    <div style={{fontSize:11,background:C.feriado,border:`1px solid #D4B483`,borderRadius:6,padding:"4px 10px",color:"#8B6914"}}>
+                      📅 <strong>Feriado/Folga</strong>: marque o dia no cabeçalho — descontado de todos
+                    </div>
+                  </div>
+
+                  <div style={{overflowX:"auto"}}>
+                    <table style={s.table}>
+                      <thead>
+                        <tr>
+                          <th style={{...s.th,minWidth:200}}>Colaborador</th>
+                          <th style={{...s.th,width:80,textAlign:"center"}}>Escala</th>
+                          {DIAS_SS.map(d=>(
+                            <th key={d} style={feriadosDia[d]?{...s.thFeriado,minWidth:60}:{...s.thC,minWidth:60}}>
+                              <div>{DIA_LABEL[d]}</div>
+                              {/* Marcar todos */}
+                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:6,alignItems:"center"}}>
+                                <input type="checkbox" title={`Marcar todos — ${DIA_LABEL_FULL[d]}`} style={{width:11,height:11,cursor:"pointer"}} onChange={e=>setAllDay(d,e.target.checked)}/>
+                              </div>
+                              {/* Feriado toggle */}
+                              <div style={{marginTop:3,display:"flex",justifyContent:"center",gap:3,alignItems:"center"}}>
+                                <input
+                                  type="checkbox"
+                                  title={`Marcar ${DIA_LABEL_FULL[d]} como feriado/folga`}
+                                  checked={feriadosDia[d]||false}
+                                  onChange={()=>toggleFeriado(d)}
+                                  style={{width:11,height:11,cursor:"pointer",accentColor:C.amber}}
+                                />
+                                <span style={{fontSize:8,color:feriadosDia[d]?"#8B6914":C.muted,fontWeight:700}}>FER</span>
+                              </div>
+                            </th>
+                          ))}
+                          <th style={{...s.thC,minWidth:44}}>Dias</th>
+                          <th style={{...s.thC,minWidth:76}}>VT Calc.</th>
+                          <th style={{...s.thC,minWidth:80,background:"#EEF5E9",color:C.green}}>Pago R$</th>
+                          <th style={{...s.thC,minWidth:76,background:"#EEF5E9",color:C.green}}>Total</th>
+                          <th style={{...s.thC,minWidth:72,background:"#FEF3F2",color:"#991B1B"}}>Afastado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employees.map((emp,i)=>{
+                          const diasEmp=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
+                          const dias=getDias(emp);
+                          const calcVal=dias*2*valorPassagem;
+                          const finalVal=getValorFinal(emp);
+                          const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
+                          return(
+                            <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.55:1}}>
+                              <td style={{...s.td,fontWeight:600,fontSize:12,textDecoration:emp.afastado?"line-through":"none"}}>
+                                {emp.nome}
+                                {emp.afastado&&<span style={{marginLeft:6,fontSize:10,background:"#FEE2E2",color:"#991B1B",borderRadius:10,padding:"1px 5px",fontWeight:700}}>Afastado</span>}
+                              </td>
+                              <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
+                              {DIAS_SS.map(d=>{
+                                const works=diasEmp.includes(d);
+                                const checked=emp.presente?.[d]||false;
+                                const isFeriado=feriadosDia[d];
+                                const bgCell=isFeriado?"#F5EFDF":!works?"#F0ECE8":checked&&!emp.afastado?"#E6F5EC":undefined;
+                                return(
+                                  <td key={d} style={{...s.tdC,background:bgCell,transition:"background 0.15s"}}>
+                                    {works&&!isFeriado&&!emp.afastado?(
+                                      <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
+                                    ):isFeriado?(
+                                      <span style={{color:"#C8A843",fontSize:13}}>🎌</span>
+                                    ):(
+                                      <span style={{color:"#CCC",fontSize:12}}>—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td style={{...s.tdC,fontWeight:700,color:dias>0&&!emp.afastado?C.pri:C.muted}}>{dias}</td>
+                              <td style={{...s.tdC,fontSize:12,color:emp.afastado?C.muted:C.muted,textDecoration:temAjuste?"line-through":"none"}}>
+                                {fmtBRL(calcVal)}
+                              </td>
+                              {/* Coluna Pago R$ */}
+                              <td style={{...s.tdC,background:"#F7FBF4"}}>
+                                {!emp.afastado?(
+                                  <input
+                                    type="text"
+                                    value={emp.valorPago||""}
+                                    placeholder="auto"
+                                    onChange={e=>setValorPago(emp.id,e.target.value)}
+                                    style={{...s.inputSm,width:72,textAlign:"center",background:temAjuste?"#FFFBF0":"#FAFAF8",border:temAjuste?`1.5px solid ${C.amber}`:`1.5px solid ${C.border}`,color:temAjuste?C.amber:C.muted}}
+                                  />
+                                ):(
+                                  <span style={{color:"#CCC",fontSize:12}}>—</span>
+                                )}
+                              </td>
+                              {/* Coluna Total (valor final) */}
+                              <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:12,background:"#F7FBF4"}}>
+                                {fmtBRL(finalVal)}
+                              </td>
+                              {/* Coluna Afastado */}
+                              <td style={{...s.tdC,background:"#FFF8F8"}}>
+                                <input
+                                  type="checkbox"
+                                  checked={emp.afastado||false}
+                                  onChange={()=>toggleAfastado(emp.id)}
+                                  style={{width:16,height:16,cursor:"pointer",accentColor:"#A93226"}}
+                                  title="Marcar como afastado (férias, atestado ou licença)"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{background:"#EDE9E1"}}>
+                          <td style={{...s.td,fontWeight:800,fontSize:13}} colSpan={2}>TOTAL</td>
+                          <td colSpan={DIAS_SS.length}/>
+                          <td style={{...s.tdC,fontWeight:800}}>{employees.reduce((s,e)=>s+getDias(e),0)}</td>
+                          <td style={{...s.tdC,fontWeight:700,fontSize:12,color:C.muted}}>{fmtBRL(employees.reduce((s,e)=>s+getDias(e)*2*valorPassagem,0))}</td>
+                          <td style={{background:"#F7FBF4"}}/>
+                          <td style={{...s.tdC,fontWeight:900,color:C.pri,fontSize:14,background:"#F7FBF4"}}>{fmtBRL(total)}</td>
+                          <td style={{background:"#FFF8F8"}}/>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB RECIBO ── */}
+          {vtTab==="recibo"&&(
+            <div>
+              <div style={s.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
+                  <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
+                </div>
+                <div>
+                  <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+                      <div>
+                        <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{empresa}</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:11,color:C.muted}}>Período de referência</div>
+                        <div style={{fontSize:14,fontWeight:700,color:C.pri}}>{semanaLabel}</div>
+                        {responsavel&&<div style={{fontSize:11,color:C.muted}}>Resp.: {responsavel}</div>}
+                      </div>
+                    </div>
+                    <div style={{marginTop:10,fontSize:14,fontWeight:800,textAlign:"center",textTransform:"uppercase",letterSpacing:"0.07em"}}>Recibo de Vale Transporte</div>
+                  </div>
+                  <table style={{...s.table,marginBottom:16,fontSize:12}}>
+                    <thead><tr>
+                      <th style={{...s.th,width:28}}>#</th>
+                      <th style={s.th}>Nome do Colaborador</th>
+                      <th style={s.thC}>Escala</th>
+                      <th style={s.thC}>Dias</th>
+                      <th style={s.thC}>Passagens</th>
+                      <th style={s.thC}>VT Calc.</th>
+                      <th style={{...s.thC,color:C.green}}>Valor Pago</th>
+                      <th style={{...s.th,minWidth:180}}>Assinatura / Data</th>
+                    </tr></thead>
+                    <tbody>
+                      {employees.map((emp,i)=>{
+                        const dias=getDias(emp);
+                        const calcVal=dias*2*valorPassagem;
+                        const finalVal=getValorFinal(emp);
+                        const temAjuste=emp.valorPago!==""&&emp.valorPago!==undefined&&!emp.afastado;
+                        return(
+                          <tr key={emp.id} style={{...s.row(i),opacity:emp.afastado?0.5:1}}>
+                            <td style={{...s.tdC,color:C.muted,fontSize:11}}>{i+1}</td>
+                            <td style={{...s.td,fontWeight:600,textDecoration:emp.afastado?"line-through":"none"}}>
+                              {emp.nome}
+                              {emp.afastado&&<span style={{marginLeft:6,fontSize:10,color:"#A93226"}}>(Afastado)</span>}
+                            </td>
+                            <td style={s.tdC}><span style={s.badge(emp.escala)}>{emp.escala}</span></td>
+                            <td style={{...s.tdC,fontWeight:700}}>{dias}</td>
+                            <td style={{...s.tdC,color:C.muted}}>{dias*2}</td>
+                            <td style={{...s.tdC,color:C.muted,textDecoration:temAjuste?"line-through":"none",fontSize:11}}>{fmtBRL(calcVal)}</td>
+                            <td style={{...s.tdC,fontWeight:800,color:finalVal>0?C.green:C.muted,fontSize:13}}>
+                              {fmtBRL(finalVal)}
+                              {temAjuste&&<div style={{fontSize:9,color:C.amber,fontWeight:700}}>ajustado</div>}
+                            </td>
+                            <td style={{...s.td,borderLeft:`1px solid ${C.border}`}}>
+                              <div style={{borderBottom:"1px solid #AAA",height:26,marginTop:6}}/>
+                              <div style={{fontSize:10,color:C.muted,marginTop:3}}>Data: ___/___/______</div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{background:C.pri}}>
+                        <td colSpan={6} style={{padding:"10px 12px",fontWeight:800,fontSize:13,color:"#fff"}}>TOTAL GERAL</td>
+                        <td style={{textAlign:"center",fontWeight:900,fontSize:14,color:C.acc,padding:10}}>{fmtBRL(total)}</td>
+                        <td style={{background:"#fff",borderLeft:`1px solid ${C.border}`}}/>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  <div style={{display:"flex",gap:14,marginBottom:16,flexWrap:"wrap"}}>
+                    {[
+                      {l:"Colaboradores",v:`${employees.length}`},
+                      {l:"Total passagens",v:`${employees.reduce((x,e)=>x+getDias(e)*2,0)} pass.`},
+                      {l:"Valor/passagem",v:fmtBRL(valorPassagem)},
+                      {l:"Total a pagar",v:fmtBRL(total),hl:true},
+                    ].map((it,i)=>(
+                      <div key={i} style={{flex:1,minWidth:100,background:it.hl?"#EAF5F0":C.rowAlt,border:`1px solid ${C.border}`,borderLeft:it.hl?`4px solid ${C.pri}`:undefined,borderRadius:8,padding:"10px 14px"}}>
+                        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
+                        <div style={{fontSize:15,fontWeight:800,color:it.hl?C.pri:C.text}}>{it.v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:28,marginTop:24,paddingTop:14,borderTop:`1px dashed ${C.border}`}}>
+                    {["Responsável pelo Pagamento","Conferência"].map((l,i)=>(
+                      <div key={i} style={{flex:1}}>
+                        <div style={{borderBottom:"1px solid #666",height:36}}/>
+                        <div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:5}}>{l}</div>
+                        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginTop:2}}>Data: ___/___/______</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end"}}>
+                <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB HISTÓRICO ── */}
+          {vtTab==="hist"&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>📚 Histórico de Semanas</div>
+              <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
+              {historico.length===0?(
+                <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
+              ):(
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Período</th>
+                    <th style={s.thC}>Colaboradores</th>
+                    <th style={s.thC}>Total VT</th>
+                    <th style={s.th}>Importado em</th>
+                    <th style={s.thC}></th>
+                  </tr></thead>
+                  <tbody>
+                    {historico.map((h,i)=>{
+                      const vp2=parseFloat(passagemStr.replace(",","."))||0;
+                      const getD2=(emp)=>{ const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; return dias.filter(d=>emp.presente?.[d]).length; };
+                      const getV2=(emp)=>{ const pago=emp.valorPago!==undefined&&emp.valorPago!==""; if(pago) return parseFloat(String(emp.valorPago).replace(",","."))||0; return getD2(emp)*2*vp2; };
+                      const tot2=h.employees.reduce((acc,e)=>acc+(e.afastado?0:getV2(e)),0);
+                      const ativo=h.semanaIni===semanaIni&&h.semanaFim===semanaFim;
+                      return(
+                        <tr key={h.id} style={{...s.row(i),outline:ativo?`2px solid ${C.acc}`:"none",outlineOffset:-1}}>
+                          <td style={{...s.td,fontWeight:ativo?700:400}}>
+                            {ativo&&<span style={{fontSize:10,background:C.acc,color:"#fff",borderRadius:20,padding:"1px 7px",marginRight:6,fontWeight:700}}>ATIVA</span>}
+                            {h.label}
+                          </td>
+                          <td style={s.tdC}>{h.employees.length}</td>
+                          <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(tot2)}</td>
+                          <td style={{...s.td,fontSize:11,color:C.muted}}>{h.importadoEm}</td>
+                          <td style={s.tdC}>
+                            <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>{carregarDoHistorico(h);setVtTab("ponto");}}>Carregar</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+              {historico.length>0&&(
+                <div style={{marginTop:12,textAlign:"right"}}>
+                  <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={()=>{ if(window.confirm("Apagar todo o histórico salvo?")) setHistorico([]); }}>🗑️ Limpar histórico</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB GOOGLE SHEETS ── */}
+          {vtTab==="sheets"&&(
+            <div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>💾 Salvar pagamento do VT</div>
+                <div style={s.infoBox}>
+                  Salve o pagamento da semana diretamente na aba <strong>VT</strong> da planilha, ou exporte como CSV.
+                </div>
+                {employees.length===0&&(
+                  <div style={{fontSize:12,color:C.muted,marginBottom:14,padding:"10px 14px",background:C.rowAlt,borderRadius:7,border:`1px solid ${C.border}`}}>
+                    ⚠️ Carregue os dados na aba <strong>Ponto</strong> primeiro.
+                  </div>
+                )}
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
+                  <button
+                    style={{...s.btnAcc,opacity:employees.length===0?0.5:1,fontSize:14,padding:"11px 24px"}}
+                    onClick={salvarNaPlanilha}
+                    disabled={employees.length===0}
+                  >
+                    💾 Salvar automaticamente
+                  </button>
+                  <button style={{...s.btn,opacity:employees.length===0?0.5:1}} onClick={exportarCSV} disabled={employees.length===0}>
+                    ⬇️ Baixar CSV
+                  </button>
+                  <button style={{...s.btnOutline,opacity:employees.length===0?0.5:1}} onClick={copiarCSV} disabled={employees.length===0}>
+                    {copiedCsv?"✅ Copiado!":"📋 Copiar dados"}
+                  </button>
+                </div>
+                {gasStatus&&(
+                  <div style={{...(gasStatus.ok===true?s.successBox:gasStatus.ok===false?s.warnBox:s.infoBox),marginTop:14,marginBottom:0}}>
+                    {gasStatus.msg}
+                  </div>
+                )}
+                {copiedCsv&&!gasStatus&&(
+                  <div style={{...s.successBox,marginTop:12}}>✅ Dados copiados! Cole na aba VT da planilha (Ctrl+V).</div>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+
+
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','acessos','ajuda']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','acessos','ajuda','config']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -3233,6 +3259,7 @@ function doPost(e) {
         {k:'ponto_hist',l:'📊 Histórico Ponto'},
         {k:'acessos',l:'🔐 Acessos'},
         {k:'ajuda',l:'❓ Ajuda'},
+        {k:'config',l:'⚙️ Configurações'},
       ].filter(n=>paginasPermitidas.includes(n.k));
 
       if(loadingAuth) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg,color:C.muted,fontSize:14}}>Carregando...</div>;
@@ -3266,11 +3293,12 @@ function doPost(e) {
               {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl} colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
               {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
               {page==="vt"&&vtPageContent}
-              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI}/>}
+              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
               {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
               {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
+              {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript}/>}
               {page==="ajuda"&&<AjudaPage/>}
             </main>
           </div>
