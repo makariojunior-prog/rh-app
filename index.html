@@ -499,8 +499,11 @@ function doPost(e) {
             )}
 
             {semDados && (
-              <div style={{...s.warnBox,marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                <span>⚠️ Nenhum colaborador carregado. Acesse <strong>Colaboradores</strong> e clique em <strong>"Sincronizar Planilha"</strong> ou <strong>"Atualizar dashboard"</strong>.</span>
+              <div style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:10,padding:"14px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontWeight:700,color:"#1D4ED8",fontSize:13,marginBottom:2}}>📋 Nenhum colaborador carregado ainda</div>
+                  <div style={{color:"#3B82F6",fontSize:12}}>Sincronize a planilha para carregar os colaboradores no banco de dados. Após a primeira sincronização, os dados carregam automaticamente.</div>
+                </div>
                 {onNavegar && <button onClick={()=>onNavegar("colaboradores")} style={{...s.btn,fontSize:12,padding:"6px 14px",flexShrink:0}}>Ir para Colaboradores →</button>}
               </div>
             )}
@@ -1189,8 +1192,20 @@ function doPost(e) {
             ):(
               <div style={s.card}>
                 {filtrados.length===0?(
-                  <div style={{textAlign:"center",padding:"32px 0",color:C.muted,fontSize:13}}>
-                    {lista.length===0?"Nenhum colaborador cadastrado. Clique em \"+ Novo\" para adicionar.":"Nenhum resultado encontrado."}
+                  <div style={{textAlign:"center",padding:"40px 24px",color:C.muted,fontSize:13}}>
+                    {busca ? "Nenhum resultado encontrado." : (
+                      <div>
+                        <div style={{fontSize:32,marginBottom:12}}>📋</div>
+                        <div style={{fontWeight:700,fontSize:15,color:C.pri,marginBottom:8}}>Banco de dados vazio</div>
+                        <div style={{color:C.muted,marginBottom:16,lineHeight:1.5}}>
+                          Nenhum colaborador encontrado no banco de dados.<br/>
+                          Clique em <strong>"📥 Sincronizar Planilha"</strong> para importar os colaboradores<br/>
+                          da planilha Google Sheets. Após a primeira sincronização,<br/>
+                          os dados carregam automaticamente sempre que abrir o app.
+                        </div>
+                        <div style={{fontSize:12,color:C.muted}}>Ou clique em <strong>"+ Novo"</strong> para cadastrar manualmente.</div>
+                      </div>
+                    )}
                   </div>
                 ):(
                   <table style={s.table}>
