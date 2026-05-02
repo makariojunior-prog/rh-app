@@ -1181,6 +1181,7 @@ function doPost(e) {
         const [abaEditar, setAbaEditar] = useState('dados');
         const [historicoAtestados, setHistoricoAtestados] = useState([]);
         const [historicoFerias, setHistoricoFerias] = useState([]);
+        const [historicoSalario, setHistoricoSalario] = useState([]);
         const [loadingHistorico, setLoadingHistorico] = useState(false);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
@@ -1236,6 +1237,10 @@ function doPost(e) {
             const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
             setHistoricoFerias(data||[]);
           } catch(e) { setHistoricoFerias([]); }
+          try {
+            const {data:dataSal} = await _supa.from('historico_salario').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('data_vigencia',{ascending:false});
+            setHistoricoSalario(dataSal||[]);
+          } catch(e) { setHistoricoSalario([]); }
           setLoadingHistorico(false);
         };
 
@@ -1356,7 +1361,7 @@ function doPost(e) {
           setLoading(false);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
@@ -1374,7 +1379,7 @@ function doPost(e) {
             termoAssiduidade:!!c.termo_assiduidade,
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
-          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]);
+          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]);
         };
 
         const salvar = async () => {
@@ -1415,6 +1420,22 @@ function doPost(e) {
               ({data,error} = await _supa.from('colaboradores').update(payload).eq('id',editando.id).select().single());
             }
             if(error) throw error;
+            if(!editando.novo){
+              const salAnterior = Number(editando.salario)||0;
+              const salNovo = parseFloat(String(form.salario).replace(",","."))||0;
+              if(salAnterior>0 && Math.abs(salNovo-salAnterior)>0.01){
+                const perc = ((salNovo-salAnterior)/salAnterior*100).toFixed(2);
+                await _supa.from('historico_salario').insert({
+                  empresa_id:empresaId,
+                  colaborador_id:editando.id,
+                  colaborador_nome:form.nome.trim(),
+                  salario_anterior:salAnterior,
+                  salario_novo:salNovo,
+                  percentual:parseFloat(perc),
+                  data_vigencia:new Date().toISOString().slice(0,10)
+                });
+              }
+            }
             const novaLista = editando.novo
               ? [...lista, data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
               : lista.map(x=>x.id===editando.id?data:x);
@@ -1554,7 +1575,7 @@ function doPost(e) {
 
             <div style={s.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
-                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
                 <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
                 <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
               </div>
@@ -1584,6 +1605,27 @@ function doPost(e) {
                               <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||"—"}</td>
                             </tr>);
                           })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>💰 Histórico Salarial</div>
+                      {historicoSalario.length===0?(
+                        <div style={{color:C.muted,fontSize:13,paddingBottom:16}}>Nenhum reajuste registrado ainda.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+                          <thead><tr style={{background:"#F9FAFB"}}>
+                            <th style={s.th}>Data</th><th style={s.th}>Salário Anterior</th>
+                            <th style={s.th}>Salário Novo</th><th style={{...s.th,textAlign:"center"}}>Reajuste</th>
+                          </tr></thead>
+                          <tbody>{historicoSalario.map((h,i)=>(
+                            <tr key={i} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12}}>{h.data_vigencia?new Date(h.data_vigencia+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                              <td style={{...s.td,fontSize:12}}>{h.salario_anterior!=null?'R$ '+Number(h.salario_anterior).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</td>
+                              <td style={{...s.td,fontSize:12,fontWeight:700}}>{h.salario_novo!=null?'R$ '+Number(h.salario_novo).toLocaleString('pt-BR',{minimumFractionDigits:2}):'—'}</td>
+                              <td style={{...s.td,textAlign:"center"}}>
+                                <span style={{fontSize:12,fontWeight:700,color:h.percentual>=0?"#166534":"#991B1B"}}>{h.percentual>=0?"+":""}{Number(h.percentual).toFixed(2).replace(".",",")}%</span>
+                              </td>
+                            </tr>
+                          ))}</tbody>
                         </table>
                       )}
                       <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>🏖️ Férias</div>
