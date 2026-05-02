@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  rh-backup:
+    build: .
+    container_name: rh-app-backup
+    restart: always
+    environment:
+      # ─── Preencha com seus dados reais ───────────────────────
+      SUPABASE_URL: "https://SEU_PROJETO.supabase.co"
+      SUPABASE_KEY: "SUA_ANON_KEY_AQUI"
+      EMPRESA_ID:   "cantina"
+      MANTER_DIAS:  "60"
+      TZ:           "America/Sao_Paulo"
+      # Dentro do container, os backups vão para /backups
+      BACKUP_DIR:   "/backups"
+      # ─────────────────────────────────────────────────────────
+    volumes:
+      # Mapeia a pasta de armazenamento do NAS para /backups no container
+      # Ajuste o caminho da esquerda para o volume do seu NAS
+      - /volume1/RH-App-Backup:/backups
