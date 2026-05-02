@@ -1963,8 +1963,7 @@ function doPost(e) {
               fim: a.fim||a.inicio||null,
               dias: calcDias(a.inicio,a.fim||a.inicio),
               obs: a.obs||null,
-              origem: 'planilha',
-              atualizado_em: new Date().toISOString()
+              origem: 'planilha'
             })).filter(r=>r.inicio);
             const {error} = await _supa.from('atestados').upsert(records,{onConflict:'id'});
             if(error) throw error;
@@ -1985,8 +1984,7 @@ function doPost(e) {
             colaborador_nome: form.colaboradorNome.trim(),
             setor: form.setor||null, cid: form.cid||null,
             inicio: form.inicio, fim: form.fim, dias,
-            obs: form.obs||null, origem: 'manual',
-            atualizado_em: new Date().toISOString()
+            obs: form.obs||null, origem: 'manual'
           });
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
           else { setStatus({ok:true,msg:'✅ Atestado incluído!'}); setMostrarForm(false); setForm(VAZIO); carregar(); }
