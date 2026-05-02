@@ -364,8 +364,10 @@ function _lerCandidatos(ss) {
       disponibilidade_turno: _bool(l[5]),                       // F
       pode_comecar:   String(l[6]||'').trim(),                  // G
       tem_experiencia: _bool(l[7]),                             // H
+      experiencia_tipo: String(l[7]||'').trim(),                // H texto completo
       descricao_experiencia: String(l[8]||'').trim(),           // I
       possui_cnh:     _bool(l[9]),                              // J
+      cnh_tipo:       String(l[9]||'').trim(),                  // J texto completo
       motivacao:      String(l[10]||'').trim(),                 // K
       curriculo_url:  String(l[11]||'').trim(),                 // L
       area_desejada:  String(l[12]||'').trim(),                 // M (manual)
@@ -2601,8 +2603,10 @@ function doPost(e) {
               disponibilidade_turno: c.disponibilidade_turno,
               pode_comecar: c.pode_comecar||null,
               tem_experiencia: c.tem_experiencia,
+              experiencia_tipo: c.experiencia_tipo||null,
               descricao_experiencia: c.descricao_experiencia||null,
               possui_cnh: c.possui_cnh,
+              cnh_tipo: c.cnh_tipo||null,
               motivacao: c.motivacao||null,
               curriculo_url: c.curriculo_url||null,
               area_desejada: c.area_desejada||null,
@@ -2775,8 +2779,8 @@ function doPost(e) {
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Mora em Goiânia'),React.createElement('br'),React.createElement('strong',null,c.mora_goiania?'Sim':'Não')),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Disponibilidade turno'),React.createElement('br'),React.createElement('strong',null,c.disponibilidade_turno?'Sim':'Não')),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Pode começar'),React.createElement('br'),React.createElement('strong',null,c.pode_comecar||'—')),
-                                    React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Experiência na área'),React.createElement('br'),React.createElement('strong',null,c.tem_experiencia?'Sim':'Não')),
-                                    React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Possui CNH'),React.createElement('br'),React.createElement('strong',null,c.possui_cnh?'Sim':'Não')),
+                                    React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Experiência na área'),React.createElement('br'),React.createElement('strong',null,(function(){var t=c.experiencia_tipo||'';return t.indexOf('diretamente')!==-1?'Sim (direta)':t.indexOf('outras')!==-1?'Sim (indireta)':t.indexOf('disposição')!==-1||t.indexOf('Não')!==-1?'Não':c.tem_experiencia?'Sim':'Não';})())),
+                                    React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'CNH'),React.createElement('br'),React.createElement('strong',null,(function(){var t=c.cnh_tipo||'';if(!t)return c.possui_cnh?'Sim':'Não';if(t==='Não possuo'||t==='Não possui')return 'Não';return t;})())),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Área desejada'),React.createElement('br'),React.createElement('strong',null,c.area_desejada||(c.outra_area?'Outra: '+c.outra_area:'—')))
                                   ),
                                   c.descricao_experiencia&&React.createElement('div',{style:{marginTop:10,fontSize:13}},React.createElement('span',{style:{color:C.muted,fontSize:11,display:'block'}},'Experiência profissional'),c.descricao_experiencia),
