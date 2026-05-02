@@ -87,6 +87,33 @@
       return { employees, semanaIni:toISO(sorted[0]), semanaFim:toISO(sorted[sorted.length-1]) };
     }
 
+    // INSS progressivo 2025
+    function calcINSS(salario) {
+      const s = Number(salario) || 0;
+      if (s <= 0) return 0;
+      const faixas = [
+        { limite: 1518.00, aliq: 0.075 },
+        { limite: 2793.00, aliq: 0.09  },
+        { limite: 4189.50, aliq: 0.12  },
+        { limite: 8157.41, aliq: 0.14  },
+      ];
+      let total = 0, base = 0;
+      for (const f of faixas) {
+        const topo = Math.min(s, f.limite);
+        if (topo <= base) break;
+        total += (topo - base) * f.aliq;
+        base = f.limite;
+        if (s <= f.limite) break;
+      }
+      return Math.round(total * 100) / 100;
+    }
+    function calcFGTS(salario) {
+      return Math.round((Number(salario) || 0) * 0.08 * 100) / 100;
+    }
+    function calcPericulosidade(salario) {
+      return Math.round((Number(salario) || 0) * 0.30 * 100) / 100;
+    }
+
     const C={
       bg:"#F4F1EC", card:"#FFF", pri:"#1B3A2B", acc:"#C8A843",
       text:"#1A1A1A", muted:"#888", border:"#E0DDD6",
@@ -233,8 +260,6 @@ function _lerColaboradores(ss) {
       cpf:                    linha[12] ? String(linha[12]).trim() : '',  // M
       nascimento:             _fmtDate(linha[13]),                        // N
       salario:                linha[14] || 0,                             // O
-      inss:                   linha[16] || 0,                             // Q
-      fgts:                   linha[17] || 0,                             // R
       transporte:             linha[18] || 0,                             // S
       contaSalario:           _bool(linha[24]),                          // Y
       aditivoContrato:        _bool(linha[25]),                          // Z
@@ -784,6 +809,7 @@ function doPost(e) {
         const tabs = [
           {k:"vt", l:"🚌 Vale Transporte"},
           {k:"folha", l:"💼 Folha de Pagamento"},
+          {k:"impostos", l:"🧮 Regras de Cálculo"},
         ];
 
         const SecaoVT = () => (
@@ -844,6 +870,74 @@ function doPost(e) {
                 <li><strong>Aba Recibo:</strong> Gera um recibo imprimível com espaço para assinatura de cada colaborador</li>
                 <li><strong>Aba Salvar:</strong> Envia os dados para o Google Sheets (requer configuração do endpoint GAS) ou baixa um CSV</li>
                 <li><strong>Aba Histórico:</strong> Exibe semanas já salvas — clique em uma para recarregá-la</li>
+              </ul>
+            </div>
+          </div>
+        );
+
+        const SecaoImpostos = () => (
+          <div>
+            <div style={{fontSize:15,fontWeight:800,color:C.pri,marginBottom:16}}>🧮 Regras e Cálculo de Impostos</div>
+
+            <div style={{...s.card,marginBottom:14}}>
+              <div style={s.cardTitle}>📐 INSS — Tabela Progressiva 2025</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:12}}>O INSS é calculado de forma <strong>progressiva</strong> sobre o salário bruto. Cada faixa incide apenas sobre a parcela do salário que se enquadra nela.</p>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,marginBottom:12}}>
+                <thead>
+                  <tr style={{background:C.pri,color:"#fff"}}>
+                    <th style={{padding:"8px 12px",textAlign:"left",fontWeight:600}}>Faixa salarial</th>
+                    <th style={{padding:"8px 12px",textAlign:"center",fontWeight:600}}>Alíquota</th>
+                    <th style={{padding:"8px 12px",textAlign:"right",fontWeight:600}}>Máx. desta faixa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    {faixa:"Até R$ 1.518,00",aliq:"7,5%",max:"R$ 113,85"},
+                    {faixa:"De R$ 1.518,01 a R$ 2.793,00",aliq:"9%",max:"R$ 114,75"},
+                    {faixa:"De R$ 2.793,01 a R$ 4.189,50",aliq:"12%",max:"R$ 167,58"},
+                    {faixa:"De R$ 4.189,51 a R$ 8.157,41",aliq:"14%",max:"R$ 555,51"},
+                  ].map((r,i)=>(
+                    <tr key={i} style={{borderBottom:"1px solid "+C.border,background:i%2===0?"#F9FAFB":"#fff"}}>
+                      <td style={{padding:"8px 12px"}}>{r.faixa}</td>
+                      <td style={{padding:"8px 12px",textAlign:"center",fontWeight:700,color:C.pri}}>{r.aliq}</td>
+                      <td style={{padding:"8px 12px",textAlign:"right",color:C.muted}}>{r.max}</td>
+                    </tr>
+                  ))}
+                  <tr style={{background:"#FEF9C3"}}>
+                    <td style={{padding:"8px 12px",fontWeight:700}}>Teto (acima de R$ 8.157,41)</td>
+                    <td style={{padding:"8px 12px",textAlign:"center",fontWeight:700,color:"#92400E"}}>Máx. R$ 951,69</td>
+                    <td style={{padding:"8px 12px",textAlign:"right",color:C.muted}}>—</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{...s.infoBox}}>
+                Exemplo: Salário R$ 3.000,00 → R$ 1.518,00 × 7,5% = R$ 113,85 + R$ 1.275,00 × 9% = R$ 114,75 + R$ 207,00 × 12% = R$ 24,84 = <strong>INSS total: R$ 253,44</strong>
+              </div>
+            </div>
+
+            <div style={{...s.card,marginBottom:14}}>
+              <div style={s.cardTitle}>📦 FGTS — Fundo de Garantia</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:8}}>Alíquota fixa de <strong>8%</strong> sobre o salário bruto, sem teto e sem progressividade. Depositado pela empresa na conta vinculada do trabalhador — não é descontado do salário.</p>
+              <div style={{background:"#F0F9F4",border:"1px solid "+C.green,borderRadius:8,padding:"12px 16px",fontSize:13}}>
+                Fórmula: FGTS = Salário Bruto × 8%
+              </div>
+            </div>
+
+            <div style={{...s.card,marginBottom:14}}>
+              <div style={s.cardTitle}>⚠️ Adicional de Periculosidade</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:8}}>Colaboradores expostos a condições perigosas têm direito ao adicional conforme <strong>CLT art. 193</strong>.</p>
+              <div style={{background:"#FEF9C3",border:"1px solid #FCD34D",borderRadius:8,padding:"12px 16px",fontSize:13,marginBottom:10}}>
+                Fórmula: Adicional de Periculosidade = Salário Base × 30%
+              </div>
+              <p style={{fontSize:12,color:C.muted,lineHeight:1.6}}>No cadastro do colaborador, ative o botão Periculosidade para que o app calcule e salve o adicional automaticamente.</p>
+            </div>
+
+            <div style={{...s.card,marginBottom:0}}>
+              <div style={s.cardTitle}>📊 Como o app calcula</div>
+              <ul style={{fontSize:13,lineHeight:2.2,paddingLeft:20,marginBottom:0}}>
+                <li><strong>INSS e FGTS</strong> são calculados automaticamente a partir do salário cadastrado — nunca importados da planilha.</li>
+                <li><strong>Periculosidade</strong> é ativada manualmente por colaborador; o app calcula 30% do salário base.</li>
+                <li>Ao salvar ou sincronizar, os valores calculados são gravados no Supabase para rastreabilidade.</li>
               </ul>
             </div>
           </div>
@@ -950,6 +1044,7 @@ function doPost(e) {
 
             {secao==="vt"&&<SecaoVT/>}
             {secao==="folha"&&<SecaoFolha/>}
+            {secao==="impostos"&&<SecaoImpostos/>}
           </div>
         );
       }
@@ -1017,6 +1112,10 @@ function doPost(e) {
         const [lista, setLista] = useState([]);
         const [listaDesligados, setListaDesligados] = useState([]);
         const [mostrarDesligados, setMostrarDesligados] = useState(false);
+        const [abaEditar, setAbaEditar] = useState('dados');
+        const [historicoAtestados, setHistoricoAtestados] = useState([]);
+        const [historicoFerias, setHistoricoFerias] = useState([]);
+        const [loadingHistorico, setLoadingHistorico] = useState(false);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
         const [editando, setEditando] = useState(null);
@@ -1026,7 +1125,7 @@ function doPost(e) {
         const FORM_VAZIO = {
           nome:"", funcao:"", setor:"", cpf:"", telefone:"", chavePix:"", email:"",
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"",
-          salario:"", inss:"", fgts:"", transporte:"",
+          salario:"", transporte:"", periculosidade:false,
           contaSalario:false, aditivoContrato:false, usoArmario:false,
           lgpd:false, imagem:false, camera:false, epiUniforme:false,
           acompanhamentoProducao:false, usoCelular:false, usoVeiculo:false,
@@ -1040,8 +1139,8 @@ function doPost(e) {
           telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
           nascimento:c.nascimento||'', admissao:c.admissao||'',
           experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
-          salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
-          transporte:Number(c.transporte)||0,
+          salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
+          transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
           contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
           usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
           camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -1051,6 +1150,28 @@ function doPost(e) {
           termoAssiduidade:!!c.termo_assiduidade,
           termoMudancaHorario:!!c.termo_mudanca_horario, id_supa:c.id
         });
+
+        const carregarHistorico = async (colab) => {
+          setLoadingHistorico(true);
+          const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
+          if (url) {
+            try {
+              const ini = new Date(new Date().getFullYear()-3, 0, 1).toISOString().slice(0,10);
+              const fim = new Date().toISOString().slice(0,10);
+              const res = await fetch(url+'?acao=atestados&ini='+ini+'&fim='+fim);
+              const json = await res.json();
+              if (json.ok) {
+                const nome = (colab.nome||'').toLowerCase();
+                setHistoricoAtestados((json.atestados||[]).filter(a=>(a.nome||'').toLowerCase().includes(nome)));
+              }
+            } catch(e) { setHistoricoAtestados([]); }
+          }
+          try {
+            const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
+            setHistoricoFerias(data||[]);
+          } catch(e) { setHistoricoFerias([]); }
+          setLoadingHistorico(false);
+        };
 
         const carregar = async () => {
           setLoading(true); setStatus(null);
@@ -1122,8 +1243,8 @@ function doPost(e) {
                 admissao: parseDateBR(c.admissao),
                 experiencia_30: parseDateBR(c.experiencia30),
                 experiencia_90: parseDateBR(c.experiencia90),
-                salario: Number(c.salario)||0, inss: Number(c.inss)||0,
-                fgts: Number(c.fgts)||0, transporte: Number(c.transporte)||0,
+                salario: Number(c.salario)||0, inss: calcINSS(c.salario),
+                fgts: calcFGTS(c.salario), transporte: Number(c.transporte)||0,
                 conta_salario: !!c.contaSalario, aditivo_contrato: !!c.aditivoContrato,
                 uso_armario: !!c.usoArmario, lgpd: !!c.lgpd, imagem: !!c.imagem,
                 camera: !!c.camera, epi_uniforme: !!c.epiUniforme,
@@ -1132,6 +1253,7 @@ function doPost(e) {
                 termo_confidencialidade: !!c.termoConfidencialidade,
                 termo_assiduidade: !!c.termoAssiduidade,
                 termo_mudanca_horario: !!c.termoMudancaHorario,
+                periculosidade: false, periculosidade_valor: 0,
                 ativo: true, atualizado_em: new Date().toISOString()
               };
             });
@@ -1145,8 +1267,8 @@ function doPost(e) {
               cpf:c.cpf||'', nascimento:c.nascimento||'', admissao:c.admissao||'',
               telefone:c.telefone||'', chavePix:c.chavePix||'', email:c.email||'',
               experiencia30:c.experiencia30||'', experiencia90:c.experiencia90||'',
-              salario:Number(c.salario)||0, inss:Number(c.inss)||0,
-              fgts:Number(c.fgts)||0, transporte:Number(c.transporte)||0,
+              salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
+              transporte:Number(c.transporte)||0, periculosidade:false,
               contaSalario:!!c.contaSalario, aditivoContrato:!!c.aditivoContrato,
               usoArmario:!!c.usoArmario, lgpd:!!c.lgpd, imagem:!!c.imagem,
               camera:!!c.camera, epiUniforme:!!c.epiUniforme,
@@ -1168,15 +1290,15 @@ function doPost(e) {
           setLoading(false);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
             telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
             nascimento:c.nascimento||'', admissao:c.admissao||'',
             experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
-            salario:String(c.salario||''), inss:String(c.inss||''), fgts:String(c.fgts||''),
-            transporte:String(c.transporte||''),
+            salario:String(c.salario||''), transporte:String(c.transporte||''),
+            periculosidade:!!c.periculosidade,
             contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
             usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
             camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -1186,7 +1308,7 @@ function doPost(e) {
             termoAssiduidade:!!c.termo_assiduidade,
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
-          setEditando(c); setStatus(null);
+          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]);
         };
 
         const salvar = async () => {
@@ -1204,9 +1326,11 @@ function doPost(e) {
               nascimento:form.nascimento||null, admissao:form.admissao||null,
               experiencia_30:form.experiencia30||null, experiencia_90:form.experiencia90||null,
               salario:parseFloat(String(form.salario).replace(",","."))||0,
-              inss:parseFloat(String(form.inss).replace(",","."))||0,
-              fgts:parseFloat(String(form.fgts).replace(",","."))||0,
+              inss:calcINSS(parseFloat(String(form.salario).replace(",","."))||0),
+              fgts:calcFGTS(parseFloat(String(form.salario).replace(",","."))||0),
               transporte:parseFloat(String(form.transporte).replace(",","."))||0,
+              periculosidade:!!form.periculosidade,
+              periculosidade_valor:form.periculosidade?calcPericulosidade(parseFloat(String(form.salario).replace(",","."))||0):0,
               conta_salario:!!form.contaSalario, aditivo_contrato:!!form.aditivoContrato,
               uso_armario:!!form.usoArmario, lgpd:!!form.lgpd, imagem:!!form.imagem,
               camera:!!form.camera, epi_uniforme:!!form.epiUniforme,
@@ -1315,10 +1439,29 @@ function doPost(e) {
             <div style={s.card}>
               <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Financeiro</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-                <CampoForm label="Salário (R$)" campo="salario" placeholder="0,00" form={form} setForm={setForm}/>
-                <CampoForm label="INSS (R$)" campo="inss" placeholder="0,00" form={form} setForm={setForm}/>
-                <CampoForm label="FGTS (R$)" campo="fgts" placeholder="0,00" form={form} setForm={setForm}/>
+                <CampoForm label="Salário Base (R$)" campo="salario" placeholder="0,00" form={form} setForm={setForm}/>
                 <CampoForm label="Vale Transporte (R$)" campo="transporte" placeholder="0,00" form={form} setForm={setForm}/>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>INSS (calculado)</label>
+                  <div style={{...s.input,background:"#F9FAFB",color:C.muted,fontSize:13}}>{fmtBRL(calcINSS(parseFloat(String(form.salario).replace(",","."))||0))} <span style={{fontSize:11,marginLeft:4}}>— tabela progressiva 2025</span></div>
+                </div>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>FGTS (calculado)</label>
+                  <div style={{...s.input,background:"#F9FAFB",color:C.muted,fontSize:13}}>{fmtBRL(calcFGTS(parseFloat(String(form.salario).replace(",","."))||0))} <span style={{fontSize:11,marginLeft:4}}>— 8% do salário</span></div>
+                </div>
+              </div>
+              <div style={{marginTop:8,padding:"12px 14px",borderRadius:8,background:form.periculosidade?"#FEF9C3":"#F9FAFB",border:"1px solid "+(form.periculosidade?"#FCD34D":C.border)}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13}}>Adicional de Periculosidade</div>
+                    {form.periculosidade&&<div style={{fontSize:12,color:"#92400E",marginTop:2}}>{fmtBRL(calcPericulosidade(parseFloat(String(form.salario).replace(",","."))||0))} — 30% do salário base</div>}
+                  </div>
+                  <button type="button" onClick={()=>setForm(p=>({...p,periculosidade:!p.periculosidade}))}
+                    style={{padding:"4px 18px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",
+                      background:form.periculosidade?"#F59E0B":"#E5E7EB",color:form.periculosidade?"#fff":"#6B7280"}}>
+                    {form.periculosidade?"✓ SIM":"NÃO"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1338,9 +1481,70 @@ function doPost(e) {
               </div>
             </div>
 
-            <div style={{display:"flex",gap:10,marginTop:4,marginBottom:24}}>
+            <div style={{display:"flex",gap:10,marginTop:4,marginBottom:12}}>
               <button onClick={salvar} style={s.btn} disabled={loading}>{loading?"Salvando...":"💾 Salvar"}</button>
               <button onClick={()=>setEditando(null)} style={s.btnOutline}>Cancelar</button>
+            </div>
+
+            <div style={s.card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
+                <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
+              </div>
+              {abaEditar==='historico'&&(
+                <div style={{marginTop:16}}>
+                  {loadingHistorico?(
+                    <div style={{textAlign:"center",padding:"24px",color:C.muted}}>Carregando histórico...</div>
+                  ):(
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>🏥 Atestados</div>
+                      {historicoAtestados.length===0?(
+                        <div style={{color:C.muted,fontSize:13,paddingBottom:16}}>Nenhum atestado encontrado nos últimos 3 anos.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+                          <thead><tr style={{background:"#F9FAFB"}}>
+                            <th style={s.th}>CID</th><th style={s.th}>Início</th><th style={s.th}>Fim</th>
+                            <th style={{...s.th,textAlign:"center"}}>Dias</th><th style={s.th}>Observações</th>
+                          </tr></thead>
+                          <tbody>{historicoAtestados.map((a,i)=>{
+                            const d1=new Date(a.inicio+'T12:00:00'),d2=new Date(a.fim+'T12:00:00');
+                            const dias=Math.round((d2-d1)/86400000)+1;
+                            return(<tr key={i} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12}}>{a.cid||"—"}</td>
+                              <td style={{...s.td,fontSize:12}}>{d1.toLocaleDateString("pt-BR")}</td>
+                              <td style={{...s.td,fontSize:12}}>{d2.toLocaleDateString("pt-BR")}</td>
+                              <td style={{...s.td,textAlign:"center",fontWeight:700,color:dias>3?C.danger:C.text}}>{dias}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||"—"}</td>
+                            </tr>);
+                          })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>🏖️ Férias</div>
+                      {historicoFerias.length===0?(
+                        <div style={{color:C.muted,fontSize:13}}>Nenhuma férias registrada. Cadastre na aba Férias.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <thead><tr style={{background:"#F9FAFB"}}>
+                            <th style={s.th}>Início</th><th style={s.th}>Fim</th>
+                            <th style={{...s.th,textAlign:"center"}}>Dias</th><th style={{...s.th,textAlign:"center"}}>Status</th>
+                          </tr></thead>
+                          <tbody>{historicoFerias.map(f=>{
+                            const cores={agendado:{bg:"#EFF6FF",c:"#1D4ED8"},em_gozo:{bg:"#FEF9C3",c:"#92400E"},concluido:{bg:"#DCFCE7",c:"#166534"},cancelado:{bg:"#FEE2E2",c:"#991B1B"}};
+                            const cor=cores[f.status]||cores.agendado;
+                            return(<tr key={f.id} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12}}>{f.inicio?new Date(f.inicio+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
+                              <td style={{...s.td,fontSize:12}}>{f.fim?new Date(f.fim+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
+                              <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
+                              <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.status}</span></td>
+                            </tr>);
+                          })}</tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -1696,6 +1900,253 @@ function doPost(e) {
                 )}
               </div>
             )}
+          </div>
+        );
+      }
+
+      function AtestadosPage({gasUrl, colabAPI}) {
+        const hoje = new Date();
+        const priDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+        const ultDia = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).toISOString().slice(0,10);
+        const [ini, setIni] = React.useState(priDia);
+        const [fim, setFim] = React.useState(ultDia);
+        const [lista, setLista] = React.useState([]);
+        const [loading, setLoading] = React.useState(false);
+        const [status, setStatus] = React.useState(null);
+        const [filtroColab, setFiltroColab] = React.useState('');
+
+        const buscar = async () => {
+          const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
+          if (!url) { setStatus({ok:false,msg:'URL do GAS não configurada em ⚙️ Configurações.'}); return; }
+          setLoading(true); setStatus(null);
+          try {
+            const res = await fetch(url+'?acao=atestados&ini='+ini+'&fim='+fim);
+            if(!res.ok) throw new Error('Servidor retornou '+res.status);
+            const json = await res.json();
+            if(!json.ok) throw new Error(json.msg||'Erro no GAS');
+            setLista(json.atestados||[]);
+            setStatus({ok:true, msg:(json.atestados||[]).length+' atestado(s) encontrado(s).'});
+          } catch(e) { setStatus({ok:false,msg:'❌ '+e.message}); }
+          setLoading(false);
+        };
+
+        React.useEffect(()=>{ buscar(); },[]);
+
+        const filtrados = lista.filter(a=>!filtroColab||(a.nome||'').toLowerCase().includes(filtroColab.toLowerCase()));
+        const totalDias = filtrados.reduce((acc,a)=>{
+          const d1=new Date(a.inicio+'T12:00:00'), d2=new Date(a.fim+'T12:00:00');
+          return acc+Math.max(0,Math.round((d2-d1)/86400000)+1);
+        },0);
+        const colaboradoresUnicos = new Set(filtrados.map(a=>a.nome)).size;
+
+        return (
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:4}}>🏥 Atestados</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Atestados médicos dos colaboradores</div>
+            <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:16}}>
+              <div><label style={s.label}>De</label><input type="date" value={ini} onChange={e=>setIni(e.target.value)} style={s.input}/></div>
+              <div><label style={s.label}>Até</label><input type="date" value={fim} onChange={e=>setFim(e.target.value)} style={s.input}/></div>
+              <div style={{flex:1,minWidth:180}}>
+                <label style={s.label}>Filtrar colaborador</label>
+                <input type="text" value={filtroColab} onChange={e=>setFiltroColab(e.target.value)} placeholder="Nome..." style={s.input}/>
+              </div>
+              <button onClick={buscar} style={s.btn} disabled={loading}>{loading?'Buscando...':'🔍 Buscar'}</button>
+            </div>
+            {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',marginBottom:16}}>{status.msg}</div>}
+            {filtrados.length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+                <div style={{...s.card,textAlign:"center",padding:"16px"}}>
+                  <div style={{fontSize:28,fontWeight:800,color:C.pri}}>{filtrados.length}</div>
+                  <div style={{fontSize:12,color:C.muted}}>Atestados</div>
+                </div>
+                <div style={{...s.card,textAlign:"center",padding:"16px"}}>
+                  <div style={{fontSize:28,fontWeight:800,color:C.pri}}>{totalDias}</div>
+                  <div style={{fontSize:12,color:C.muted}}>Dias afastados</div>
+                </div>
+                <div style={{...s.card,textAlign:"center",padding:"16px"}}>
+                  <div style={{fontSize:28,fontWeight:800,color:C.pri}}>{colaboradoresUnicos}</div>
+                  <div style={{fontSize:12,color:C.muted}}>Colaboradores</div>
+                </div>
+              </div>
+            )}
+            <div style={{...s.card,padding:0,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#F9FAFB"}}>
+                  <th style={s.th}>Colaborador</th><th style={s.th}>Setor</th><th style={s.th}>CID</th>
+                  <th style={s.th}>Início</th><th style={s.th}>Fim</th>
+                  <th style={{...s.th,textAlign:"center"}}>Dias</th><th style={s.th}>Observações</th>
+                </tr></thead>
+                <tbody>
+                  {filtrados.length===0?(
+                    <tr><td colSpan={7} style={{textAlign:"center",padding:"32px",color:C.muted}}>{loading?'Carregando...':'Nenhum atestado no período.'}</td></tr>
+                  ):filtrados.map((a,i)=>{
+                    const d1=new Date(a.inicio+'T12:00:00'), d2=new Date(a.fim+'T12:00:00');
+                    const dias=Math.max(0,Math.round((d2-d1)/86400000)+1);
+                    return(
+                      <tr key={i} style={{borderTop:"1px solid "+C.border,background:"#fff"}}>
+                        <td style={{...s.td,fontWeight:600}}>{a.nome}</td>
+                        <td style={{...s.td,fontSize:12,color:C.muted}}>{a.setor||"—"}</td>
+                        <td style={{...s.td,fontSize:12}}>{a.cid||"—"}</td>
+                        <td style={{...s.td,fontSize:12}}>{d1.toLocaleDateString("pt-BR")}</td>
+                        <td style={{...s.td,fontSize:12}}>{d2.toLocaleDateString("pt-BR")}</td>
+                        <td style={{...s.td,textAlign:"center",fontWeight:700,color:dias>3?"#DC2626":C.text}}>{dias}</td>
+                        <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||"—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+
+      function FeriasPage({colabAPI, empresaId}) {
+        const VAZIO = {colaboradorId:'',colaboradorNome:'',inicio:'',fim:'',status:'agendado',observacoes:''};
+        const [lista, setLista] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const [form, setForm] = React.useState(VAZIO);
+        const [mostrarForm, setMostrarForm] = React.useState(false);
+        const [status, setStatus] = React.useState(null);
+
+        const calcDias = (ini,fim) => {
+          if(!ini||!fim) return 0;
+          return Math.max(0,Math.round((new Date(fim+'T12:00:00')-new Date(ini+'T12:00:00'))/86400000)+1);
+        };
+
+        const carregar = async () => {
+          setLoading(true);
+          const {data,error} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).order('inicio',{ascending:false});
+          if(!error) setLista(data||[]);
+          setLoading(false);
+        };
+
+        React.useEffect(()=>{ if(empresaId) carregar(); },[empresaId]);
+
+        const salvar = async () => {
+          if(!form.colaboradorNome||!form.inicio||!form.fim){ setStatus({ok:false,msg:'Preencha colaborador, início e fim.'}); return; }
+          setLoading(true);
+          const {error} = await _supa.from('ferias').insert({
+            empresa_id:empresaId, colaborador_nome:form.colaboradorNome,
+            inicio:form.inicio, fim:form.fim, dias:calcDias(form.inicio,form.fim),
+            status:form.status, observacoes:form.observacoes||null
+          });
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
+          else { setStatus({ok:true,msg:'✅ Férias agendadas!'}); setMostrarForm(false); carregar(); }
+          setLoading(false);
+        };
+
+        const alterarStatus = async (id, novoStatus) => {
+          await _supa.from('ferias').update({status:novoStatus,atualizado_em:new Date().toISOString()}).eq('id',id);
+          carregar();
+        };
+
+        const excluir = async (id, nome) => {
+          if(!window.confirm('Excluir férias de '+nome+'?')) return;
+          await _supa.from('ferias').delete().eq('id',id);
+          carregar();
+        };
+
+        const CORES = {
+          agendado: {bg:"#EFF6FF",c:"#1D4ED8",l:"Agendado"},
+          em_gozo:  {bg:"#FEF9C3",c:"#92400E",l:"Em gozo"},
+          concluido:{bg:"#DCFCE7",c:"#166534",l:"Concluído"},
+          cancelado:{bg:"#FEE2E2",c:"#991B1B",l:"Cancelado"},
+        };
+
+        return (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🏖️ Férias</div>
+                <div style={{fontSize:13,color:C.muted}}>Agendamento e controle de férias</div>
+              </div>
+              <button onClick={()=>{setMostrarForm(true);setForm(VAZIO);setStatus(null);}} style={s.btn}>➕ Agendar Férias</button>
+            </div>
+            {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',marginBottom:16}}>{status.msg}</div>}
+            {mostrarForm&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:16}}>Agendar Férias</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                  <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                    <label style={s.label}>Colaborador *</label>
+                    <select value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} style={{...s.input,width:"100%"}}>
+                      <option value="">Selecione...</option>
+                      {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Início *</label>
+                    <input type="date" value={form.inicio} onChange={e=>setForm(p=>({...p,inicio:e.target.value}))} style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Fim *</label>
+                    <input type="date" value={form.fim} onChange={e=>setForm(p=>({...p,fim:e.target.value}))} style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Duração</label>
+                    <div style={{...s.input,background:"#F9FAFB",color:C.muted}}>{form.inicio&&form.fim?calcDias(form.inicio,form.fim)+' dias corridos':'—'}</div>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Status</label>
+                    <select value={form.status} onChange={e=>setForm(p=>({...p,status:e.target.value}))} style={s.input}>
+                      <option value="agendado">Agendado</option>
+                      <option value="em_gozo">Em gozo</option>
+                      <option value="concluido">Concluído</option>
+                      <option value="cancelado">Cancelado</option>
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                    <label style={s.label}>Observações</label>
+                    <input type="text" value={form.observacoes} onChange={e=>setForm(p=>({...p,observacoes:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={salvar} style={s.btn} disabled={loading}>{loading?'Salvando...':'💾 Salvar'}</button>
+                  <button onClick={()=>setMostrarForm(false)} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            <div style={{...s.card,padding:0,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#F9FAFB"}}>
+                  <th style={s.th}>Colaborador</th><th style={s.th}>Início</th><th style={s.th}>Fim</th>
+                  <th style={{...s.th,textAlign:"center"}}>Dias</th><th style={{...s.th,textAlign:"center"}}>Status</th>
+                  <th style={{...s.th,textAlign:"right"}}>Ações</th>
+                </tr></thead>
+                <tbody>
+                  {lista.length===0?(
+                    <tr><td colSpan={6} style={{textAlign:"center",padding:"32px",color:C.muted}}>
+                      {loading?'Carregando...':'Nenhuma férias agendada. Clique em "Agendar Férias" para começar.'}
+                    </td></tr>
+                  ):lista.map(f=>{
+                    const cor=CORES[f.status]||CORES.agendado;
+                    return(
+                      <tr key={f.id} style={{borderTop:"1px solid "+C.border,background:"#fff"}}>
+                        <td style={{...s.td,fontWeight:600}}>{f.colaborador_nome}</td>
+                        <td style={{...s.td,fontSize:12}}>{f.inicio?new Date(f.inicio+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,fontSize:12}}>{f.fim?new Date(f.fim+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
+                        <td style={{...s.td,textAlign:"center"}}>
+                          <span style={{background:cor.bg,color:cor.c,padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{cor.l}</span>
+                        </td>
+                        <td style={{...s.td,textAlign:"right",whiteSpace:"nowrap"}}>
+                          <select onChange={e=>alterarStatus(f.id,e.target.value)} value={f.status}
+                            style={{fontSize:11,border:"1px solid "+C.border,borderRadius:4,padding:"3px 6px",marginRight:8,cursor:"pointer"}}>
+                            <option value="agendado">Agendado</option>
+                            <option value="em_gozo">Em gozo</option>
+                            <option value="concluido">Concluído</option>
+                            <option value="cancelado">Cancelado</option>
+                          </select>
+                          <button onClick={()=>excluir(f.id,f.colaborador_nome)}
+                            style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       }
@@ -2742,8 +3193,8 @@ function doPost(e) {
               telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
               nascimento:c.nascimento||'', admissao:c.admissao||'',
               experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
-              salario:Number(c.salario)||0, inss:Number(c.inss)||0, fgts:Number(c.fgts)||0,
-              transporte:Number(c.transporte)||0,
+              salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
+              transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
               contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
               usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
               camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -3524,8 +3975,8 @@ function doPost(e) {
               {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
               {page==="vt"&&vtPageContent}
               {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
-              {page==="ferias"&&<PlaceholderPage title="Férias" icon="🏖️"/>}
-              {page==="atestados"&&<PlaceholderPage title="Atestados" icon="🏥"/>}
+              {page==="ferias"&&<FeriasPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="atestados"&&<AtestadosPage gasUrl={gasUrl} colabAPI={colabAPI}/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript}/>}
