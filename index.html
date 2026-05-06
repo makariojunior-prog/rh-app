@@ -3258,6 +3258,190 @@ function doPost(e) {
         );
       }
 
+      function ComprasPage({ colabAPI, empresaId }) {
+        const hoje = new Date();
+        const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+        const VAZIO = { colaboradorNome:'', produto:'', valor:'', dataCompra: hoje.toISOString().slice(0,10), mesReferencia: mesAtual, obs:'' };
+
+        const [mesRef, setMesRef] = React.useState(mesAtual);
+        const [lista, setLista] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const [status, setStatus] = React.useState(null);
+        const [mostrarForm, setMostrarForm] = React.useState(false);
+        const [form, setForm] = React.useState(VAZIO);
+
+        const carregar = async () => {
+          if(!empresaId) return;
+          setLoading(true);
+          const {data,error} = await _supa.from('compras').select('*').eq('empresa_id',empresaId).eq('mes_referencia',mesRef).order('data_compra',{ascending:false});
+          if(!error) setLista(data||[]);
+          setLoading(false);
+        };
+
+        React.useEffect(()=>{ carregar(); },[empresaId,mesRef]);
+
+        const salvar = async () => {
+          if(!form.colaboradorNome||!form.produto||!form.valor||!form.dataCompra){
+            setStatus({ok:false,msg:'Preencha colaborador, produto, valor e data.'}); return;
+          }
+          const valor = parseFloat(String(form.valor).replace(',','.'));
+          if(isNaN(valor)||valor<=0){ setStatus({ok:false,msg:'Valor deve ser maior que zero.'}); return; }
+          setLoading(true);
+          const {error} = await _supa.from('compras').insert({
+            id: crypto.randomUUID(),
+            empresa_id: empresaId,
+            colaborador_nome: form.colaboradorNome.trim(),
+            produto: form.produto.trim(),
+            valor,
+            data_compra: form.dataCompra,
+            mes_referencia: form.mesReferencia,
+            status: 'pendente',
+            obs: form.obs||null
+          });
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
+          else { setStatus({ok:true,msg:'✅ Compra lançada!'}); setMostrarForm(false); setForm(VAZIO); carregar(); }
+          setLoading(false);
+        };
+
+        const excluir = async (id, nome) => {
+          if(!window.confirm('Excluir compra de '+nome+'?')) return;
+          await _supa.from('compras').delete().eq('id',id);
+          carregar();
+        };
+
+        const resumoPorColab = Object.values(lista.reduce((acc,c)=>{
+          if(c.status!=='pendente') return acc;
+          const k = c.colaborador_nome;
+          if(!acc[k]) acc[k]={nome:k,total:0,qtd:0};
+          acc[k].total += Number(c.valor)||0;
+          acc[k].qtd++;
+          return acc;
+        },{})).sort((a,b)=>b.total-a.total);
+
+        const totalPendente = resumoPorColab.reduce((s,c)=>s+c.total,0);
+
+        return (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🛍️ Compras de Funcionários</div>
+                <div style={{fontSize:13,color:C.muted}}>Compras de produtos descontadas em folha</div>
+              </div>
+              <button onClick={()=>{setMostrarForm(true);setForm({...VAZIO,mesReferencia:mesRef});setStatus(null);}} style={s.btn}>➕ Nova Compra</button>
+            </div>
+
+            {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',margin:"12px 0"}}>{status.msg}</div>}
+
+            {mostrarForm&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:16}}>Nova Compra</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                  <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                    <label style={s.label}>Colaborador *</label>
+                    <select value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} style={{...s.input,width:"100%"}}>
+                      <option value="">Selecione...</option>
+                      {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                    <label style={s.label}>Produto *</label>
+                    <input type="text" value={form.produto} onChange={e=>setForm(p=>({...p,produto:e.target.value}))} placeholder="Ex: Frango, Linguiça, Marmita..." style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Valor (R$) *</label>
+                    <input type="number" step="0.01" min="0.01" value={form.valor} onChange={e=>setForm(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Data da Compra *</label>
+                    <input type="date" value={form.dataCompra} onChange={e=>{ const mr=e.target.value.slice(0,7); setForm(p=>({...p,dataCompra:e.target.value,mesReferencia:mr})); }} style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Mês de Referência (Folha) *</label>
+                    <input type="month" value={form.mesReferencia} onChange={e=>setForm(p=>({...p,mesReferencia:e.target.value}))} style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Observações</label>
+                    <input type="text" value={form.obs} onChange={e=>setForm(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={salvar} style={s.btn} disabled={loading}>{loading?'Salvando...':'💾 Salvar'}</button>
+                  <button onClick={()=>setMostrarForm(false)} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",marginBottom:16}}>
+              <div>
+                <label style={s.label}>Mês de referência</label>
+                <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={s.input}/>
+              </div>
+            </div>
+
+            {resumoPorColab.length>0&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontWeight:700,color:C.amber,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>⏳ Pendentes para desconto na Folha</div>
+                  <div style={{fontWeight:800,fontSize:15,color:C.danger}}>{fmtBRL(totalPendente)}</div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
+                  {resumoPorColab.map((c,i)=>(
+                    <div key={i} style={{background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:8,padding:"12px 14px"}}>
+                      <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:2}}>{c.nome}</div>
+                      <div style={{fontSize:11,color:C.muted}}>{c.qtd} compra{c.qtd!==1?"s":""}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:C.amber,marginTop:4}}>{fmtBRL(c.total)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{...s.card,padding:0,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#F9FAFB"}}>
+                  <th style={s.th}>Colaborador</th>
+                  <th style={s.th}>Produto</th>
+                  <th style={{...s.th,textAlign:"right"}}>Valor</th>
+                  <th style={s.th}>Data</th>
+                  <th style={s.th}>Ref. Folha</th>
+                  <th style={s.th}>Status</th>
+                  <th style={s.th}>Obs.</th>
+                  <th style={{...s.th,textAlign:"right"}}></th>
+                </tr></thead>
+                <tbody>
+                  {loading?(
+                    <tr><td colSpan={8} style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</td></tr>
+                  ):lista.length===0?(
+                    <tr><td colSpan={8} style={{textAlign:"center",padding:"32px",color:C.muted}}>Nenhuma compra registrada no período.</td></tr>
+                  ):lista.map(c=>{
+                    const dt = c.data_compra?new Date(c.data_compra+'T12:00:00'):null;
+                    const isPendente = c.status==='pendente';
+                    return (
+                      <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                        <td style={{...s.td,fontWeight:600}}>{c.colaborador_nome}</td>
+                        <td style={s.td}>{c.produto}</td>
+                        <td style={{...s.td,textAlign:"right",fontWeight:700,color:C.danger}}>{fmtBRL(Number(c.valor)||0)}</td>
+                        <td style={{...s.td,fontSize:12}}>{dt?dt.toLocaleDateString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,fontSize:12,color:C.muted}}>{c.mes_referencia||'—'}</td>
+                        <td style={s.td}>
+                          <span style={{background:isPendente?"#FEF9C3":"#DCFCE7",color:isPendente?"#92400E":"#166534",padding:"2px 8px",borderRadius:8,fontSize:11,fontWeight:700}}>
+                            {isPendente?'Pendente':'Descontado'}
+                          </span>
+                        </td>
+                        <td style={{...s.td,fontSize:12,color:C.muted}}>{c.obs||"—"}</td>
+                        <td style={{...s.td,textAlign:"right"}}>
+                          {isPendente&&<button onClick={()=>excluir(c.id,c.colaborador_nome)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+
       function PlaceholderPage({title,icon}){
         return(
           <div>
@@ -3291,6 +3475,7 @@ function doPost(e) {
         const [apiStatus, setApiStatus] = useState(null);
         const [saveStatus, setSaveStatus] = useState(null);
         const [adiantSupa, setAdiantSupa] = useState({});
+        const [comprasSupa, setComprasSupa] = useState({});
         const [drag, setDrag] = useState(false);
         const [colabSelecionado, setColabSelecionado] = useState(null);
         const [loadingAPI, setLoadingAPI] = useState(false);
@@ -3315,6 +3500,16 @@ function doPost(e) {
               mapa[k].ids.push(a.id);
             });
             setAdiantSupa(mapa);
+          });
+          _supa.from('compras').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').then(({data})=>{
+            const mapa = {};
+            (data||[]).forEach(c=>{
+              const k = norm(c.colaborador_nome);
+              if(!mapa[k]) mapa[k]={valor:0,ids:[]};
+              mapa[k].valor += Number(c.valor);
+              mapa[k].ids.push(c.id);
+            });
+            setComprasSupa(mapa);
           });
         },[empresaId,mesAno]);
 
@@ -3603,7 +3798,7 @@ function doPost(e) {
           const cajuValor = cajuDias * 5;
 
           const aj = ajustes[nomeKey] || {};
-          const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||0;
+          const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||(comprasSupa[nomeKey]?.valor||0);
           const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",","."))||(adiantSupa[nomeKey]?.valor||0);
           const premioAuto = faltas === 0;
           const premioAssiduidade = aj.premioAssiduidade !== undefined ? aj.premioAssiduidade : premioAuto;
@@ -3763,6 +3958,11 @@ function doPost(e) {
             if(idsDescontar.length>0){
               await _supa.from('adiantamentos').update({status:'descontado'}).in('id',idsDescontar);
               setAdiantSupa({});
+            }
+            const idsCompras = Object.values(comprasSupa).flatMap(c=>c.ids||[]).filter(Boolean);
+            if(idsCompras.length>0){
+              await _supa.from('compras').update({status:'descontado'}).in('id',idsCompras);
+              setComprasSupa({});
             }
             await salvarFolhaBanco();
           } catch(err) {
@@ -4091,10 +4291,10 @@ function doPost(e) {
                               {r.calc.emExperiencia && <div style={{fontSize:9,color:"#8b5cf6",fontWeight:700}}>(exp.)</div>}
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
-                              <input style={{...s.inputSm,width:62,textAlign:"right"}}
+                              <input style={{...s.inputSm,width:62,textAlign:"right",background:comprasSupa[r.nomeKey]?.valor>0&&!ajustes[r.nomeKey]?.produtos?"#FFFBEB":"#fff"}}
                                      value={ajustes[r.nomeKey]?.produtos||""}
                                      onChange={e=>setAjuste(r.nomeKey,"produtos",e.target.value)}
-                                     placeholder="0,00"/>
+                                     placeholder={comprasSupa[r.nomeKey]?.valor>0?String(comprasSupa[r.nomeKey].valor.toFixed(2)).replace(".",","):"0,00"}/>
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
                               <input style={{...s.inputSm,width:62,textAlign:"right"}}
@@ -5371,7 +5571,7 @@ function doPost(e) {
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','adiantamentos','recrutamento','orcamento','acessos','ajuda','config']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','adiantamentos','compras','recrutamento','orcamento','acessos','ajuda','config']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -5383,6 +5583,7 @@ function doPost(e) {
         {k:'ferias',l:'🏖️ Férias'},
         {k:'atestados',l:'🏥 Atestados'},
         {k:'adiantamentos',l:'💵 Adiantamentos'},
+        {k:'compras',l:'🛍️ Compras'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
         {k:'ponto_hist',l:'📊 Histórico Ponto'},
         {k:'acessos',l:'🔐 Acessos'},
@@ -5426,6 +5627,7 @@ function doPost(e) {
               {page==="ferias"&&<FeriasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="atestados"&&<AtestadosPage gasUrl={gasUrl} colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage gasUrl={gasUrl} empresaId={empresaId}/>}
               {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
