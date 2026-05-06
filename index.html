@@ -2340,6 +2340,7 @@ function doPost(e) {
           setLoading(true);
           const dias = calcDias(form.inicio,form.fim);
           const {error} = await _supa.from('atestados').insert({
+            id: crypto.randomUUID(),
             empresa_id: empresaId,
             colaborador_nome: form.colaboradorNome.trim(),
             setor: form.setor||null, cid: form.cid||null,
@@ -2388,7 +2389,9 @@ function doPost(e) {
                       <option value="">Selecione ou digite abaixo...</option>
                       {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
                     </select>
-                    <input type="text" value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} placeholder="Ou digite o nome manualmente..." style={{...s.input,marginTop:4}}/>
+                    {!colabAPI.some(c=>c.nome===form.colaboradorNome)&&(
+                      <input type="text" value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} placeholder="Ou digite o nome manualmente..." style={{...s.input,marginTop:4}}/>
+                    )}
                   </div>
                   {form.setor&&(
                     <div style={{marginBottom:14}}>
