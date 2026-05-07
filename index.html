@@ -87,6 +87,61 @@
       return { employees, semanaIni:toISO(sorted[0]), semanaFim:toISO(sorted[sorted.length-1]) };
     }
 
+    // Parseia CSV do ponto retornando mapa detalhado por funcionário/dia
+    function parsePontoDetalhado(text) {
+      const lines = text.trim().split(/\r?\n/);
+      if (lines.length < 2) throw new Error("Arquivo vazio ou inválido");
+      const header = lines[0].split(";");
+      if (!header[0].includes("Crach")) throw new Error("Formato não reconhecido.");
+      const empMap = {};
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(";").map(s => s.trim());
+        if (cols.length < 11) continue;
+        const cracha = cols[0], nome = cols[1], dataStr = cols[2];
+        if (!cracha || !nome || !dataStr) continue;
+        const [dd, mm, yyyy] = dataStr.split("/");
+        const iso = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+        const previsto = { e1: cols[3]||"", s1: cols[4]||"", e2: cols[5]||"", s2: cols[6]||"" };
+        const real     = { b1: cols[7]||"", b2: cols[8]||"", b3: cols[9]||"", b4: cols[10]||"" };
+        const horaExtra = cols[11] || "00:00";
+        if (!empMap[nome]) empMap[nome] = { cracha, nome, dias: {} };
+        empMap[nome].dias[iso] = { data: iso, previsto, real, horaExtra };
+      }
+      return empMap;
+    }
+
+    // Persiste registros de ponto no Supabase (upsert por id empresa+nome+data)
+    async function upsertRegistrosPonto(empMap, empresaId) {
+      const norm = n => String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+      const records = [];
+      Object.values(empMap).forEach(emp => {
+        Object.entries(emp.dias).forEach(([iso, d]) => {
+          records.push({
+            id: `${empresaId}_${norm(emp.nome)}_${iso.replace(/-/g,'')}`,
+            empresa_id: empresaId,
+            colaborador_nome: emp.nome,
+            cracha: emp.cracha || null,
+            data: iso,
+            previsto_e1: d.previsto.e1 || '',
+            previsto_s1: d.previsto.s1 || '',
+            previsto_e2: d.previsto.e2 || '',
+            previsto_s2: d.previsto.s2 || '',
+            real_b1: d.real.b1 || '',
+            real_b2: d.real.b2 || '',
+            real_b3: d.real.b3 || '',
+            real_b4: d.real.b4 || '',
+            hora_extra: d.horaExtra || '00:00',
+            fonte: 'csv',
+            atualizado_em: new Date().toISOString()
+          });
+        });
+      });
+      if (records.length === 0) return { count: 0 };
+      const { error } = await _supa.from('registros_ponto').upsert(records, { onConflict: 'id' });
+      if (error) throw error;
+      return { count: records.length };
+    }
+
     // INSS progressivo 2025
     function calcINSS(salario) {
       const s = Number(salario) || 0;
@@ -3442,6 +3497,157 @@ function doPost(e) {
         );
       }
 
+      function PontoPage({ colabAPI, empresaId }) {
+        const hoje = new Date();
+        const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+        const [mes, setMes] = React.useState(mesAtual);
+        const [lista, setLista] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const [status, setStatus] = React.useState(null);
+        const [csvStatus, setCsvStatus] = React.useState(null);
+        const [editando, setEditando] = React.useState(null); // {id, campo, valor}
+
+        const hhmmToMin = str => { if(!str||str==="00:00") return 0; const [h,m]=str.split(":"); return parseInt(h)*60+parseInt(m||0); };
+        const horVal = h => h && h !== "" && h !== "00:00";
+
+        const carregar = async () => {
+          if(!empresaId) return;
+          setLoading(true);
+          const ini = mes + "-01";
+          const fim = mes + "-31";
+          const {data, error} = await _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',ini).lte('data',fim).order('colaborador_nome').order('data');
+          if(!error) setLista(data||[]);
+          setLoading(false);
+        };
+
+        React.useEffect(()=>{ carregar(); },[empresaId,mes]);
+
+        const salvarStatus = async (id, novoStatus) => {
+          await _supa.from('registros_ponto').update({status_manual:novoStatus||null,atualizado_em:new Date().toISOString()}).eq('id',id);
+          setLista(prev=>prev.map(r=>r.id===id?{...r,status_manual:novoStatus||null}:r));
+        };
+
+        const handleCsvUpload = e => {
+          const file = e.target.files[0];
+          if(!file) return;
+          const reader = new FileReader();
+          reader.onload = async ev => {
+            try {
+              const text = new TextDecoder("iso-8859-1").decode(new Uint8Array(ev.target.result));
+              const empMap = parsePontoDetalhado(text);
+              setCsvStatus({ok:null, msg:"⏳ Salvando ponto no banco..."});
+              const r = await upsertRegistrosPonto(empMap, empresaId);
+              setCsvStatus({ok:true, msg:`✅ ${r.count} registros salvos/atualizados.`});
+              carregar();
+            } catch(err) { setCsvStatus({ok:false, msg:"❌ "+err.message}); }
+          };
+          reader.readAsArrayBuffer(file);
+          e.target.value = "";
+        };
+
+        // Agrupado por funcionário
+        const porColab = lista.reduce((acc,r)=>{
+          if(!acc[r.colaborador_nome]) acc[r.colaborador_nome]=[];
+          acc[r.colaborador_nome].push(r);
+          return acc;
+        },{});
+
+        const STATUS_OPTS = [
+          {v:"",l:"Auto"},
+          {v:"atestado",l:"Atestado"},
+          {v:"abono",l:"Abono"},
+          {v:"ferias",l:"Férias"},
+          {v:"folga",l:"Folga"},
+        ];
+
+        return (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📋 Banco de Ponto</div>
+                <div style={{fontSize:13,color:C.muted}}>Registros acumulados do ponto eletrônico</div>
+              </div>
+              <label style={{...s.btn,cursor:"pointer"}}>
+                ⬆️ Importar CSV
+                <input type="file" accept=".csv" style={{display:"none"}} onChange={handleCsvUpload}/>
+              </label>
+            </div>
+
+            {csvStatus&&<div style={{...s.card,background:csvStatus.ok===true?'#DCFCE7':csvStatus.ok===false?'#FEE2E2':'#EFF6FF',color:csvStatus.ok===true?'#166534':csvStatus.ok===false?'#991B1B':'#1D4ED8',margin:"12px 0"}}>{csvStatus.msg}</div>}
+
+            <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",marginBottom:16}}>
+              <div>
+                <label style={s.label}>Mês</label>
+                <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={s.input}/>
+              </div>
+              <div style={{fontSize:13,color:C.muted}}>{lista.length} registros encontrados</div>
+            </div>
+
+            {loading?(
+              <div style={{...s.card,textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
+            ):Object.entries(porColab).length===0?(
+              <div style={{...s.card,textAlign:"center",padding:"40px",color:C.muted}}>
+                <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                <div>Nenhum registro de ponto para este mês.</div>
+                <div style={{fontSize:12,marginTop:4}}>Importe um CSV do ponto ou carregue pelo módulo VT ou Folha.</div>
+              </div>
+            ):(
+              Object.entries(porColab).map(([nome, dias])=>(
+                <div key={nome} style={{...s.card,padding:0,overflow:"hidden",marginBottom:12}}>
+                  <div style={{background:C.pri,color:"#fff",padding:"10px 16px",fontWeight:700,fontSize:13}}>
+                    👤 {nome} — {dias.length} dias
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{background:"#F9FAFB"}}>
+                        <th style={s.th}>Data</th>
+                        <th style={s.thC}>E1</th><th style={s.thC}>S1</th><th style={s.thC}>E2</th><th style={s.thC}>S2</th>
+                        <th style={s.thC}>B1</th><th style={s.thC}>B2</th><th style={s.thC}>B3</th><th style={s.thC}>B4</th>
+                        <th style={s.thC}>H.Extra</th>
+                        <th style={{...s.th,minWidth:120}}>Status</th>
+                        <th style={s.th}>Fonte</th>
+                      </tr></thead>
+                      <tbody>
+                        {dias.map((r,i)=>{
+                          const dt = new Date(r.data+'T12:00:00');
+                          const dow = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()];
+                          const temBatida = horVal(r.real_b1)||horVal(r.real_b2)||horVal(r.real_b3)||horVal(r.real_b4);
+                          const temPrev = horVal(r.previsto_e1)||horVal(r.previsto_s1);
+                          const isFalta = temPrev && !temBatida && !r.status_manual;
+                          return (
+                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:isFalta?"#FFF0F0":i%2===0?"#fff":"#FAFAFA"}}>
+                              <td style={{...s.td,fontWeight:600}}>{dt.toLocaleDateString('pt-BR')} <span style={{fontSize:10,color:C.muted}}>{dow}</span></td>
+                              <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_e1||"—"}</td>
+                              <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_s1||"—"}</td>
+                              <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_e2||"—"}</td>
+                              <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_s2||"—"}</td>
+                              <td style={{...s.tdC,color:horVal(r.real_b1)?C.text:C.muted,fontWeight:horVal(r.real_b1)?600:400}}>{r.real_b1||"—"}</td>
+                              <td style={{...s.tdC,color:horVal(r.real_b2)?C.text:C.muted}}>{r.real_b2||"—"}</td>
+                              <td style={{...s.tdC,color:horVal(r.real_b3)?C.text:C.muted}}>{r.real_b3||"—"}</td>
+                              <td style={{...s.tdC,color:horVal(r.real_b4)?C.text:C.muted}}>{r.real_b4||"—"}</td>
+                              <td style={{...s.tdC,color:hhmmToMin(r.hora_extra)>0?C.green:C.muted,fontWeight:hhmmToMin(r.hora_extra)>0?700:400}}>{r.hora_extra||"00:00"}</td>
+                              <td style={s.td}>
+                                <select value={r.status_manual||""} onChange={e=>salvarStatus(r.id,e.target.value)}
+                                  style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 4px",
+                                    background:r.status_manual==="atestado"?"#FFF7ED":r.status_manual==="abono"?"#EFF6FF":r.status_manual?"#F0FFF4":"#fff"}}>
+                                  {STATUS_OPTS.map(o=>(<option key={o.v} value={o.v}>{o.l}</option>))}
+                                </select>
+                                {isFalta&&<span style={{marginLeft:4,fontSize:10,color:C.danger,fontWeight:700}}>FALTA</span>}
+                              </td>
+                              <td style={{...s.td,fontSize:10,color:C.muted}}>{r.fonte||"csv"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        );
+      }
+
       function PlaceholderPage({title,icon}){
         return(
           <div>
@@ -3459,7 +3665,8 @@ function doPost(e) {
       // ============================================================
       // MÓDULO FOLHA DE PAGAMENTO
       // ============================================================
-      function FolhaPage({ colabAPI, setColabAPI, gasUrl, empresaId }) {
+      function FolhaPage({ colabAPI, setColabAPI, gasUrl, empresaId, valorDSR }) {
+        const dsrUnitario = parseFloat(String(valorDSR||"7,20").replace(",",".")) || 7.20;
         const GAS_URL = gasUrl || "https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec";
 
         const hoje = new Date();
@@ -3480,6 +3687,7 @@ function doPost(e) {
         const [colabSelecionado, setColabSelecionado] = useState(null);
         const [loadingAPI, setLoadingAPI] = useState(false);
         const [showRegras, setShowRegras] = useState(false);
+        const [folhaTab, setFolhaTab] = useState("contabilidade");
         const [historicoFolha, setHistoricoFolha] = useState([]);
         const [loadingHistFolha, setLoadingHistFolha] = useState(false);
 
@@ -3510,6 +3718,32 @@ function doPost(e) {
               mapa[k].ids.push(c.id);
             });
             setComprasSupa(mapa);
+          });
+          // Carrega registros de ponto do Supabase para o período
+          const [mes2, ano2] = mesAno.split("/").map(Number);
+          const iniISO = `${ano2}-${String(mes2-1||12).padStart(2,'0')}-26`;
+          const fimISO = `${ano2}-${String(mes2).padStart(2,'0')}-25`;
+          _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',iniISO).lte('data',fimISO).then(({data:rp})=>{
+            if(!rp||rp.length===0) return;
+            const empMap = {};
+            rp.forEach(r=>{
+              if(!empMap[r.colaborador_nome]) empMap[r.colaborador_nome]={cracha:r.cracha,nome:r.colaborador_nome,dias:{}};
+              empMap[r.colaborador_nome].dias[r.data]={
+                data:r.data,
+                previsto:{e1:r.previsto_e1,s1:r.previsto_s1,e2:r.previsto_e2,s2:r.previsto_s2},
+                real:{b1:r.real_b1,b2:r.real_b2,b3:r.real_b3,b4:r.real_b4},
+                horaExtra:r.hora_extra,
+                statusManual:r.status_manual||null
+              };
+            });
+            setFolhaData(prev => {
+              const merged = {...empMap};
+              Object.entries(prev||{}).forEach(([nome,d])=>{
+                if(!merged[nome]) merged[nome]=d;
+                else merged[nome]={...merged[nome],dias:{...empMap[nome]?.dias,...d.dias}};
+              });
+              return merged;
+            });
           });
         },[empresaId,mesAno]);
 
@@ -3643,30 +3877,6 @@ function doPost(e) {
 
         const periodoBate = !csvPeriodoSugerido || csvPeriodoSugerido.mesAnoSugerido === mesAno;
 
-        const parseCSVFolha = useCallback((text)=>{
-          const lines = text.trim().split(/\r?\n/);
-          if (lines.length < 2) throw new Error("Arquivo vazio ou inválido");
-          const header = lines[0].split(";");
-          if (!header[0].includes("Crach")) throw new Error("Formato não reconhecido. Use o CSV do ponto eletrônico.");
-          const empMap = {};
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(";").map(s=>s.trim());
-            if (cols.length < 11) continue;
-            const cracha = cols[0];
-            const nome = cols[1];
-            const dataStr = cols[2];
-            if (!cracha||!nome||!dataStr) continue;
-            const [dd,mm,yyyy] = dataStr.split("/");
-            const iso = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-            const previsto = {e1: cols[3]||"", s1: cols[4]||"", e2: cols[5]||"", s2: cols[6]||""};
-            const real = {b1: cols[7]||"", b2: cols[8]||"", b3: cols[9]||"", b4: cols[10]||""};
-            const horaExtra = cols[11]||"00:00";
-            if (!empMap[nome]) empMap[nome] = { cracha, nome, dias: {} };
-            empMap[nome].dias[iso] = { data: iso, previsto, real, horaExtra };
-          }
-          return empMap;
-        }, []);
-
         const handleFile = useCallback((file)=>{
           if (!file) return;
           if (!file.name.toLowerCase().endsWith(".csv")) {
@@ -3678,15 +3888,20 @@ function doPost(e) {
             try {
               const bytes = new Uint8Array(e.target.result);
               const text = new TextDecoder("iso-8859-1").decode(bytes);
-              const data = parseCSVFolha(text);
+              const data = parsePontoDetalhado(text);
               setFolhaData(data);
-              setCsvStatus({ok:true, msg:`✅ Ponto importado: ${Object.keys(data).length} colaboradores no CSV.`});
+              setCsvStatus({ok:true, msg:`✅ Ponto importado: ${Object.keys(data).length} colaboradores. Salvando no banco...`});
+              upsertRegistrosPonto(data, empresaId).then(r=>{
+                setCsvStatus({ok:true, msg:`✅ Ponto importado: ${Object.keys(data).length} colaboradores | 🗄️ ${r.count} registros salvos.`});
+              }).catch(err=>{
+                setCsvStatus({ok:false, msg:"Erro ao salvar ponto: " + err.message});
+              });
             } catch(err) {
               setCsvStatus({ok:false, msg:"Erro: " + err.message});
             }
           };
           reader.readAsArrayBuffer(file);
-        }, [parseCSVFolha]);
+        }, [empresaId]);
 
         const onDropFolha = useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }, [handleFile]);
 
@@ -3711,7 +3926,14 @@ function doPost(e) {
           const temBatida = diaDados && (horarioValido(diaDados.real.b1) || horarioValido(diaDados.real.b2) || horarioValido(diaDados.real.b3) || horarioValido(diaDados.real.b4));
           if (marc === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (marc === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (marc === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
           if (marc === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
+          // Verificar status_manual vindo do banco de ponto
+          const smDb = diaDados?.statusManual;
+          if (smDb === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (smDb === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
+          if (smDb === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
+          if (smDb === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
           if (isFeriado) return {status:"feriado", diaUtilPrevisto: !!temPrevisao};
           if (!temPrevisao) return {status:"nao_previsto", diaUtilPrevisto: false};
           if (temBatida) return {status:"trabalhou", diaUtilPrevisto: true};
@@ -3719,8 +3941,9 @@ function doPost(e) {
         };
 
         const calcularColab = useCallback((nomeKey, dados, colabInfo)=>{
-          let diasTrabalhados=0, faltas=0, atestados=0, ferias=0, folgas=0;
+          let diasTrabalhados=0, faltas=0, atestados=0, ferias=0, folgas=0, abonos=0;
           let horasExtrasMin=0, horasFaltasMin=0;
+          let atrasosInjustificados=0;
           const diasFaltas = [];
           // Data de fim da experiência (col I = EXPERIÊNCIA 90 DIAS)
           const fimExperiencia = colabInfo?.experiencia90 ? new Date(colabInfo.experiencia90 + "T12:00:00") : null;
@@ -3732,18 +3955,23 @@ function doPost(e) {
               diasTrabalhados++;
               if (diaDados?.horaExtra) horasExtrasMin += hhmmToMin(diaDados.horaExtra);
               if (diaDados) {
-                const prevMin = (hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) + 
+                const prevMin = (hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) +
                                 (hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
                 const realMin = ((hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1)) || 0) +
                                 ((hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3)) || 0);
                 if (realMin > 0 && prevMin > realMin) horasFaltasMin += (prevMin - realMin);
+                // Atraso injustificado (> 10 min de tolerância)
+                const prevE1 = hhmmToMin(diaDados.previsto.e1);
+                const realB1 = hhmmToMin(diaDados.real.b1);
+                if (prevE1 > 0 && realB1 > 0 && realB1 > prevE1 + 10) atrasosInjustificados++;
               }
             } else if (a.status === "falta") {
               faltas++;
-              diasFaltas.push(iso.split("-").reverse().slice(0,2).join("/"));
+              diasFaltas.push(iso.split("-").reverse().join("/"));
             } else if (a.status === "atestado") { atestados++; }
+            else if (a.status === "abono")  { abonos++; }
             else if (a.status === "ferias") { ferias++; }
-            else if (a.status === "folga") { folgas++; }
+            else if (a.status === "folga")  { folgas++; }
           });
 
           let dsrPerdidos = 0, feriadosNaSemanaPerdidos = 0;
@@ -3770,6 +3998,7 @@ function doPost(e) {
                 if (feriados.includes(iso)) feriadosNaSemanaPerdidos += 1;
               });
             }
+            // abono não gera perda de DSR (já tratado pelo status diferente de "falta")
           });
 
           // CAJU: só recebe dias trabalhados + atestados + férias que sejam APÓS experiência
@@ -3800,7 +4029,9 @@ function doPost(e) {
           const aj = ajustes[nomeKey] || {};
           const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||(comprasSupa[nomeKey]?.valor||0);
           const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",","."))||(adiantSupa[nomeKey]?.valor||0);
-          const premioAuto = faltas === 0;
+          // Prêmio assiduidade: qualquer atraso injustificado = 0 dias; atestado/abono = perde só aquele dia
+          const premioAssiduidadeDias = atrasosInjustificados > 0 ? 0 : Math.max(0, 30 - atestados - abonos);
+          const premioAuto = faltas === 0 && atrasosInjustificados === 0;
           const premioAssiduidade = aj.premioAssiduidade !== undefined ? aj.premioAssiduidade : premioAuto;
           // VT: pré-selecionado se transporte > 0 na planilha
           const descontarVTAuto = (colabInfo?.transporte || 0) > 0;
@@ -3809,7 +4040,7 @@ function doPost(e) {
           const totalDesconto = produtos + adiantamento;
 
           return {
-            diasTrabalhados, faltas, atestados, ferias, folgas,
+            diasTrabalhados, faltas, atestados, ferias, folgas, abonos,
             feriadosPerdidos: feriadosNaSemanaPerdidos,
             horasExtras: minToHHMM(horasExtrasMin),
             horasExtrasMin,
@@ -3817,7 +4048,7 @@ function doPost(e) {
             horasFaltasMin,
             dsrPerdidos, diasUteisPrevistos, diasEmExperiencia,
             cajuDias, cajuValor,
-            premioAssiduidade, descontarVT, bancoHoras,
+            premioAssiduidade, premioAssiduidadeDias, atrasosInjustificados, descontarVT, bancoHoras,
             produtos, adiantamento, totalDesconto,
             diasFaltas, observacoes: aj.observacoes||"",
             emExperiencia: diasEmExperiencia > 0,
@@ -4055,12 +4286,25 @@ function doPost(e) {
                     </div>
 
                     <div style={{marginBottom:20}}>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>📋 Banco de Ponto</div>
+                      <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li>Cada CSV do ponto importado (via VT ou Folha) salva os registros no banco Supabase por funcionário/dia.</li>
+                          <li>Se um dia já existir, os dados são atualizados com os novos valores (upsert).</li>
+                          <li>A Folha lê automaticamente o banco para o período selecionado — não precisa reimportar.</li>
+                          <li>Edições manuais de status podem ser feitas em <strong>📋 Banco de Ponto</strong>.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div style={{marginBottom:20}}>
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>💤 DSR — Descanso Semanal Remunerado</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li>Toda semana em que o colaborador tiver <strong>pelo menos 1 falta injustificada</strong> gera perda de <strong>1 DSR</strong>.</li>
-                          <li>Feriados que caem na mesma semana de uma falta também são perdidos (exibidos como <strong>+Nf</strong> na coluna DSR).</li>
-                          <li>Atestados, férias e folgas <strong>não</strong> geram perda de DSR.</li>
+                          <li>Toda semana com <strong>pelo menos 1 falta injustificada</strong> gera perda de <strong>1 DSR</strong>.</li>
+                          <li>Se houver feriado na mesma semana da falta, o feriado também é perdido (exibido como <strong>+Nf</strong>).</li>
+                          <li>O <strong>valor</strong> do desconto DSR = (DSR perdidos + feriados perdidos) × R$ {valorDSR} (configurável em ⚙️ Configurações).</li>
+                          <li>Atestados, abonos, férias e folgas <strong>não</strong> geram perda de DSR.</li>
                         </ul>
                       </div>
                     </div>
@@ -4069,49 +4313,51 @@ function doPost(e) {
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🍱 CAJU — Vale Alimentação</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li>Valor: <strong>R$ 5,00 por dia</strong> que conta como trabalhado, atestado ou férias.</li>
-                          <li>Dias de falta, folga e feriado <strong>não</strong> geram crédito CAJU.</li>
+                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado, atestado ou em férias.</li>
+                          <li>Falta, folga, feriado e abono <strong>não</strong> geram crédito CAJU.</li>
                           <li>Colaboradores em <strong>período de experiência (90 dias)</strong> não recebem CAJU durante esse período.</li>
-                          <li>O fim da experiência é baseado na data cadastrada no campo <em>experiencia90</em> da planilha.</li>
                         </ul>
                       </div>
                     </div>
 
                     <div style={{marginBottom:20}}>
-                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>⏱️ Horas Extras e Horas Falta</div>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>⏱️ Horas Extras e Horas Falta Parcial</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li><strong>Horas Extras:</strong> Lidas diretamente do campo <em>Hora Extra</em> do CSV do ponto eletrônico.</li>
-                          <li><strong>Horas Falta:</strong> Calculadas pela diferença entre o horário previsto e o real registrado no ponto.</li>
-                          <li>Ambas são exibidas no formato <strong>HH:MM</strong>.</li>
-                          <li>A flag <strong>Banco de Horas</strong> indica que as horas extras estão sendo acumuladas em banco, e não pagas.</li>
+                          <li><strong>Horas Extras:</strong> Lidas do campo <em>Hora Extra</em> do CSV do ponto eletrônico.</li>
+                          <li><strong>Horas Falta Parcial:</strong> Diferença entre horário previsto e real batido no dia (quando trabalhou mas saiu mais cedo ou chegou tarde além da tolerância).</li>
+                          <li>Tolerância de atraso: <strong>10 minutos</strong>. Atrasos até 10 min não geram horas falta.</li>
+                          <li>Formato exibido: <strong>HH:MM</strong>.</li>
                         </ul>
                       </div>
                     </div>
 
                     <div style={{marginBottom:20}}>
-                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🎯 Prêmio Assiduidade</div>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🎯 Prêmio Assiduidade 5% (Dias)</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
-                        Marcado automaticamente como <strong>Sim</strong> quando o colaborador não possui nenhuma falta injustificada no período.
-                        Pode ser ajustado manualmente no painel individual de cada colaborador.
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li>Base: <strong>30 dias fixos</strong> por mês (independente do mês).</li>
+                          <li>Qualquer <strong>atraso injustificado superior a 10 minutos</strong> → perde <strong>todo</strong> o prêmio (0 dias).</li>
+                          <li>Dia com <strong>atestado</strong> ou <strong>abono</strong> → desconta apenas aquele dia (30 − dias atestado/abono).</li>
+                          <li>Sem nenhuma ocorrência → <strong>30 dias</strong> completos.</li>
+                          <li><strong>Abono:</strong> Status definido manualmente em 📋 Banco de Ponto. Ausência justificada sem atestado — não perde DSR mas perde o dia do prêmio.</li>
+                        </ul>
                       </div>
                     </div>
 
                     <div style={{marginBottom:20}}>
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🚌 Desconto Vale Transporte</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
-                        Ativado automaticamente se o colaborador possuir valor de transporte cadastrado na planilha (<em>campo transporte {">"} 0</em>).
-                        Pode ser ajustado manualmente por colaborador.
+                        Ativado automaticamente se o colaborador possuir valor de transporte cadastrado. Ajustável manualmente.
                       </div>
                     </div>
 
                     <div style={{marginBottom:0}}>
-                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>💸 Descontos</div>
+                      <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>💸 Descontos (Compras + Antecipação)</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li><strong>Produtos:</strong> Valor de compras de produtos da empresa descontados em folha (inserido manualmente).</li>
-                          <li><strong>Adiantamento:</strong> Valor de adiantamento salarial a ser descontado (inserido manualmente).</li>
-                          <li><strong>Total Descontos:</strong> Soma de Produtos + Adiantamento.</li>
+                          <li><strong>Compras:</strong> Valor de compras de produtos lançados em 🛍️ Compras para o mês de referência. Marcadas como <em>Descontado</em> ao exportar a folha.</li>
+                          <li><strong>Antecipação:</strong> Adiantamento salarial lançado em 💵 Antecipações. Marcado como <em>Descontado</em> ao exportar a folha.</li>
                         </ul>
                       </div>
                     </div>
@@ -4227,8 +4473,79 @@ function doPost(e) {
                   </div>
                 </div>
 
+                {/* Abas */}
+                <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:16}}>
+                  {[{k:"contabilidade",l:"📤 Contabilidade"},
+                    {k:"interno",l:"🔍 Detalhamento Interno"}].map(t=>(
+                    <button key={t.k} onClick={()=>setFolhaTab(t.k)} style={{
+                      background:"none",border:"none",borderBottom:folhaTab===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                      marginBottom:-2,padding:"8px 18px",cursor:"pointer",fontWeight:folhaTab===t.k?700:400,
+                      color:folhaTab===t.k?C.acc:C.muted,fontSize:13,transition:"all 0.15s"
+                    }}>{t.l}</button>
+                  ))}
+                </div>
+
                 {saveStatus&&<div style={{...(saveStatus.ok===true?s.successBox:saveStatus.ok===false?s.warnBox:s.infoBox),marginTop:0,marginBottom:14}}>{saveStatus.msg}</div>}
 
+                {/* ===== ABA CONTABILIDADE ===== */}
+                {folhaTab==="contabilidade"&&(
+                  <div style={{overflowX:"auto"}}>
+                    <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Informações para envio à contabilidade — período {periodoLabel}</div>
+                    <table style={{...s.table,fontSize:12}}>
+                      <thead>
+                        <tr style={{background:"#F9FAFB"}}>
+                          <th style={{...s.th,minWidth:160}}>Funcionário</th>
+                          <th style={{...s.thC,minWidth:90}}>Horas Extras</th>
+                          <th style={{...s.thC,minWidth:90}}>Compras</th>
+                          <th style={{...s.th,minWidth:200}}>Horas Faltas (Datas)</th>
+                          <th style={{...s.thC,minWidth:110}}>Desconto DSR</th>
+                          <th style={{...s.thC,minWidth:110}}>H. Faltas Parcial</th>
+                          <th style={{...s.thC,minWidth:100}}>Antecipação</th>
+                          <th style={{...s.thC,minWidth:110}}>Prêmio 5% (Dias)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resultados.map((r,i)=>{
+                          const totalDSR = (r.calc.dsrPerdidos + r.calc.feriadosPerdidos) * dsrUnitario;
+                          const temAtraso = r.calc.atrasosInjustificados > 0;
+                          return (
+                            <tr key={r.nomeKey} style={{...s.row(i)}}>
+                              <td style={{...s.td,fontWeight:700}}>
+                                {r.nome}
+                                {r.funcao&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{r.funcao}</div>}
+                              </td>
+                              <td style={{...s.tdC,fontWeight:600,color:r.calc.horasExtrasMin>0?C.green:C.muted}}>{r.calc.horasExtras}</td>
+                              <td style={{...s.tdC,fontWeight:600,color:r.calc.produtos>0?C.danger:C.muted}}>{r.calc.produtos>0?fmtBRL(r.calc.produtos):"—"}</td>
+                              <td style={{...s.td,fontSize:11}}>
+                                {r.calc.diasFaltas.length>0
+                                  ? r.calc.diasFaltas.join(" · ")
+                                  : <span style={{color:C.muted}}>—</span>}
+                              </td>
+                              <td style={{...s.tdC,fontWeight:700,color:totalDSR>0?C.danger:C.muted}}>
+                                {totalDSR>0?fmtBRL(totalDSR):"—"}
+                                {(r.calc.dsrPerdidos+r.calc.feriadosPerdidos)>0&&(
+                                  <div style={{fontSize:9,color:C.muted,fontWeight:400}}>{r.calc.dsrPerdidos}+{r.calc.feriadosPerdidos}f DSR</div>
+                                )}
+                              </td>
+                              <td style={{...s.tdC,color:r.calc.horasFaltasMin>0?C.amber:C.muted,fontWeight:600}}>{r.calc.horasFaltasMin>0?r.calc.horasFaltas:"—"}</td>
+                              <td style={{...s.tdC,fontWeight:600,color:r.calc.adiantamento>0?C.danger:C.muted}}>{r.calc.adiantamento>0?fmtBRL(r.calc.adiantamento):"—"}</td>
+                              <td style={{...s.tdC}}>
+                                {temAtraso
+                                  ? <span style={{color:C.danger,fontWeight:700}}>0 ⚠</span>
+                                  : <span style={{color:r.calc.premioAssiduidadeDias===30?C.green:r.calc.premioAssiduidadeDias>0?C.amber:C.danger,fontWeight:700}}>{r.calc.premioAssiduidadeDias} dias</span>
+                                }
+                                {temAtraso&&<div style={{fontSize:9,color:C.danger}}>atraso inject.</div>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* ===== ABA INTERNO ===== */}
+                {folhaTab==="interno"&&(<>
                 <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
                   {[
                     {l:"Colaboradores",v:resultados.length,c:C.pri},
@@ -4331,6 +4648,7 @@ function doPost(e) {
                     </tbody>
                   </table>
                 </div>
+                </>)}
               </div>
             )}
 
@@ -4701,7 +5019,7 @@ function doPost(e) {
       // ============================================================
       // MÓDULO CONFIGURAÇÕES (admin only)
       // ============================================================
-      function ConfiguracoesPage({ gasUrl, setGasUrl, empresa, setEmpresa, responsavel, setResponsavel, passagemStr, setPassagemStr, copiedScript, setCopiedScript, empresaId }) {
+      function ConfiguracoesPage({ gasUrl, setGasUrl, empresa, setEmpresa, responsavel, setResponsavel, passagemStr, setPassagemStr, copiedScript, setCopiedScript, empresaId, valorDSR, setValorDSR }) {
         const [statusBkp, setStatusBkp] = React.useState(null);
         const [loadingBkp, setLoadingBkp] = React.useState(false);
         const realizarBackupSheets = async () => {
@@ -4786,6 +5104,11 @@ function doPost(e) {
                   <label style={s.label}>Valor da passagem (R$)</label>
                   <input style={s.input} value={passagemStr} onChange={e=>setPassagemStr(e.target.value)} placeholder="4,30"/>
                 </div>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Valor do DSR (R$)</label>
+                  <input style={s.input} value={valorDSR} onChange={e=>setValorDSR(e.target.value)} placeholder="7,20"/>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Desconto por DSR perdido. Padrão: R$ 7,20</div>
+                </div>
               </div>
             </div>
           </div>
@@ -4809,6 +5132,7 @@ function doPost(e) {
       // Novos estados
       const [feriadosDia,setFeriadosDia]=useState({});
       const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec");
+      const [valorDSR,setValorDSR]=useState(()=>localStorage.getItem("rh_valor_dsr")||"7,20");
       const [gasStatus,setGasStatus]=useState(null);
       const [copiedScript,setCopiedScript]=useState(false);
       const [copiedCsv,setCopiedCsv]=useState(false);
@@ -4826,6 +5150,7 @@ function doPost(e) {
       useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
       useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
       useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
+      useEffect(()=>{ localStorage.setItem("rh_valor_dsr",valorDSR); },[valorDSR]);
       useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
       useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
       useEffect(()=>{
@@ -4933,12 +5258,19 @@ function doPost(e) {
               const sem=prev.filter(h=>h.semanaIni!==ini||h.semanaFim!==fim);
               return [{id:Date.now(),label:lbl,semanaIni:ini,semanaFim:fim,employees:emps.map((e,i)=>({...e,id:i+1})),importadoEm:new Date().toLocaleString("pt-BR")},...sem].slice(0,12);
             });
+            // Salva dados detalhados do ponto no Supabase
+            try {
+              const empMap = parsePontoDetalhado(text);
+              upsertRegistrosPonto(empMap, empresaId).then(r=>{
+                if(r.count>0) setCsvStatus(prev=>({...prev, msg:(prev?.msg||'')+` | 🗄️ ${r.count} registros de ponto salvos.`}));
+              }).catch(()=>{});
+            } catch(_){}
           }catch(err){
             setCsvStatus({ok:false,msg:`Erro ao processar arquivo: ${err.message}`});
           }
         };
         reader.readAsArrayBuffer(file);
-      },[]);
+      },[empresaId]);
 
       const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
 
@@ -5571,7 +5903,7 @@ function doPost(e) {
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto_hist','adiantamentos','compras','recrutamento','orcamento','acessos','ajuda','config']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','acessos','ajuda','config']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -5582,10 +5914,10 @@ function doPost(e) {
         {k:'orcamento',l:'📊 Orçamento Folha'},
         {k:'ferias',l:'🏖️ Férias'},
         {k:'atestados',l:'🏥 Atestados'},
-        {k:'adiantamentos',l:'💵 Adiantamentos'},
+        {k:'adiantamentos',l:'💵 Antecipações'},
         {k:'compras',l:'🛍️ Compras'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
-        {k:'ponto_hist',l:'📊 Histórico Ponto'},
+        {k:'ponto',l:'📋 Banco de Ponto'},
         {k:'acessos',l:'🔐 Acessos'},
         {k:'ajuda',l:'❓ Ajuda'},
         {k:'config',l:'⚙️ Configurações'},
@@ -5622,16 +5954,16 @@ function doPost(e) {
               {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl} colabAPI={colabAPI} setColabAPI={setColabAPI} empresaId={empresaId}/>}
               {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
               {page==="vt"&&vtPageContent}
-              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} gasUrl={gasUrl} empresaId={empresaId}/>}
+              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} gasUrl={gasUrl} empresaId={empresaId} valorDSR={valorDSR}/>}
               {page==="orcamento"&&<OrcamentoPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ferias"&&<FeriasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="atestados"&&<AtestadosPage gasUrl={gasUrl} colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage gasUrl={gasUrl} empresaId={empresaId}/>}
-              {page==="ponto_hist"&&<PlaceholderPage title="Histórico de Ponto" icon="📊"/>}
+              {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
-              {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript} empresaId={empresaId}/>}
+              {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
               {page==="ajuda"&&<AjudaPage/>}
             </main>
           </div>
