@@ -2070,16 +2070,17 @@ function doPost(e) {
       // ============================================================
       function AcessosPage({ perfil: adminPerfil, empresaId }) {
         const TODAS_PAGINAS = [
-          {k:'dashboard',  l:'🏠 Início'},
-          {k:'colaboradores', l:'👥 Colaboradores'},
-          {k:'vt',         l:'🚌 Vale Transporte'},
-          {k:'folha',      l:'💼 Folha de Pagamento'},
-          {k:'ferias',     l:'🏖️ Férias'},
-          {k:'atestados',  l:'🏥 Atestados'},
-          {k:'ponto_hist', l:'📊 Histórico Ponto'},
-          {k:'adiantamentos', l:'💵 Adiantamentos'},
-          {k:'recrutamento',  l:'🧑‍💼 Recrutamento'},
-          {k:'orcamento',     l:'📊 Orçamento Folha'},
+          {k:'dashboard',    l:'🏠 Início'},
+          {k:'colaboradores',l:'👥 Colaboradores'},
+          {k:'vt',           l:'🚌 Vale Transporte'},
+          {k:'folha',        l:'💼 Folha de Pagamento'},
+          {k:'ponto',        l:'📋 Banco de Ponto'},
+          {k:'ferias',       l:'🏖️ Férias'},
+          {k:'atestados',    l:'🏥 Atestados'},
+          {k:'adiantamentos',l:'💵 Antecipações'},
+          {k:'compras',      l:'🛍️ Compras'},
+          {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
+          {k:'orcamento',    l:'📊 Orçamento Folha'},
         ];
 
         const [lista, setLista] = useState([]);
