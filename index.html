@@ -1158,16 +1158,15 @@ function doPost(e) {
             <div style={{fontSize:15,fontWeight:800,color:C.pri,marginBottom:16}}>Como usar o módulo de Vale Transporte</div>
 
             <div style={{...s.card, marginBottom:14}}>
-              <div style={s.cardTitle}>📂 1. Importar CSV do Ponto</div>
-              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Exporte o arquivo CSV do seu sistema de ponto eletrônico e arraste-o para a área indicada (ou clique para selecionar o arquivo).</p>
-              <div style={{background:"#F0F9F4",border:`1px solid ${C.green}`,borderRadius:8,padding:"10px 14px",fontSize:12,lineHeight:1.8}}>
-                <strong style={{color:C.green}}>Formato esperado do CSV:</strong><br/>
-                Colunas obrigatórias: <code>Cracha · Nome · Data · Batida (1ª entrada)</code><br/>
-                Separador: ponto-e-vírgula (<code>;</code>)<br/>
-                Codificação: ISO-8859-1 (padrão da maioria dos sistemas de ponto)
-              </div>
+              <div style={s.cardTitle}>📋 1. Carregar do Banco de Ponto</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Os dados de ponto são agora carregados diretamente do <strong>📋 Banco de Ponto</strong>. Para usar o VT:</p>
+              <ol style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
+                <li>Importe o CSV do período em <strong>📋 Banco de Ponto</strong> (menu lateral)</li>
+                <li>Volte aqui e defina a <strong>semana</strong> (início e fim) nas configurações acima</li>
+                <li>Na aba <strong>📋 Banco de Ponto</strong>, clique em <strong>"Carregar do Banco de Ponto"</strong></li>
+              </ol>
               <div style={{...s.infoBox, marginTop:10, marginBottom:0}}>
-                💡 Ao importar, o sistema detecta automaticamente a escala de cada colaborador (SEG-SEX ou SEG-SAB) com base nos registros de sábado presentes no CSV.
+                💡 O sistema detecta automaticamente a escala (SEG-SEX ou SEG-SAB) com base nos registros de sábado no banco.
               </div>
             </div>
 
@@ -1302,14 +1301,10 @@ function doPost(e) {
             </div>
 
             <div style={{...s.card, marginBottom:14}}>
-              <div style={s.cardTitle}>📂 3. Importar CSV do Ponto</div>
-              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Arraste o arquivo CSV do ponto eletrônico do período completo para a área indicada.</p>
-              <div style={{background:"#F0F9F4",border:`1px solid ${C.green}`,borderRadius:8,padding:"10px 14px",fontSize:12,lineHeight:1.8,marginBottom:10}}>
-                <strong style={{color:C.green}}>Formato esperado do CSV da Folha:</strong><br/>
-                <code>Cracha · Nome · Data · Previsto E1 · Previsto S1 · Previsto E2 · Previsto S2 · Real B1 · Real B2 · Real B3 · Real B4 · Hora Extra</code>
-              </div>
-              <div style={{...s.warnBox, marginBottom:0}}>
-                ⚠️ Se o período do CSV não bater com o mês selecionado, o sistema avisará e oferecerá ajuste automático do período.
+              <div style={s.cardTitle}>📋 3. Ponto — carregado automaticamente do Banco</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>O ponto eletrônico é buscado automaticamente do <strong>📋 Banco de Ponto</strong> ao selecionar o mês. Não é mais necessário importar CSV aqui.</p>
+              <div style={{...s.infoBox, marginBottom:0}}>
+                💡 Para que os dados apareçam: acesse <strong>📋 Banco de Ponto</strong> (menu lateral) e importe o CSV do período desejado. Depois, selecione o mês da folha e os dados serão carregados automaticamente.
               </div>
             </div>
 
@@ -3171,7 +3166,11 @@ function doPost(e) {
           }
           const val = parseFloat(String(form.valor).replace(',','.'));
           if(isNaN(val)||val<=0){ setStatus({ok:false,msg:'Valor inválido.'}); return; }
-          const mesR = form.dataConcessao.slice(0,7);
+          const _dia=parseInt(form.dataConcessao.slice(-2));
+          const [_yyyy,_mm]=form.dataConcessao.slice(0,7).split('-');
+          let mesR;
+          if(_dia>=26){ const nd=new Date(parseInt(_yyyy),parseInt(_mm),1); mesR=`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}`; }
+          else mesR=form.dataConcessao.slice(0,7);
           setLoading(true);
           const colab = colabAPI.find(c=>c.nome===form.colaboradorNome);
           const {error} = await _supa.from('adiantamentos').insert({
@@ -3235,6 +3234,7 @@ function doPost(e) {
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Data da Concessão *</label>
                     <input type="date" value={form.dataConcessao} onChange={e=>setForm(p=>({...p,dataConcessao:e.target.value}))} style={s.input}/>
+                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>Adiantamento no dia ≥ 26 é contabilizado na folha do mês seguinte.</div>
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Observações</label>
@@ -3409,11 +3409,21 @@ function doPost(e) {
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Data da Compra *</label>
-                    <input type="date" value={form.dataCompra} onChange={e=>{ const mr=e.target.value.slice(0,7); setForm(p=>({...p,dataCompra:e.target.value,mesReferencia:mr})); }} style={s.input}/>
+                    <input type="date" value={form.dataCompra} onChange={e=>{
+                      const d=e.target.value;
+                      const dia=parseInt(d.slice(-2));
+                      const [yyyy,mm]=d.slice(0,7).split('-');
+                      let mr;
+                      if(dia>=26){ const nd=new Date(parseInt(yyyy),parseInt(mm),1); mr=`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}`; }
+                      else mr=d.slice(0,7);
+                      setForm(p=>({...p,dataCompra:d,mesReferencia:mr}));
+                    }} style={s.input}/>
+                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>Compra no dia ≥ 26 é contabilizada na folha do mês seguinte.</div>
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Mês de Referência (Folha) *</label>
                     <input type="month" value={form.mesReferencia} onChange={e=>setForm(p=>({...p,mesReferencia:e.target.value}))} style={s.input}/>
+                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>Ajustado automaticamente pela data, mas pode ser corrigido aqui.</div>
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Observações</label>
@@ -3498,7 +3508,7 @@ function doPost(e) {
         );
       }
 
-      function PontoPage({ colabAPI, empresaId }) {
+      function PontoPage({ colabAPI, empresaId, isAdmin }) {
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
         const [mes, setMes] = React.useState(mesAtual);
@@ -3515,7 +3525,9 @@ function doPost(e) {
           if(!empresaId) return;
           setLoading(true);
           const ini = mes + "-01";
-          const fim = mes + "-31";
+          const [_a, _m] = mes.split('-');
+          const ultimoDia = new Date(parseInt(_a), parseInt(_m), 0).getDate();
+          const fim = `${mes}-${String(ultimoDia).padStart(2,'0')}`;
           const {data, error} = await _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',ini).lte('data',fim).order('colaborador_nome').order('data');
           if(!error) setLista(data||[]);
           setLoading(false);
@@ -3526,6 +3538,12 @@ function doPost(e) {
         const salvarStatus = async (id, novoStatus) => {
           await _supa.from('registros_ponto').update({status_manual:novoStatus||null,atualizado_em:new Date().toISOString()}).eq('id',id);
           setLista(prev=>prev.map(r=>r.id===id?{...r,status_manual:novoStatus||null}:r));
+        };
+
+        const salvarPontoManual = async (id, campo, valor) => {
+          const {error} = await _supa.from('registros_ponto').update({[campo]:valor,fonte:'editado',atualizado_em:new Date().toISOString()}).eq('id',id);
+          if(!error) setLista(prev=>prev.map(r=>r.id===id?{...r,[campo]:valor,fonte:'editado'}:r));
+          setEditando(null);
         };
 
         const handleCsvUpload = e => {
@@ -3615,17 +3633,42 @@ function doPost(e) {
                           const temBatida = horVal(r.real_b1)||horVal(r.real_b2)||horVal(r.real_b3)||horVal(r.real_b4);
                           const temPrev = horVal(r.previsto_e1)||horVal(r.previsto_s1);
                           const isFalta = temPrev && !temBatida && !r.status_manual;
+                          const foiEditado = r.fonte==='editado';
+                          const editandoEste = (campo) => editando?.id===r.id && editando?.campo===campo;
+                          const CelulaBatida = ({campo, valor}) => {
+                            if(editandoEste(campo)){
+                              return(
+                                <td style={{...s.tdC,padding:'2px'}}>
+                                  <input autoFocus type="text" defaultValue={valor||''} placeholder="HH:MM"
+                                    style={{width:52,fontSize:11,border:`1.5px solid ${C.acc}`,borderRadius:4,padding:'2px 4px',textAlign:'center'}}
+                                    onBlur={e=>salvarPontoManual(r.id,campo,e.target.value.trim())}
+                                    onKeyDown={e=>{if(e.key==='Enter')e.target.blur();if(e.key==='Escape')setEditando(null);}}
+                                  />
+                                </td>
+                              );
+                            }
+                            return(
+                              <td style={{...s.tdC,color:horVal(valor)?C.text:C.muted,fontWeight:horVal(valor)?600:400,
+                                cursor:isAdmin?'pointer':undefined,
+                                background:isAdmin&&horVal(valor)?'transparent':undefined}}
+                                title={isAdmin?'Clique para editar':undefined}
+                                onClick={isAdmin?()=>setEditando({id:r.id,campo,valor:valor||''}):undefined}>
+                                {valor||'—'}
+                                {isAdmin&&horVal(valor)&&<span style={{fontSize:8,color:C.muted,marginLeft:2}}>✏️</span>}
+                              </td>
+                            );
+                          };
                           return (
-                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:isFalta?"#FFF0F0":i%2===0?"#fff":"#FAFAFA"}}>
+                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:foiEditado?"#FFFBEB":isFalta?"#FFF0F0":i%2===0?"#fff":"#FAFAFA"}}>
                               <td style={{...s.td,fontWeight:600}}>{dt.toLocaleDateString('pt-BR')} <span style={{fontSize:10,color:C.muted}}>{dow}</span></td>
                               <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_e1||"—"}</td>
                               <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_s1||"—"}</td>
                               <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_e2||"—"}</td>
                               <td style={{...s.tdC,color:C.muted,fontSize:11}}>{r.previsto_s2||"—"}</td>
-                              <td style={{...s.tdC,color:horVal(r.real_b1)?C.text:C.muted,fontWeight:horVal(r.real_b1)?600:400}}>{r.real_b1||"—"}</td>
-                              <td style={{...s.tdC,color:horVal(r.real_b2)?C.text:C.muted}}>{r.real_b2||"—"}</td>
-                              <td style={{...s.tdC,color:horVal(r.real_b3)?C.text:C.muted}}>{r.real_b3||"—"}</td>
-                              <td style={{...s.tdC,color:horVal(r.real_b4)?C.text:C.muted}}>{r.real_b4||"—"}</td>
+                              <CelulaBatida campo="real_b1" valor={r.real_b1}/>
+                              <CelulaBatida campo="real_b2" valor={r.real_b2}/>
+                              <CelulaBatida campo="real_b3" valor={r.real_b3}/>
+                              <CelulaBatida campo="real_b4" valor={r.real_b4}/>
                               <td style={{...s.tdC,color:hhmmToMin(r.hora_extra)>0?C.green:C.muted,fontWeight:hhmmToMin(r.hora_extra)>0?700:400}}>{r.hora_extra||"00:00"}</td>
                               <td style={s.td}>
                                 <select value={r.status_manual||""} onChange={e=>salvarStatus(r.id,e.target.value)}
@@ -3635,7 +3678,9 @@ function doPost(e) {
                                 </select>
                                 {isFalta&&<span style={{marginLeft:4,fontSize:10,color:C.danger,fontWeight:700}}>FALTA</span>}
                               </td>
-                              <td style={{...s.td,fontSize:10,color:C.muted}}>{r.fonte||"csv"}</td>
+                              <td style={{...s.td,fontSize:10,color:foiEditado?'#92400E':C.muted,fontWeight:foiEditado?700:400}}>
+                                {foiEditado?'✏️ editado':'csv'}
+                              </td>
                             </tr>
                           );
                         })}
@@ -4397,33 +4442,24 @@ function doPost(e) {
             </div>
 
             <div style={s.card}>
-              <div style={s.cardTitle}>📂 Importar Ponto do Período</div>
-              <div style={s.infoBox}>
-                Exporte do ponto eletrônico o CSV com todos os colaboradores para o período <strong>{periodoLabel}</strong>.
+              <div style={s.cardTitle}>📋 Ponto do Período</div>
+              <div style={{...s.infoBox,background:"#EFF6FF",border:`1px solid ${C.acc}`}}>
+                <strong>O ponto é carregado automaticamente do Banco de Ponto.</strong><br/>
+                Os registros do período <strong>{periodoLabel}</strong> são buscados ao selecionar o mês.<br/>
+                <span style={{fontSize:12,color:C.muted}}>
+                  Para importar novos CSVs, acesse <strong>📋 Banco de Ponto</strong> no menu lateral.
+                  Após importar, retorne aqui e troque o mês para recarregar os dados.
+                </span>
               </div>
-              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDropFolha} onClick={()=>document.getElementById("csvFolhaInput").click()}>
-                <div style={{fontSize:32,marginBottom:8}}>📄</div>
-                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o CSV do ponto aqui</div>
-                <div style={{fontSize:13}}>ou clique para selecionar</div>
-                <input id="csvFolhaInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
-              </div>
-              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
-
-              {csvPeriodoSugerido && !periodoBate && (
-                <div style={{marginTop:12, marginBottom:0, background:"#FEF3C7", border:"1.5px solid #F59E0B", padding:"12px 14px", borderRadius:8}}>
-                  <div style={{fontWeight:800, color:"#92400E", marginBottom:6}}>⚠️ Descompasso de período detectado</div>
-                  <div style={{fontSize:12, color:"#78350F", marginBottom:10}}>
-                    O CSV tem dados de <strong>{csvPeriodoSugerido.primeira.split("-").reverse().join("/")}</strong> a <strong>{csvPeriodoSugerido.ultima.split("-").reverse().join("/")}</strong> (folha de <strong>{csvPeriodoSugerido.mesAnoSugerido}</strong>),
-                    mas o mês selecionado é <strong>{mesAno}</strong>. Por isso os valores estão zerados.
-                  </div>
-                  <button onClick={()=>setMesAno(csvPeriodoSugerido.mesAnoSugerido)}
-                          style={{background:"#F59E0B", color:"#fff", padding:"7px 14px", fontSize:12, borderRadius:6, border:"none", cursor:"pointer", fontWeight:700}}>
-                    ✅ Ajustar período para {csvPeriodoSugerido.mesAnoSugerido}
-                  </button>
+              {Object.keys(folhaData).length>0&&(
+                <div style={{fontSize:12,color:C.green,fontWeight:700,marginTop:8}}>
+                  ✅ {Object.keys(folhaData).length} colaboradores carregados do banco para o período.
                 </div>
               )}
-              {csvPeriodoSugerido && periodoBate && (
-                <div style={{marginTop:10, fontSize:11, color:C.green, fontWeight:700}}>✅ Período do CSV bate com o selecionado.</div>
+              {Object.keys(folhaData).length===0&&(
+                <div style={{fontSize:12,color:C.muted,marginTop:8}}>
+                  Nenhum dado de ponto encontrado para este período. Verifique se o CSV do mês foi importado no <strong>📋 Banco de Ponto</strong>.
+                </div>
               )}
             </div>
 
@@ -5234,6 +5270,31 @@ function doPost(e) {
       const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
       const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{},afastado:false,valorPago:""}]); setNovoNome(""); };
 
+      const carregarVTdoBancoPonto = useCallback(async () => {
+        if(!semanaIni||!semanaFim){ setCsvStatus({ok:false,msg:"Defina a semana (início e fim) antes de carregar."}); return; }
+        setCsvStatus({ok:null,msg:"⏳ Buscando ponto no Banco de Ponto..."});
+        const {data,error}=await _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',semanaIni).lte('data',semanaFim).order('colaborador_nome').order('data');
+        if(error){ setCsvStatus({ok:false,msg:"❌ "+error.message}); return; }
+        if(!data||data.length===0){ setCsvStatus({ok:false,msg:"Nenhum registro encontrado para este período no Banco de Ponto. Importe o CSV no módulo 📋 Banco de Ponto primeiro."}); return; }
+        const empMap={};
+        data.forEach(r=>{
+          const dt=new Date(r.data+'T12:00:00');
+          const diaKey=WEEKDAY_MAP[dt.getDay()];
+          if(!diaKey||diaKey==='DOM') return;
+          const temBatida=r.real_b1&&r.real_b1!==''&&r.real_b1!=='00:00';
+          if(!empMap[r.colaborador_nome]) empMap[r.colaborador_nome]={nome:r.colaborador_nome,cracha:r.cracha,presente:{},trabalhouSab:false};
+          empMap[r.colaborador_nome].presente[diaKey]=!!temBatida;
+          if(diaKey==='SAB'&&temBatida) empMap[r.colaborador_nome].trabalhouSab=true;
+        });
+        const emps=Object.values(empMap).map((e,i)=>({
+          id:i+1,cracha:e.cracha,nome:e.nome,
+          escala:e.trabalhouSab?"SEG-SAB":"SEG-SEX",
+          presente:e.presente,afastado:false,valorPago:""
+        }));
+        setEmployees(emps);
+        setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores carregados do Banco de Ponto. Período: ${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}.`});
+      },[semanaIni,semanaFim,empresaId]);
+
       const carregarDoHistorico=useCallback((entrada)=>{
         setEmployees(entrada.employees.map(e=>({afastado:false,valorPago:"",...e})));
         setSemanaIni(entrada.semanaIni);
@@ -5453,7 +5514,7 @@ function doPost(e) {
       },[employees,semanaIni,semanaFim,empresa,responsavel,passagemStr,feriadosDia]);
 
       const vtTabs=[
-        {k:"import",l:"📂 Importar CSV"},
+        {k:"import",l:"📋 Banco de Ponto"},
         {k:"manual",l:"✏️ Manual"},
         {k:"ponto",l:"📋 Ponto"},
         {k:"recibo",l:"🖨️ Recibo"},
@@ -5491,20 +5552,21 @@ function doPost(e) {
             ))}
           </div>
 
-          {/* ── TAB IMPORT ── */}
+          {/* ── TAB BANCO DE PONTO ── */}
           {vtTab==="import"&&(
             <div style={s.card}>
-              <div style={s.cardTitle}>📂 Importar arquivo do ponto eletrônico</div>
-              <div style={s.infoBox}><strong>Formato esperado:</strong> arquivo <code>.csv</code> com separador <code>;</code> exportado pelo sistema de ponto. Presença detectada pela coluna <strong>1ª Batida</strong>.</div>
-              <div style={s.dropZone(drag)} onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={onDrop} onClick={()=>document.getElementById("csvInput").click()}>
-                <div style={{fontSize:32,marginBottom:8}}>📄</div>
-                <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>Arraste o arquivo CSV aqui</div>
-                <div style={{fontSize:13}}>ou clique para selecionar</div>
-                <input id="csvInput" type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+              <div style={s.cardTitle}>📋 Carregar Ponto do Banco</div>
+              <div style={{...s.infoBox,background:"#EFF6FF",border:`1px solid ${C.acc}`,marginBottom:14}}>
+                <strong>O ponto agora é carregado do Banco de Ponto.</strong><br/>
+                Certifique-se de ter importado o CSV do período correto em <strong>📋 Banco de Ponto</strong> antes de carregar aqui.<br/>
+                <span style={{fontSize:12,color:C.muted}}>Defina a semana nos campos acima (Semana — Início/Fim) e clique no botão abaixo.</span>
               </div>
-              {csvStatus&&<div style={csvStatus.ok?s.successBox:s.warnBox}>{csvStatus.msg}</div>}
+              <button style={{...s.btnAcc,fontSize:14,padding:"10px 24px"}} onClick={carregarVTdoBancoPonto}>
+                📋 Carregar do Banco de Ponto
+              </button>
+              {csvStatus&&<div style={{...(csvStatus.ok===true?s.successBox:csvStatus.ok===false?s.warnBox:s.infoBox),marginTop:12}}>{csvStatus.msg}</div>}
               {employees.length>0&&(
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.rowAlt,borderRadius:8,padding:"10px 14px",border:`1px solid ${C.border}`,marginTop:12}}>
                   <span style={{fontSize:13,fontWeight:600,color:C.pri}}>{employees.length} colaboradores · Semana: <strong>{semanaLabel}</strong></span>
                   <button style={s.btnAcc} onClick={()=>setVtTab("ponto")}>Ver Ponto →</button>
                 </div>
@@ -5962,7 +6024,7 @@ function doPost(e) {
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage gasUrl={gasUrl} empresaId={empresaId}/>}
-              {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
               {page==="ajuda"&&<AjudaPage/>}
