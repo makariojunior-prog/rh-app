@@ -622,30 +622,37 @@ function doPost(e) {
         const hoje = new Date();
         hoje.setHours(12, 0, 0, 0);
 
-        const [ausencias, setAusencias] = React.useState({atestados:[],ferias:[]});
+        const [ausencias, setAusencias] = React.useState({atestados:[],ferias:[],retornandoHoje:[]});
         const [recrutInfo, setRecrutInfo] = React.useState({novos:0,entrevistas:[]});
 
         React.useEffect(()=>{
           if(!empresaId) return;
           const today = new Date().toISOString().slice(0,10);
+          const em3dias = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
           Promise.all([
-            _supa.from('atestados').select('colaborador_nome,setor,cid,fim').eq('empresa_id',empresaId).lte('inicio',today).gte('fim',today),
-            _supa.from('ferias').select('colaborador_nome,inicio,fim,status').eq('empresa_id',empresaId).lte('inicio',today).gte('fim',today).in('status',['agendado','em_gozo'])
+            _supa.from('atestados').select('colaborador_nome,setor,cid,inicio,fim').eq('empresa_id',empresaId).lte('inicio',em3dias).gte('fim',today),
+            _supa.from('ferias').select('colaborador_nome,inicio,fim,status').eq('empresa_id',empresaId).lte('inicio',em3dias).gte('fim',today).in('status',['agendado','em_gozo'])
           ]).then(([atRes,fRes])=>{
+            const getSetor = nome => (colabAPI.find(c=>c.nome===nome)||{}).setor||'Não informado';
             const atestados = (atRes.data||[]).map(a=>({
-              nome:a.colaborador_nome,
-              setor:a.setor||(colabAPI.find(c=>c.nome===a.colaborador_nome)||{}).setor||'Não informado',
-              cid:a.cid||'',
-              fim:a.fim||''
+              nome:a.colaborador_nome, setor:a.setor||getSetor(a.colaborador_nome),
+              cid:a.cid||'', inicio:a.inicio||'', fim:a.fim||'', tipo:'atestado'
             }));
             const ferias = (fRes.data||[]).map(f=>({
-              nome:f.colaborador_nome,
-              setor:(colabAPI.find(c=>c.nome===f.colaborador_nome)||{}).setor||'Não informado',
-              fim:f.fim||''
+              nome:f.colaborador_nome, setor:getSetor(f.colaborador_nome),
+              inicio:f.inicio||'', fim:f.fim||'', tipo:'ferias'
             }));
-            setAusencias({atestados,ferias});
+            const retornandoHoje = [
+              ...atestados.filter(a=>a.fim===today),
+              ...ferias.filter(f=>f.fim===today)
+            ];
+            const ativosHoje = [
+              ...atestados.filter(a=>a.inicio<=today&&a.fim>=today),
+              ...ferias.filter(f=>f.inicio<=today&&f.fim>=today)
+            ];
+            setAusencias({atestados:ativosHoje.filter(x=>x.tipo==='atestado'), ferias:ativosHoje.filter(x=>x.tipo==='ferias'), retornandoHoje});
           });
-        },[empresaId]);
+        },[empresaId,colabAPI.length]);
 
         React.useEffect(()=>{
           if(!empresaId) return;
@@ -989,120 +996,78 @@ function doPost(e) {
               </div>
             </div>
 
-            {/* ---- ATESTADOS ---- */}
+            {/* ---- AUSÊNCIAS ---- */}
             <div style={s.card}>
-              <div style={s.cardTitle}>🏥 Atestados em Andamento</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={s.cardTitle}>🚨 Ausências</div>
+                <span style={{fontSize:12,color:C.muted}}>
+                  {ausencias.atestados.length} atestado{ausencias.atestados.length!==1?"s":""} · {ausencias.ferias.length} féria{ausencias.ferias.length!==1?"s":""}
+                </span>
+              </div>
 
-              {atestadosAtivos.length > 0 ? (
-                <div>
-                  {atestadosAtivos.filter(a => a.diffRetorno === 0).length > 0 && (
-                    <div style={{marginBottom:16}}>
-                      <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>✅ Retorno esperado HOJE — confirmar presença!</div>
-                      {atestadosAtivos.filter(a => a.diffRetorno === 0).map((a,i) => (
-                        <div key={i} style={{background:"#E8F5EE",border:`2px solid ${C.green}`,borderRadius:10,padding:"12px 16px",marginBottom:6,display:"flex",alignItems:"center",gap:14}}>
-                          <div style={{fontSize:32,lineHeight:1}}>🔔</div>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:800,color:C.pri,fontSize:14}}>{a.nome}</div>
-                            {a.funcao && <div style={{fontSize:11,color:C.muted,marginTop:1}}>{a.funcao}</div>}
-                            <div style={{fontSize:11,color:C.muted,marginTop:4}}>Atestado de <strong>{fmtDate(a.inicio)}</strong> a <strong>{fmtDate(a.fim)}</strong></div>
-                          </div>
-                          <div style={{textAlign:"right",flexShrink:0}}>
-                            <div style={{fontWeight:800,color:C.green,fontSize:13}}>Retorna hoje</div>
-                            <div style={{fontSize:11,color:C.muted}}>{fmtDate(a.retornoISO)}</div>
-                          </div>
+              {/* Retornando hoje — alerta especial */}
+              {ausencias.retornandoHoje.length>0&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🔔 Retorno esperado HOJE — confirmar presença!</div>
+                  {ausencias.retornandoHoje.map((a,i)=>(
+                    <div key={i} style={{background:"#E8F5EE",border:`2px solid ${C.green}`,borderRadius:10,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:800,color:C.pri,fontSize:13}}>{a.nome}</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+                          {a.tipo==='atestado'?'🏥 Atestado':'🏖️ Férias'} encerrado em <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {atestadosAtivos.filter(a => a.diffRetorno > 0).length > 0 && (
-                    <div style={{marginBottom:16}}>
-                      <div style={{fontSize:11,fontWeight:700,color:C.amber,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>🏥 Afastados no momento</div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:10}}>
-                        {atestadosAtivos.filter(a => a.diffRetorno > 0).map((a,i) => (
-                          <div key={i} style={{background:C.amberBg,border:`1.5px solid ${C.amber}50`,borderRadius:9,padding:"11px 14px"}}>
-                            <div style={{fontWeight:700,color:C.pri,fontSize:13,marginBottom:1}}>{a.nome}</div>
-                            {a.funcao && <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{a.funcao}</div>}
-                            <div style={{fontSize:11,color:C.muted}}>Afastado desde <strong>{fmtDate(a.inicio)}</strong></div>
-                            <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.amber}30`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div style={{fontSize:10,color:C.muted}}>Retorno previsto</div>
-                              <div>
-                                <div style={{fontWeight:800,color:C.amber,fontSize:12,textAlign:"right"}}>{fmtDate(a.retornoISO)}</div>
-                                <div style={{fontSize:10,color:C.muted,textAlign:"right"}}>em {a.diffRetorno} dia{a.diffRetorno>1?"s":""}</div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
                       </div>
+                      <div style={{fontWeight:800,color:C.green,fontSize:12}}>Retorna hoje</div>
                     </div>
-                  )}
-
-                  {atestadosAtivos.filter(a => a.diffRetorno < 0).length > 0 && (
-                    <div>
-                      <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Retornaram recentemente</div>
-                      {atestadosAtivos.filter(a => a.diffRetorno < 0).map((a,i) => (
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"7px 0",borderBottom:`1px solid ${C.border}`,opacity:0.65}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:600,fontSize:12,color:C.text}}>{a.nome}</div>
-                            {a.funcao && <div style={{fontSize:10,color:C.muted}}>{a.funcao}</div>}
-                          </div>
-                          <div style={{textAlign:"right",fontSize:11,color:C.muted}}>
-                            <div>Retornou em {fmtDate(a.retornoISO)}</div>
-                            <div style={{fontSize:10}}>({Math.abs(a.diffRetorno)} dia{Math.abs(a.diffRetorno)>1?"s":""} atrás)</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  ))}
                 </div>
-              ) : (
-                <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"24px 0"}}>
-                  Nenhum atestado registrado no período atual.
+              )}
+
+              {/* Atestados ativos */}
+              {ausencias.atestados.length>0&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#C2410C",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏥 Atestados em andamento</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                    {ausencias.atestados.map((a,i)=>(
+                      <div key={i} style={{background:"#FFF7ED",border:"1.5px solid #FED7AA",borderRadius:9,padding:"10px 13px"}}>
+                        <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{a.nome}</div>
+                        {a.setor&&a.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{a.setor}</div>}
+                        {a.cid&&<div style={{fontSize:11,color:"#C2410C",marginTop:4}}>CID: {a.cid}</div>}
+                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                          {a.inicio&&<span>de {new Date(a.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
+                          até <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Férias ativas */}
+              {ausencias.ferias.length>0&&(
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#1D4ED8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏖️ Férias em andamento</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+                    {ausencias.ferias.map((f,i)=>(
+                      <div key={i} style={{background:"#EFF6FF",border:"1.5px solid #BFDBFE",borderRadius:9,padding:"10px 13px"}}>
+                        <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{f.nome}</div>
+                        {f.setor&&f.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{f.setor}</div>}
+                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                          {f.inicio&&<span>de {new Date(f.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
+                          até <strong>{new Date(f.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {ausencias.atestados.length===0&&ausencias.ferias.length===0&&ausencias.retornandoHoje.length===0&&(
+                <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"18px 0"}}>
+                  Nenhuma ausência registrada hoje.
                 </div>
               )}
             </div>
-
-            {(ausencias.atestados.length>0||ausencias.ferias.length>0)&&(
-              <div style={s.card}>
-                <div style={{fontWeight:700,color:C.pri,marginBottom:16,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>
-                  🚨 Ausências Hoje
-                  <span style={{marginLeft:10,fontSize:12,fontWeight:400,color:C.muted}}>
-                    {ausencias.atestados.length} atestado{ausencias.atestados.length!==1?"s":""} · {ausencias.ferias.length} férias
-                  </span>
-                </div>
-                {(()=>{
-                  const todos = [
-                    ...ausencias.atestados.map(a=>({...a,tipo:'atestado'})),
-                    ...ausencias.ferias.map(f=>({...f,tipo:'ferias'}))
-                  ];
-                  const porSetor = {};
-                  todos.forEach(a=>{ const s=a.setor||'Não informado'; if(!porSetor[s]) porSetor[s]=[]; porSetor[s].push(a); });
-                  return Object.entries(porSetor).sort((a,b)=>a[0].localeCompare(b[0],'pt')).map(([setor,pessoas])=>(
-                    <div key={setor} style={{marginBottom:14}}>
-                      <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:6}}>
-                        {setor} <span style={{fontWeight:400}}>({pessoas.length})</span>
-                      </div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                        {pessoas.map((p,i)=>(
-                          <div key={i} style={{
-                            display:"flex",alignItems:"center",gap:8,padding:"6px 12px",borderRadius:8,
-                            background:p.tipo==='atestado'?"#FFF7ED":"#EFF6FF",
-                            border:"1px solid "+(p.tipo==='atestado'?"#FED7AA":"#BFDBFE")
-                          }}>
-                            <span style={{fontSize:11,fontWeight:700,color:p.tipo==='atestado'?"#C2410C":"#1D4ED8"}}>
-                              {p.tipo==='atestado'?"🏥 ATT":"🏖️ FER"}
-                            </span>
-                            <span style={{fontSize:13,fontWeight:600,color:C.text}}>{p.nome}</span>
-                            {p.cid&&<span style={{fontSize:11,color:C.muted}}>({p.cid})</span>}
-                            {p.fim&&<span style={{fontSize:11,color:C.muted}}>até {new Date(p.fim+'T12:00:00').toLocaleDateString('pt-BR')}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ));
-                })()}
-              </div>
-            )}
 
             <div style={s.card}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
@@ -1296,8 +1261,11 @@ function doPost(e) {
             </div>
 
             <div style={{...s.card, marginBottom:14}}>
-              <div style={s.cardTitle}>👥 2. Carregar Colaboradores</div>
-              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Clique em <strong>"Carregar colaboradores da planilha"</strong> para buscar a lista de funcionários cadastrados. Isso é necessário para cruzar os dados de ponto com as informações do cadastro (função, setor, período de experiência, etc.).</p>
+              <div style={s.cardTitle}>👥 2. Colaboradores — sincronizados automaticamente</div>
+              <p style={{fontSize:13,lineHeight:1.7,marginBottom:10}}>Os colaboradores são sincronizados automaticamente do banco de dados da seção <strong>👥 Colaboradores</strong>. Não é necessário carregar manualmente.</p>
+              <div style={{...s.warnBox, marginBottom:0}}>
+                ⚠️ Se um colaborador aparece no ponto mas <strong>não está cadastrado</strong> em Colaboradores, o sistema exibirá um alerta amarelo no topo da folha. Verifique se o nome no cadastro corresponde exatamente ao nome no ponto eletrônico.
+              </div>
             </div>
 
             <div style={{...s.card, marginBottom:14}}>
@@ -1331,7 +1299,7 @@ function doPost(e) {
             <div style={{...s.card, marginBottom:14}}>
               <div style={s.cardTitle}>💾 6. Exportar a Folha</div>
               <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
-                <li><strong>Salvar na planilha:</strong> Envia os dados calculados para o Google Sheets via integração GAS</li>
+                <li><strong>Salvar:</strong> Registra a folha fechada no banco de dados do app. Para editar uma folha já salva, basta fazer os ajustes e clicar em Salvar novamente.</li>
                 <li><strong>Baixar CSV:</strong> Exporta a folha em formato semicolon (compatível com Excel)</li>
               </ul>
             </div>
@@ -4207,30 +4175,9 @@ function doPost(e) {
 
         const salvarFolha = async () => {
           if (resultados.length === 0) { setSaveStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
-          setSaveStatus({ok:null, msg:"Enviando folha para a planilha..."});
-          const payload = {
-            tipo:"folha", periodo: mesAno,
-            periodoInicio: toISO(dataIni), periodoFim: toISO(dataFim),
-            colaboradores: resultados.map(r=>({
-              nome: r.nome, funcao: r.funcao,
-              diasTrabalhados: r.calc.diasTrabalhados,
-              faltas: r.calc.faltas, atestados: r.calc.atestados,
-              ferias: r.calc.ferias, folgas: r.calc.folgas,
-              horasExtras: r.calc.horasExtras, horasFaltas: r.calc.horasFaltas,
-              dsrPerdidos: r.calc.dsrPerdidos, feriadosPerdidos: r.calc.feriadosPerdidos,
-              cajuDias: r.calc.cajuDias, cajuValor: r.calc.cajuValor,
-              premioAssiduidade: r.calc.premioAssiduidade,
-              descontarVT: r.calc.descontarVT,
-              produtos: r.calc.produtos, adiantamento: r.calc.adiantamento,
-              totalDesconto: r.calc.totalDesconto,
-              bancoHoras: r.calc.bancoHoras,
-              diasFaltas: r.calc.diasFaltas,
-              observacoes: r.calc.observacoes
-            }))
-          };
+          setSaveStatus({ok:null, msg:"⏳ Salvando folha..."});
           try {
-            await fetch(GAS_URL, { method:"POST", mode:"no-cors", body:JSON.stringify(payload) });
-            setSaveStatus({ok:true, msg:`✅ Folha ${mesAno} enviada! Verifique a aba FOLHA${ano} na planilha.`});
+            await salvarFolhaBanco();
             const idsDescontar = Object.values(adiantSupa).flatMap(a=>a.ids||[]).filter(Boolean);
             if(idsDescontar.length>0){
               await _supa.from('adiantamentos').update({status:'descontado'}).in('id',idsDescontar);
@@ -4241,7 +4188,7 @@ function doPost(e) {
               await _supa.from('compras').update({status:'descontado'}).in('id',idsCompras);
               setComprasSupa({});
             }
-            await salvarFolhaBanco();
+            setSaveStatus({ok:true, msg:`✅ Folha ${mesAno} salva no banco! Adiantamentos e compras marcados como descontados. Para editar, ajuste os valores e salve novamente.`});
           } catch(err) {
             setSaveStatus({ok:false, msg:"Erro: " + err.message});
           }
@@ -4434,11 +4381,20 @@ function doPost(e) {
                   <label style={s.label}>Período calculado</label>
                   <div style={{padding:"8px 12px",background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:7,fontSize:13,fontWeight:700,color:C.pri}}>{periodoLabel}</div>
                 </div>
-                <button style={{...s.btnAcc,opacity:loadingAPI?0.6:1}} onClick={buscarColaboradores} disabled={loadingAPI}>
-                  {loadingAPI?"⏳ Buscando...":"🔄 Carregar colaboradores da planilha"}
-                </button>
+                <div style={{fontSize:12,color:C.muted,paddingBottom:6}}>
+                  {colabAPI.length>0?<span style={{color:C.green}}>✅ {colabAPI.length} colaboradores sincronizados</span>:<span style={{color:C.danger}}>⚠️ Nenhum colaborador cadastrado</span>}
+                </div>
               </div>
-              {apiStatus&&<div style={{...(apiStatus.ok===true?s.successBox:apiStatus.ok===false?s.warnBox:s.infoBox),marginTop:12,marginBottom:0}}>{apiStatus.msg}</div>}
+              {(()=>{
+                const semCadastro = colaboradoresUnificados.filter(c=>!c.fonteCadastro&&c.fonteCSV);
+                if(semCadastro.length===0) return null;
+                return(
+                  <div style={{marginTop:12,background:"#FEF3C7",border:"1.5px solid #F59E0B",borderRadius:8,padding:"10px 14px"}}>
+                    <div style={{fontWeight:800,color:"#92400E",marginBottom:4}}>⚠️ {semCadastro.length} colaborador{semCadastro.length>1?"es":"" } no ponto sem cadastro</div>
+                    <div style={{fontSize:12,color:"#78350F"}}>Estes nomes estão no Banco de Ponto mas não foram encontrados na seção Colaboradores. Verifique se o nome está cadastrado corretamente: <strong>{semCadastro.map(c=>c.nome).join(", ")}</strong></div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div style={s.card}>
@@ -4505,7 +4461,7 @@ function doPost(e) {
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
                   <div style={s.cardTitle}>📊 Fechamento — {periodoLabel}</div>
                   <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                    <button style={s.btnAcc} onClick={salvarFolha}>💾 Salvar na planilha</button>
+                    <button style={s.btnAcc} onClick={salvarFolha}>💾 Salvar</button>
                     <button style={s.btn} onClick={exportarCSVFolha}>⬇️ Baixar CSV</button>
                   </div>
                 </div>
@@ -4720,7 +4676,7 @@ function doPost(e) {
               </div>
               {loadingHistFolha&&<div style={s.infoBox}>⏳ Carregando histórico...</div>}
               {!loadingHistFolha&&historicoFolha.length===0&&(
-                <div style={{color:C.muted,fontSize:13,padding:"10px 0"}}>Nenhuma folha salva ainda. Após fechar o mês, clique em <strong>💾 Salvar na planilha</strong> para registrar automaticamente.</div>
+                <div style={{color:C.muted,fontSize:13,padding:"10px 0"}}>Nenhuma folha salva ainda. Após fechar o mês, clique em <strong>💾 Salvar</strong> para registrar no banco.</div>
               )}
               {!loadingHistFolha&&historicoFolha.length>0&&(()=>{
                 const grupos={};
