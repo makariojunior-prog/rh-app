@@ -23,21 +23,29 @@ const BACKUP_DIR    = process.env.BACKUP_DIR    || path.join(__dirname, 'dados')
 const MANTER_DIAS   = parseInt(process.env.MANTER_DIAS || '60');
 // ─────────────────────────────────────────────────────────────────────────────
 
+// nome: tabela no Supabase
+// order: coluna usada para ordenar (garantir ordem determinística no JSON)
+// limit: máximo de registros (registros_ponto e folha_mensal podem ser grandes)
 const TABELAS = [
-  'colaboradores',
-  'atestados',
-  'ferias',
-  'adiantamentos',
-  'historico_salario',
-  'candidatos',
-  'entrevistas',
-  'logs',
+  { nome: 'colaboradores',    order: 'id',       limit: 10000 },
+  { nome: 'atestados',        order: 'id',       limit: 10000 },
+  { nome: 'ferias',           order: 'id',       limit: 10000 },
+  { nome: 'adiantamentos',    order: 'id',       limit: 10000 },
+  { nome: 'historico_salario',order: 'id',       limit: 10000 },
+  { nome: 'candidatos',       order: 'id',       limit: 10000 },
+  { nome: 'entrevistas',      order: 'id',       limit: 10000 },
+  { nome: 'logs',             order: 'id',       limit: 10000 },
+  // ── tabelas adicionadas após mai/2026 ─────────────────────
+  { nome: 'perfis',           order: 'id',       limit: 10000 },
+  { nome: 'compras',          order: 'id',       limit: 10000 },
+  { nome: 'folha_mensal',     order: 'periodo',  limit: 50000 },
+  { nome: 'registros_ponto',  order: 'data',     limit: 50000 },
 ];
 
-function fetchTable(tabela) {
+function fetchTable({ nome: tabela, order = 'id', limit = 10000 }) {
   return new Promise((resolve, reject) => {
     const host  = SUPABASE_URL.replace('https://', '');
-    const query = `empresa_id=eq.${encodeURIComponent(EMPRESA_ID)}&limit=10000&order=id`;
+    const query = `empresa_id=eq.${encodeURIComponent(EMPRESA_ID)}&limit=${limit}&order=${order}`;
     const options = {
       hostname: host,
       path: `/rest/v1/${tabela}?select=*&${query}`,
@@ -97,18 +105,19 @@ async function main() {
   const completo = {};
   let totalRecs = 0;
 
-  for (const tabela of TABELAS) {
+  for (const tbl of TABELAS) {
+    const { nome } = tbl;
     try {
-      const dados = await fetchTable(tabela);
-      const arquivo = path.join(destDir, `${tabela}.json`);
+      const dados = await fetchTable(tbl);
+      const arquivo = path.join(destDir, `${nome}.json`);
       fs.writeFileSync(arquivo, JSON.stringify(dados, null, 2), 'utf8');
-      resumo.tabelas[tabela] = dados.length;
-      completo[tabela] = dados;
+      resumo.tabelas[nome] = dados.length;
+      completo[nome] = dados;
       totalRecs += dados.length;
-      console.log(`  ✓  ${tabela.padEnd(22)} ${String(dados.length).padStart(5)} registros`);
+      console.log(`  ✓  ${nome.padEnd(22)} ${String(dados.length).padStart(5)} registros`);
     } catch (e) {
-      resumo.tabelas[tabela] = `ERRO: ${e.message}`;
-      console.error(`  ✗  ${tabela.padEnd(22)} ${e.message}`);
+      resumo.tabelas[nome] = `ERRO: ${e.message}`;
+      console.error(`  ✗  ${nome.padEnd(22)} ${e.message}`);
     }
   }
 
@@ -118,6 +127,10 @@ async function main() {
   fs.writeFileSync(path.join(destDir, '_resumo.json'), JSON.stringify(resumo, null, 2), 'utf8');
 
   console.log(`\n  Total: ${totalRecs} registros em ${TABELAS.length} tabelas`);
+
+  if (resumo.erro === null && Object.values(resumo.tabelas).some(v => String(v).startsWith('ERRO'))) {
+    resumo.erro = 'Uma ou mais tabelas falharam — verifique _resumo.json';
+  }
 
   // ── Rotação: remover backups mais antigos que MANTER_DIAS ────────────────
   const pastasDia = fs.readdirSync(BACKUP_DIR)

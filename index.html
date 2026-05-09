@@ -99,7 +99,10 @@
         if (cols.length < 11) continue;
         const cracha = cols[0], nome = cols[1], dataStr = cols[2];
         if (!cracha || !nome || !dataStr) continue;
-        const [dd, mm, yyyy] = dataStr.split("/");
+        const dataParts = dataStr.split("/");
+        if (dataParts.length < 3) continue;
+        const [dd, mm, yyyy] = dataParts;
+        if (!dd || !mm || !yyyy) continue;
         const iso = `${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
         const previsto = { e1: cols[3]||"", s1: cols[4]||"", e2: cols[5]||"", s2: cols[6]||"" };
         const real     = { b1: cols[7]||"", b2: cols[8]||"", b3: cols[9]||"", b4: cols[10]||"" };
@@ -1540,7 +1543,6 @@ function doPost(e) {
             const json = await res.json();
             if(!json.ok) throw new Error(json.msg || "Resposta inválida do GAS");
             const colab = json.colaboradores || [];
-            if(colab.length>0) console.log('[sync] GAS campos recebidos:', Object.keys(colab[0]));
             if(colab.length === 0) throw new Error("Nenhum colaborador encontrado na planilha");
             setStatus({ok:null, msg:`⏳ Salvando ${colab.length} colaboradores no Supabase...`});
             const records = colab.map(c => {
@@ -1571,10 +1573,8 @@ function doPost(e) {
                 ativo: true, atualizado_em: new Date().toISOString()
               };
             });
-            console.log('[sync] Sample record fields:', Object.keys(records[0]||{}));
-            console.log('[sync] Sample telefone:', records[0]?.telefone, 'chave_pix:', records[0]?.chave_pix);
             const {error} = await _supa.from('colaboradores').upsert(records, {onConflict:'id'});
-            if(error) { console.error('[sync] Supabase error:', error); throw error; }
+            if(error) throw error;
             // Populate colabAPI from GAS data (preserves nascimento/datas even sem colunas no Supabase)
             const colabParaApp = colab.map(c=>({
               nome:(c.nome||c.NOME||"").trim(), funcao:c.funcao||'', setor:c.setor||'',
@@ -2356,6 +2356,9 @@ function doPost(e) {
           if(!form.colaboradorNome||!form.inicio||!form.fim){
             setStatus({ok:false,msg:'Preencha colaborador, início e fim.'}); return;
           }
+          if(form.fim < form.inicio){
+            setStatus({ok:false,msg:'A data de fim não pode ser anterior ao início.'}); return;
+          }
           setLoading(true);
           const dias = calcDias(form.inicio,form.fim);
           const {error} = await _supa.from('atestados').insert({
@@ -2531,6 +2534,7 @@ function doPost(e) {
 
         const salvar = async () => {
           if(!form.colaboradorNome||!form.inicio||!form.fim){ setStatus({ok:false,msg:'Preencha colaborador, início e fim.'}); return; }
+          if(form.fim < form.inicio){ setStatus({ok:false,msg:'A data de fim não pode ser anterior ao início.'}); return; }
           setLoading(true);
           const {error} = await _supa.from('ferias').insert({
             empresa_id:empresaId, colaborador_nome:form.colaboradorNome,
@@ -3504,13 +3508,15 @@ function doPost(e) {
         React.useEffect(()=>{ carregar(); },[empresaId,mes]);
 
         const salvarStatus = async (id, novoStatus) => {
-          await _supa.from('registros_ponto').update({status_manual:novoStatus||null,atualizado_em:new Date().toISOString()}).eq('id',id);
+          const {error} = await _supa.from('registros_ponto').update({status_manual:novoStatus||null,atualizado_em:new Date().toISOString()}).eq('id',id);
+          if(error){ setStatus({ok:false,msg:'❌ Erro ao atualizar status: '+error.message}); return; }
           setLista(prev=>prev.map(r=>r.id===id?{...r,status_manual:novoStatus||null}:r));
         };
 
         const salvarPontoManual = async (id, campo, valor) => {
           const {error} = await _supa.from('registros_ponto').update({[campo]:valor,fonte:'editado',atualizado_em:new Date().toISOString()}).eq('id',id);
-          if(!error) setLista(prev=>prev.map(r=>r.id===id?{...r,[campo]:valor,fonte:'editado'}:r));
+          if(error){ setStatus({ok:false,msg:'❌ Erro ao salvar: '+error.message}); return; }
+          setLista(prev=>prev.map(r=>r.id===id?{...r,[campo]:valor,fonte:'editado'}:r));
           setEditando(null);
         };
 
@@ -3561,6 +3567,7 @@ function doPost(e) {
             </div>
 
             {csvStatus&&<div style={{...s.card,background:csvStatus.ok===true?'#DCFCE7':csvStatus.ok===false?'#FEE2E2':'#EFF6FF',color:csvStatus.ok===true?'#166534':csvStatus.ok===false?'#991B1B':'#1D4ED8',margin:"12px 0"}}>{csvStatus.msg}</div>}
+            {status&&<div style={{...s.card,background:status.ok===true?'#DCFCE7':'#FEE2E2',color:status.ok===true?'#166534':'#991B1B',margin:"12px 0",cursor:'pointer'}} onClick={()=>setStatus(null)}>{status.msg} <span style={{opacity:0.5,fontSize:11}}>✕</span></div>}
 
             <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",marginBottom:16}}>
               <div>
@@ -4129,7 +4136,7 @@ function doPost(e) {
           try {
             const {data} = await _supa.from('folha_mensal')
               .select('periodo,colaborador_nome,setor,salario_bruto,salario_liquido')
-              .eq('empresa_id',empresaId).order('periodo',{ascending:false}).limit(500);
+              .eq('empresa_id',empresaId).order('periodo',{ascending:false}).limit(5000);
             setHistoricoFolha(data||[]);
           } catch(e){ setHistoricoFolha([]); }
           setLoadingHistFolha(false);
@@ -4168,7 +4175,7 @@ function doPost(e) {
             const {error} = await _supa.from('folha_mensal').upsert(rows,{onConflict:'empresa_id,periodo,colaborador_nome'});
             if(error) throw error;
             await carregarHistoricoFolha();
-          } catch(e){ console.error('Folha banco erro:',e); }
+          } catch(e){ throw e; }
         };
 
         useEffect(()=>{ carregarHistoricoFolha(); },[empresaId]);
