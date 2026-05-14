@@ -1535,7 +1535,7 @@ function doPost(e) {
 
         const FORM_VAZIO = {
           nome:"", funcao:"", setor:"", cpf:"", telefone:"", chavePix:"", email:"",
-          nascimento:"", admissao:"", experiencia30:"", experiencia90:"",
+          nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
           salario:"", transporte:"", periculosidade:false,
           contaSalario:false, aditivoContrato:false, usoArmario:false,
           lgpd:false, imagem:false, camera:false, epiUniforme:false,
@@ -1549,7 +1549,7 @@ function doPost(e) {
           nome:c.nome, setor:c.setor||'', funcao:c.funcao||'', cpf:c.cpf||'',
           telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
           nascimento:c.nascimento||'', admissao:c.admissao||'',
-          experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
+          experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
           salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
           transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
           contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
@@ -1721,7 +1721,7 @@ function doPost(e) {
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
             telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
             nascimento:c.nascimento||'', admissao:c.admissao||'',
-            experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
+            experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
             salario:String(c.salario||''), transporte:String(c.transporte||''),
             periculosidade:!!c.periculosidade,
             contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
@@ -1758,6 +1758,7 @@ function doPost(e) {
               email:form.email?.trim()||null,
               nascimento:form.nascimento||null, admissao:form.admissao||null,
               experiencia_30:form.experiencia30||null, experiencia_90:form.experiencia90||null,
+              data_encerramento:form.encerramento||null,
               salario:parseFloat(String(form.salario).replace(",","."))||0,
               inss:calcINSS(parseFloat(String(form.salario).replace(",","."))||0),
               fgts:calcFGTS(parseFloat(String(form.salario).replace(",","."))||0),
@@ -1772,7 +1773,7 @@ function doPost(e) {
               termo_confidencialidade:!!form.termoConfidencialidade,
               termo_assiduidade:!!form.termoAssiduidade,
               termo_mudanca_horario:!!form.termoMudancaHorario,
-              ativo:true, atualizado_em:new Date().toISOString()
+              ativo:!form.encerramento, atualizado_em:new Date().toISOString()
             };
             let data, error;
             if(editando.novo){
@@ -1819,12 +1820,25 @@ function doPost(e) {
               }));
               await _supa.from('colaborador_termos').upsert(rows,{onConflict:'colaborador_id,termo_id'});
             }
-            const novaLista = editando.novo
-              ? [...lista, data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
-              : lista.map(x=>x.id===editando.id?data:x);
-            setLista(novaLista);
-            setColabAPI(novaLista.map(mapearParaApp));
-            setStatus({ok:true, msg:editando.novo?"✅ Colaborador adicionado.":"✅ Alterações salvas."});
+            const ficouAtivo = !form.encerramento;
+            if(editando.novo){
+              if(ficouAtivo) setLista(p=>[...p,data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')));
+              else setListaDesligados(p=>[...p,data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')));
+            } else {
+              if(ficouAtivo){
+                const novaLista = lista.map(x=>x.id===editando.id?data:x);
+                setLista(novaLista); setListaDesligados(prev=>prev.filter(x=>x.id!==editando.id));
+                setColabAPI(novaLista.map(mapearParaApp));
+              } else {
+                const novaLista = lista.filter(x=>x.id!==editando.id);
+                setLista(novaLista); setColabAPI(novaLista.map(mapearParaApp));
+                setListaDesligados(prev=>{
+                  const filtered = prev.filter(x=>x.id!==editando.id);
+                  return [...filtered,data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
+                });
+              }
+            }
+            setStatus({ok:true, msg:editando.novo?"✅ Colaborador adicionado.":(ficouAtivo?"✅ Alterações salvas.":"✅ Colaborador encerrado e movido para inativos.")});
             setEditando(null);
           } catch(err){ setStatus({ok:false,msg:"❌ Erro: "+err.message}); }
           setLoading(false);
@@ -1833,7 +1847,7 @@ function doPost(e) {
         const reativar = async c => {
           if(!await confirmar(`Reativar "${c.nome}"? O colaborador voltará a aparecer na folha.`,'Reativar Colaborador')) return;
           setLoading(true);
-          const {error} = await _supa.from('colaboradores').update({ativo:true,atualizado_em:new Date().toISOString()}).eq('id',c.id);
+          const {error} = await _supa.from('colaboradores').update({ativo:true,data_encerramento:null,atualizado_em:new Date().toISOString()}).eq('id',c.id);
           if(!error){
             setListaDesligados(prev=>prev.filter(x=>x.id!==c.id));
             const novaLista = [...lista,{...c,ativo:true}].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
@@ -1846,11 +1860,12 @@ function doPost(e) {
         const desativar = async c => {
           if(!await confirmar(`Desativar "${c.nome}"? Ele não aparecerá mais na folha de pagamento.`,'Desativar Colaborador')) return;
           setLoading(true);
-          const {error} = await _supa.from('colaboradores').update({ativo:false,atualizado_em:new Date().toISOString()}).eq('id',c.id);
+          const hoje = new Date().toISOString().slice(0,10);
+          const {error} = await _supa.from('colaboradores').update({ativo:false,data_encerramento:c.data_encerramento||hoje,atualizado_em:new Date().toISOString()}).eq('id',c.id);
           if(!error){
             const novaLista = lista.filter(x=>x.id!==c.id);
             setLista(novaLista); setColabAPI(novaLista.map(mapearParaApp));
-            setListaDesligados(prev=>[...prev,{...c,ativo:false}].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')));
+            setListaDesligados(prev=>[...prev,{...c,ativo:false,data_encerramento:c.data_encerramento||hoje}].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')));
             setStatus({ok:true,msg:`✅ ${c.nome} desativado.`});
           } else { setStatus({ok:false,msg:"❌ Erro: "+error.message}); }
           setLoading(false);
@@ -1912,7 +1927,7 @@ function doPost(e) {
                 <CampoForm label="Função" campo="funcao" placeholder="Ex: Auxiliar de Cozinha" form={form} setForm={setForm}/>
                 <CampoForm label="Setor" campo="setor" placeholder="Ex: Produção" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Admissão" campo="admissao" type="date" form={form} setForm={setForm}/>
-                <div/>
+                <CampoForm label="Data de Encerramento" campo="encerramento" type="date" form={form} setForm={setForm} hint={form.encerramento?"⚠️ Preencher esta data torna o colaborador inativo":undefined}/>
                 <CampoForm label="Fim Experiência 30d" campo="experiencia30" type="date" form={form} setForm={setForm}/>
                 <CampoForm label="Fim Experiência 90d" campo="experiencia90" type="date" form={form} setForm={setForm}/>
               </div>
@@ -2185,7 +2200,7 @@ function doPost(e) {
                   <div style={{marginTop:8,border:"1px solid "+C.border,borderRadius:8,overflow:"hidden",opacity:0.85}}>
                     <table style={{width:"100%",borderCollapse:"collapse"}}>
                       <thead><tr style={{background:"#F9FAFB"}}>
-                        <th style={s.th}>Nome</th><th style={s.th}>Função</th><th style={s.th}>Setor</th><th style={{...s.th,textAlign:"right"}}></th>
+                        <th style={s.th}>Nome</th><th style={s.th}>Função</th><th style={s.th}>Setor</th><th style={s.th}>Encerramento</th><th style={{...s.th,textAlign:"right"}}></th>
                       </tr></thead>
                       <tbody>
                         {listaDesligados.map(c=>(
@@ -2193,6 +2208,7 @@ function doPost(e) {
                             <td style={{...s.td,fontWeight:600,color:C.muted}}>{c.nome}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{c.funcao||"—"}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{c.setor||"—"}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{c.data_encerramento?fmtDate(c.data_encerramento):"—"}</td>
                             <td style={{...s.td,textAlign:"right"}}>
                               <button onClick={()=>reativar(c)} style={{background:"none",border:"1px solid #86EFAC",color:"#16A34A",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>↩ Reativar</button>
                             </td>
