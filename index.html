@@ -285,7 +285,7 @@ function doGet(e) {
     if (acao === 'backup') {
       var empresaIdBkp = e.parameter.empresa_id || 'cantina';
       var agora = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm');
-      var TABELAS_BKP = ['colaboradores','atestados','ferias','adiantamentos','historico_salario','candidatos','entrevistas','logs'];
+      var TABELAS_BKP = ['colaboradores','atestados','ferias','adiantamentos','adiantamentos_fixos','historico_salario','candidatos','entrevistas','logs','termos_assinatura','colaborador_termos'];
       var totalRecs = 0;
       var erros = [];
 
@@ -1424,7 +1424,10 @@ function doPost(e) {
         const [historicoFerias, setHistoricoFerias] = useState([]);
         const [historicoSalario, setHistoricoSalario] = useState([]);
         const [historicoAdiantamentos, setHistoricoAdiantamentos] = useState([]);
+        const [historicoAdiantamentosFixos, setHistoricoAdiantamentosFixos] = useState([]);
         const [loadingHistorico, setLoadingHistorico] = useState(false);
+        const [termosGlobais, setTermosGlobais] = useState([]);
+        const [termosExtras, setTermosExtras] = useState({});
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
         const [editando, setEditando] = useState(null);
@@ -1487,6 +1490,10 @@ function doPost(e) {
             const {data:dataAdt} = await _supa.from('adiantamentos').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('data_concessao',{ascending:false});
             setHistoricoAdiantamentos(dataAdt||[]);
           } catch(e) { setHistoricoAdiantamentos([]); }
+          try {
+            const {data:dataAdtF} = await _supa.from('adiantamentos_fixos').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('created_at',{ascending:false});
+            setHistoricoAdiantamentosFixos(dataAdtF||[]);
+          } catch(e) { setHistoricoAdiantamentosFixos([]); }
           setLoadingHistorico(false);
         };
 
@@ -1517,7 +1524,12 @@ function doPost(e) {
           }
         };
 
-        useEffect(()=>{ carregar(); },[empresaId]);
+        useEffect(()=>{
+          carregar();
+          _supa.from('termos_assinatura').select('*').eq('empresa_id',empresaId).order('ordem')
+            .then(({data})=>{ if(data) setTermosGlobais(data); })
+            .catch(()=>{});
+        },[empresaId]);
 
         const parseDateBR = s => {
           if(!s) return null;
@@ -1604,7 +1616,7 @@ function doPost(e) {
           setLoading(false);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
@@ -1622,7 +1634,15 @@ function doPost(e) {
             termoAssiduidade:!!c.termo_assiduidade,
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
-          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]);
+          setTermosExtras({});
+          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]);
+          // Load non-legacy terms from colaborador_termos
+          _supa.from('colaborador_termos').select('*').eq('colaborador_id',c.id)
+            .then(({data})=>{
+              const extras = {};
+              (data||[]).forEach(ct=>{ extras[ct.termo_id]=ct.assinado; });
+              setTermosExtras(extras);
+            }).catch(()=>{});
         };
 
         const salvar = async () => {
@@ -1679,6 +1699,27 @@ function doPost(e) {
                 });
               }
             }
+            // Sync all terms to colaborador_termos
+            if(termosGlobais.length > 0 && data?.id) {
+              const CAMPO_DB_TO_APP = {
+                'conta_salario':'contaSalario','aditivo_contrato':'aditivoContrato',
+                'uso_armario':'usoArmario','lgpd':'lgpd','imagem':'imagem','camera':'camera',
+                'epi_uniforme':'epiUniforme','acompanhamento_producao':'acompanhamentoProducao',
+                'uso_celular':'usoCelular','uso_veiculo':'usoVeiculo',
+                'termo_confidencialidade':'termoConfidencialidade',
+                'termo_assiduidade':'termoAssiduidade','termo_mudanca_horario':'termoMudancaHorario',
+              };
+              const rows = termosGlobais.map(t=>({
+                empresa_id: empresaId,
+                colaborador_id: data.id,
+                termo_id: t.id,
+                assinado: t.campo_legado
+                  ? !!(form[CAMPO_DB_TO_APP[t.campo_legado]])
+                  : !!(termosExtras[t.id]),
+                updated_at: new Date().toISOString(),
+              }));
+              await _supa.from('colaborador_termos').upsert(rows,{onConflict:'colaborador_id,termo_id'});
+            }
             const novaLista = editando.novo
               ? [...lista, data].sort((a,b)=>a.nome.localeCompare(b.nome,'pt'))
               : lista.map(x=>x.id===editando.id?data:x);
@@ -1716,20 +1757,29 @@ function doPost(e) {
           setLoading(false);
         };
 
-        const TERMOS = [
-          {campo:"contaSalario",          label:"Conta Salário Aberta"},
-          {campo:"aditivoContrato",        label:"Aditivo do Contrato"},
-          {campo:"usoArmario",             label:"Uso do Armário"},
-          {campo:"lgpd",                   label:"LGPD"},
-          {campo:"imagem",                 label:"Autorização de Imagem"},
-          {campo:"camera",                 label:"Câmera"},
-          {campo:"epiUniforme",            label:"EPI / Uniforme"},
-          {campo:"acompanhamentoProducao", label:"Acompanhamento de Produção"},
-          {campo:"usoCelular",             label:"Uso do Celular"},
-          {campo:"usoVeiculo",             label:"Uso de Veículo"},
-          {campo:"termoConfidencialidade", label:"Termo de Confidencialidade"},
-          {campo:"termoAssiduidade",       label:"Termo de Adesão à Assiduidade"},
-          {campo:"termoMudancaHorario",    label:"Termo de Mudança de Horário"},
+        const CAMPO_DB_TO_APP = {
+          'conta_salario':'contaSalario','aditivo_contrato':'aditivoContrato',
+          'uso_armario':'usoArmario','lgpd':'lgpd','imagem':'imagem','camera':'camera',
+          'epi_uniforme':'epiUniforme','acompanhamento_producao':'acompanhamentoProducao',
+          'uso_celular':'usoCelular','uso_veiculo':'usoVeiculo',
+          'termo_confidencialidade':'termoConfidencialidade',
+          'termo_assiduidade':'termoAssiduidade','termo_mudanca_horario':'termoMudancaHorario',
+        };
+        // Fallback enquanto termosGlobais carrega
+        const TERMOS_FALLBACK = [
+          {campo:"contaSalario",label:"Conta Salário Aberta"},
+          {campo:"aditivoContrato",label:"Aditivo do Contrato"},
+          {campo:"usoArmario",label:"Uso do Armário"},
+          {campo:"lgpd",label:"LGPD"},
+          {campo:"imagem",label:"Autorização de Imagem"},
+          {campo:"camera",label:"Câmera"},
+          {campo:"epiUniforme",label:"EPI / Uniforme"},
+          {campo:"acompanhamentoProducao",label:"Acompanhamento de Produção"},
+          {campo:"usoCelular",label:"Uso do Celular"},
+          {campo:"usoVeiculo",label:"Uso de Veículo"},
+          {campo:"termoConfidencialidade",label:"Termo de Confidencialidade"},
+          {campo:"termoAssiduidade",label:"Termo de Adesão à Assiduidade"},
+          {campo:"termoMudancaHorario",label:"Termo de Mudança de Horário"},
         ];
 
         const filtrados = lista.filter(c=>!busca||(c.nome||'').toLowerCase().includes(busca.toLowerCase())||(c.funcao||'').toLowerCase().includes(busca.toLowerCase()));
@@ -1796,18 +1846,29 @@ function doPost(e) {
             </div>
 
             <div style={s.card}>
-              <div style={{fontWeight:700,color:C.pri,marginBottom:16,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📝 Assinatura de Termos</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📝 Assinatura de Termos</div>
+                <span style={{fontSize:11,color:C.muted}}>{(termosGlobais.filter(t=>t.ativo).length||TERMOS_FALLBACK.length)} termos</span>
+              </div>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {TERMOS.map(({campo,label})=>(
-                  <div key={campo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderRadius:7,background:form[campo]?"#F0FDF4":"#F9FAFB",border:"1px solid "+(form[campo]?C.green:C.border)}}>
-                    <span style={{fontSize:13,color:"#374151",fontWeight:500}}>{label}</span>
-                    <button type="button" onClick={()=>setForm(p=>({...p,[campo]:!p[campo]}))}
-                      style={{padding:"3px 16px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",minWidth:52,
-                        background:form[campo]?C.green:"#E5E7EB",color:form[campo]?"#fff":"#6B7280"}}>
-                      {form[campo]?"✓ SIM":"NÃO"}
-                    </button>
-                  </div>
-                ))}
+                {(termosGlobais.filter(t=>t.ativo).length > 0 ? termosGlobais.filter(t=>t.ativo) : TERMOS_FALLBACK).map(t=>{
+                  const campoApp = t.campo_legado ? CAMPO_DB_TO_APP[t.campo_legado] : (t.campo||null);
+                  const checked = campoApp ? !!form[campoApp] : !!termosExtras[t.id];
+                  const toggle = () => {
+                    if(campoApp) setForm(p=>({...p,[campoApp]:!p[campoApp]}));
+                    else setTermosExtras(p=>({...p,[t.id]:!p[t.id]}));
+                  };
+                  return (
+                    <div key={t.id||t.campo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderRadius:7,background:checked?"#F0FDF4":"#F9FAFB",border:"1px solid "+(checked?C.green:C.border)}}>
+                      <span style={{fontSize:13,color:"#374151",fontWeight:500}}>{t.nome||t.label}</span>
+                      <button type="button" onClick={toggle}
+                        style={{padding:"3px 16px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",minWidth:52,
+                          background:checked?C.green:"#E5E7EB",color:checked?"#fff":"#6B7280"}}>
+                        {checked?"✓ SIM":"NÃO"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1818,7 +1879,7 @@ function doPost(e) {
 
             <div style={s.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
-                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
                 <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
                 <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
               </div>
@@ -1871,11 +1932,11 @@ function doPost(e) {
                           ))}</tbody>
                         </table>
                       )}
-                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>💵 Adiantamentos</div>
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>💵 Adiantamentos Avulsos</div>
                       {historicoAdiantamentos.length===0?(
-                        <div style={{color:C.muted,fontSize:13,paddingBottom:16}}>Nenhum adiantamento registrado.</div>
+                        <div style={{color:C.muted,fontSize:13,paddingBottom:8}}>Nenhum adiantamento avulso registrado.</div>
                       ):(
-                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
                           <thead><tr style={{background:"#F9FAFB"}}>
                             <th style={s.th}>Data</th><th style={s.th}>Valor</th>
                             <th style={s.th}>Mês Ref.</th><th style={{...s.th,textAlign:"center"}}>Status</th><th style={s.th}>Obs</th>
@@ -1889,6 +1950,23 @@ function doPost(e) {
                               <td style={{...s.td,fontSize:12}}>{a.mes_referencia?a.mes_referencia.split('-').reverse().join('/'):'—'}</td>
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:cA.bg,color:cA.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{a.status}</span></td>
                               <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
+                            </tr>);
+                          })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>📌 Adiantamentos Fixos Mensais</div>
+                      {historicoAdiantamentosFixos.length===0?(
+                        <div style={{color:C.muted,fontSize:13,paddingBottom:16}}>Nenhum adiantamento fixo cadastrado.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+                          <thead><tr style={{background:"#F9FAFB"}}>
+                            <th style={s.th}>Valor/Mês</th><th style={s.th}>Descrição</th><th style={{...s.th,textAlign:"center"}}>Status</th>
+                          </tr></thead>
+                          <tbody>{historicoAdiantamentosFixos.map((f,i)=>{
+                            return(<tr key={i} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12,fontWeight:700,color:"#7C3AED"}}>R$ {Number(f.valor).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+                              <td style={{...s.td,fontSize:12}}>{f.descricao||'—'}</td>
+                              <td style={{...s.td,textAlign:"center"}}><span style={{background:f.ativo?"#EDE9FE":"#F1F5F9",color:f.ativo?"#6D28D9":"#64748B",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.ativo?'ativo':'pausado'}</span></td>
                             </tr>);
                           })}</tbody>
                         </table>
@@ -2044,6 +2122,7 @@ function doPost(e) {
           {k:'compras',      l:'🛍️ Compras'},
           {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
           {k:'orcamento',    l:'📊 Orçamento Folha'},
+          {k:'termos',       l:'📝 Termos de Assinatura'},
         ];
 
         const [lista, setLista] = useState([]);
@@ -3111,6 +3190,11 @@ function doPost(e) {
       function AdiantamentosPage({ colabAPI, empresaId }) {
         const hoje = new Date().toISOString().slice(0,10);
         const mesAtual = hoje.slice(0,7);
+
+        // ── Tabs ──
+        const [aba, setAba] = React.useState('avulsos');
+
+        // ── Avulsos ──
         const [mesRef, setMesRef] = React.useState(mesAtual);
         const [lista, setLista] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
@@ -3162,8 +3246,9 @@ function doPost(e) {
 
         const cancelarAdt = async (id) => {
           if(!window.confirm('Cancelar este adiantamento?')) return;
+          setLoading(true);
           await _supa.from('adiantamentos').update({status:'cancelado'}).eq('id',id);
-          carregar();
+          await carregar();
         };
 
         const totalPendente = lista.filter(a=>a.status==='pendente').reduce((s,a)=>s+Number(a.valor),0);
@@ -3174,112 +3259,318 @@ function doPost(e) {
           porColab[a.colaborador_nome]+=Number(a.valor);
         });
 
+        // ── Fixos ──
+        const [fixos, setFixos] = React.useState([]);
+        const [loadingFixos, setLoadingFixos] = React.useState(false);
+        const [statusFixo, setStatusFixo] = React.useState(null);
+        const [mostrarFormFixo, setMostrarFormFixo] = React.useState(false);
+        const VAZIO_FIXO = {colaboradorNome:'',valor:'',descricao:'Adiantamento Fixo'};
+        const [formFixo, setFormFixo] = React.useState(VAZIO_FIXO);
+
+        const carregarFixos = async () => {
+          if(!empresaId) return;
+          setLoadingFixos(true);
+          const {data} = await _supa.from('adiantamentos_fixos').select('*').eq('empresa_id',empresaId).order('colaborador_nome');
+          setFixos(data||[]);
+          setLoadingFixos(false);
+        };
+
+        React.useEffect(()=>{ carregarFixos(); },[empresaId]);
+
+        const salvarFixo = async () => {
+          if(!formFixo.colaboradorNome||!formFixo.valor){
+            setStatusFixo({ok:false,msg:'Preencha colaborador e valor.'}); return;
+          }
+          const val = parseFloat(String(formFixo.valor).replace(',','.'));
+          if(isNaN(val)||val<=0){ setStatusFixo({ok:false,msg:'Valor inválido.'}); return; }
+          setLoadingFixos(true);
+          const {error} = await _supa.from('adiantamentos_fixos').insert({
+            empresa_id:empresaId,
+            colaborador_nome:formFixo.colaboradorNome.trim(),
+            valor:val,
+            descricao:formFixo.descricao.trim()||'Adiantamento Fixo',
+            ativo:true
+          });
+          if(error){ setStatusFixo({ok:false,msg:'❌ '+error.message}); }
+          else{ setStatusFixo({ok:true,msg:'✅ Adiantamento fixo criado! Será incluído automaticamente na Folha de Pagamento todos os meses.'}); setMostrarFormFixo(false); setFormFixo(VAZIO_FIXO); carregarFixos(); }
+          setLoadingFixos(false);
+        };
+
+        const toggleAtivoFixo = async (id, ativo) => {
+          setLoadingFixos(true);
+          await _supa.from('adiantamentos_fixos').update({ativo:!ativo}).eq('id',id);
+          await carregarFixos();
+        };
+
+        const excluirFixo = async (id, nome) => {
+          if(!window.confirm(`Excluir adiantamento fixo de ${nome}? Esta ação não pode ser desfeita.`)) return;
+          setLoadingFixos(true);
+          await _supa.from('adiantamentos_fixos').delete().eq('id',id);
+          await carregarFixos();
+        };
+
+        const fixosAtivos = fixos.filter(f=>f.ativo);
+        const totalFixosAtivos = fixosAtivos.reduce((s,f)=>s+Number(f.valor),0);
+
         return (
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>💵 Adiantamentos</div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={{...s.input,width:150,marginBottom:0}}/>
-                <button onClick={()=>{setMostrarForm(true);setStatus(null);setForm(VAZIO);}} style={s.btn}>+ Novo</button>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>💵 Adiantamentos</div>
+                <div style={{fontSize:13,color:C.muted}}>Avulsos e recorrentes mensais</div>
               </div>
             </div>
 
-            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+            {/* Tabs */}
+            <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
+              {[
+                {k:'avulsos', l:'💵 Avulsos', badge: lista.filter(a=>a.status==='pendente').length||null},
+                {k:'fixos',   l:'📌 Fixos Mensais', badge: fixosAtivos.length||null}
+              ].map(t=>(
+                <button key={t.k} onClick={()=>setAba(t.k)} style={{
+                  background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                  marginBottom:-2,padding:"8px 20px",cursor:"pointer",fontWeight:aba===t.k?700:400,
+                  color:aba===t.k?C.acc:C.muted,fontSize:13,display:"flex",alignItems:"center",gap:6
+                }}>
+                  {t.l}
+                  {t.badge>0&&<span style={{background:aba===t.k?C.acc:"#E5E7EB",color:aba===t.k?"#fff":C.muted,borderRadius:20,fontSize:10,fontWeight:700,padding:"1px 7px"}}>{t.badge}</span>}
+                </button>
+              ))}
+            </div>
 
-            {mostrarForm&&(
-              <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
-                <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Adiantamento</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-                  <div style={{marginBottom:14}}>
-                    <label style={s.label}>Colaborador *</label>
-                    <select value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} style={s.input}>
-                      <option value="">Selecione...</option>
-                      {[...colabAPI].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt')).map(c=>(
-                        <option key={c.nome} value={c.nome}>{c.nome}</option>
+            {/* ───── ABA AVULSOS ───── */}
+            {aba==='avulsos'&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <label style={{...s.label,marginBottom:0}}>Mês ref.:</label>
+                    <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={{...s.input,width:150,marginBottom:0}}/>
+                  </div>
+                  <button onClick={()=>{setMostrarForm(true);setStatus(null);setForm(VAZIO);}} style={s.btn}>+ Novo Avulso</button>
+                </div>
+
+                {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+
+                {mostrarForm&&(
+                  <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Adiantamento Avulso</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Colaborador *</label>
+                        <select value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} style={s.input}>
+                          <option value="">Selecione...</option>
+                          {[...colabAPI].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt')).map(c=>(
+                            <option key={c.nome} value={c.nome}>{c.nome}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor (R$) *</label>
+                        <input type="number" step="0.01" min="0" value={form.valor} onChange={e=>setForm(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Data da Concessão *</label>
+                        <input type="date" value={form.dataConcessao} onChange={e=>setForm(p=>({...p,dataConcessao:e.target.value}))} style={s.input}/>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Adiantamento no dia ≥ 26 é contabilizado na folha do mês seguinte.</div>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Observações</label>
+                        <input type="text" value={form.obs} onChange={e=>setForm(p=>({...p,obs:e.target.value}))} placeholder="Motivo, etc." style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={salvar} style={s.btn} disabled={loading}>💾 Salvar</button>
+                      <button onClick={()=>{setMostrarForm(false);setStatus(null);}} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                {Object.keys(porColab).length>0&&(
+                  <div style={{...s.card,marginBottom:14,background:"#FFFBEB",border:"1px solid #FCD34D"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#92400E",marginBottom:8}}>
+                      ⚠️ Pendentes para desconto na Folha de {mesRef.split('-').reverse().join('/')}
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                      {Object.entries(porColab).map(([nome,val])=>(
+                        <span key={nome} style={{background:"#FEF9C3",border:"1px solid #FCD34D",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:600}}>
+                          {nome}: <span style={{color:"#92400E"}}>{fmtBRL(val)}</span>
+                        </span>
                       ))}
-                    </select>
+                      <span style={{background:C.pri,color:"#fff",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>
+                        Total pendente: {fmtBRL(totalPendente)}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{marginBottom:14}}>
-                    <label style={s.label}>Valor (R$) *</label>
-                    <input type="number" step="0.01" min="0" value={form.valor} onChange={e=>setForm(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
-                  </div>
-                  <div style={{marginBottom:14}}>
-                    <label style={s.label}>Data da Concessão *</label>
-                    <input type="date" value={form.dataConcessao} onChange={e=>setForm(p=>({...p,dataConcessao:e.target.value}))} style={s.input}/>
-                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>Adiantamento no dia ≥ 26 é contabilizado na folha do mês seguinte.</div>
-                  </div>
-                  <div style={{marginBottom:14}}>
-                    <label style={s.label}>Observações</label>
-                    <input type="text" value={form.obs} onChange={e=>setForm(p=>({...p,obs:e.target.value}))} placeholder="Motivo, etc." style={s.input}/>
-                  </div>
-                </div>
-                <div style={{display:"flex",gap:10}}>
-                  <button onClick={salvar} style={s.btn} disabled={loading}>💾 Salvar</button>
-                  <button onClick={()=>{setMostrarForm(false);setStatus(null);}} style={s.btnOutline}>Cancelar</button>
-                </div>
-              </div>
-            )}
+                )}
 
-            {Object.keys(porColab).length>0&&(
-              <div style={{...s.card,marginBottom:14,background:"#FFFBEB",border:"1px solid #FCD34D"}}>
-                <div style={{fontWeight:700,fontSize:13,color:"#92400E",marginBottom:8}}>
-                  ⚠️ Pendentes para desconto na Folha de {mesRef.split('-').reverse().join('/')}
-                </div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
-                  {Object.entries(porColab).map(([nome,val])=>(
-                    <span key={nome} style={{background:"#FEF9C3",border:"1px solid #FCD34D",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:600}}>
-                      {nome}: <span style={{color:"#92400E"}}>R$ {val.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>
-                    </span>
-                  ))}
-                  <span style={{background:C.pri,color:"#fff",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}}>
-                    Total pendente: R$ {totalPendente.toLocaleString('pt-BR',{minimumFractionDigits:2})}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {loading?(
-              <div style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
-            ):lista.length===0?(
-              <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
-                <div style={{fontSize:32,marginBottom:8}}>💵</div>
-                <div style={{fontWeight:700,marginBottom:4}}>Nenhum adiantamento em {mesRef.split('-').reverse().join('/')}</div>
-                <div style={{fontSize:12}}>Clique em "+ Novo" para registrar.</div>
-              </div>
-            ):(
-              <div style={s.card}>
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
-                  <thead>
-                    <tr style={{background:"#F9FAFB"}}>
-                      <th style={s.th}>Colaborador</th><th style={s.th}>Valor</th>
-                      <th style={s.th}>Data</th><th style={s.th}>Mês Ref.</th>
-                      <th style={{...s.th,textAlign:"center"}}>Status</th>
-                      <th style={s.th}>Obs</th><th style={{...s.th,textAlign:"right"}}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lista.map(a=>{
-                      const cor=corSt[a.status]||corSt.pendente;
-                      return(
-                        <tr key={a.id} style={{borderTop:"1px solid "+C.border}}>
-                          <td style={{...s.td,fontWeight:600}}>{a.colaborador_nome}</td>
-                          <td style={{...s.td,fontWeight:700,color:C.pri}}>R$ {Number(a.valor).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-                          <td style={{...s.td,fontSize:12}}>{a.data_concessao?new Date(a.data_concessao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
-                          <td style={{...s.td,fontSize:12}}>{a.mes_referencia?a.mes_referencia.split('-').reverse().join('/'):'—'}</td>
-                          <td style={{...s.td,textAlign:"center"}}>
-                            <span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{a.status}</span>
-                          </td>
-                          <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
-                          <td style={{...s.td,textAlign:"right"}}>
-                            {a.status==='pendente'&&(
-                              <button onClick={()=>cancelarAdt(a.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Cancelar</button>
-                            )}
-                          </td>
+                {loading?(
+                  <div style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
+                ):lista.length===0?(
+                  <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
+                    <div style={{fontSize:32,marginBottom:8}}>💵</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Nenhum adiantamento em {mesRef.split('-').reverse().join('/')}</div>
+                    <div style={{fontSize:12}}>Clique em "+ Novo Avulso" para registrar.</div>
+                  </div>
+                ):(
+                  <div style={s.card}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{background:"#F9FAFB"}}>
+                          <th style={s.th}>Colaborador</th><th style={s.th}>Valor</th>
+                          <th style={s.th}>Data</th><th style={s.th}>Mês Ref.</th>
+                          <th style={{...s.th,textAlign:"center"}}>Status</th>
+                          <th style={s.th}>Obs</th><th style={{...s.th,textAlign:"right"}}></th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody>
+                        {lista.map(a=>{
+                          const cor=corSt[a.status]||corSt.pendente;
+                          return(
+                            <tr key={a.id} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontWeight:600}}>{a.colaborador_nome}</td>
+                              <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(a.valor))}</td>
+                              <td style={{...s.td,fontSize:12}}>{a.data_concessao?new Date(a.data_concessao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                              <td style={{...s.td,fontSize:12}}>{a.mes_referencia?a.mes_referencia.split('-').reverse().join('/'):'—'}</td>
+                              <td style={{...s.td,textAlign:"center"}}>
+                                <span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{a.status}</span>
+                              </td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
+                              <td style={{...s.td,textAlign:"right"}}>
+                                {a.status==='pendente'&&(
+                                  <button onClick={()=>cancelarAdt(a.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Cancelar</button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ───── ABA FIXOS ───── */}
+            {aba==='fixos'&&(
+              <div>
+                {/* Info card */}
+                <div style={{...s.card,background:"#F5F3FF",border:"1px solid #C4B5FD",marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+                    <div>
+                      <div style={{fontWeight:800,color:"#5B21B6",fontSize:13,marginBottom:4}}>📌 Como funcionam os Adiantamentos Fixos</div>
+                      <div style={{fontSize:12,color:"#6D28D9",lineHeight:1.7}}>
+                        São valores mensais <strong>recorrentes</strong> descontados automaticamente na Folha de Pagamento.<br/>
+                        Diferente dos avulsos, <strong>não são criados mês a mês</strong> — ficam ativos até você desativar ou excluir.<br/>
+                        Aparecem na coluna <strong>Adiant. R$</strong> da Folha com o indicador <strong>📌 fixo</strong>.
+                      </div>
+                    </div>
+                    {fixosAtivos.length>0&&(
+                      <div style={{background:"#7C3AED",color:"#fff",borderRadius:10,padding:"8px 16px",textAlign:"center",flexShrink:0}}>
+                        <div style={{fontSize:10,opacity:0.8,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>Total fixo/mês</div>
+                        <div style={{fontSize:16,fontWeight:800}}>{fmtBRL(totalFixosAtivos)}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+                  <button onClick={()=>{setMostrarFormFixo(true);setStatusFixo(null);setFormFixo(VAZIO_FIXO);}} style={{...s.btn,background:"#7C3AED"}}>📌 + Novo Fixo</button>
+                </div>
+
+                {statusFixo&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:statusFixo.ok?"#DCFCE7":"#FEE2E2",color:statusFixo.ok?"#166534":"#991B1B",fontSize:13}}>{statusFixo.msg}</div>}
+
+                {mostrarFormFixo&&(
+                  <div style={{...s.card,marginBottom:16,border:"2px solid #7C3AED"}}>
+                    <div style={{fontWeight:700,color:"#5B21B6",marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📌 Cadastrar Adiantamento Fixo Mensal</div>
+                    <div style={{...s.card,background:"#FFFBEB",border:"1px solid #FCD34D",marginBottom:14,padding:"10px 14px"}}>
+                      <div style={{fontSize:12,color:"#92400E"}}>⚠️ Este valor será descontado automaticamente na folha <strong>todos os meses</strong>, enquanto estiver ativo. Use apenas para benefícios recorrentes (ex: antecipação de salário fixa, desconto de convênio, etc).</div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Colaborador *</label>
+                        <select value={formFixo.colaboradorNome} onChange={e=>setFormFixo(p=>({...p,colaboradorNome:e.target.value}))} style={s.input}>
+                          <option value="">Selecione...</option>
+                          {[...colabAPI].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt')).map(c=>(
+                            <option key={c.nome} value={c.nome}>{c.nome}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor mensal (R$) *</label>
+                        <input type="number" step="0.01" min="0.01" value={formFixo.valor} onChange={e=>setFormFixo(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                        <label style={s.label}>Descrição</label>
+                        <input type="text" value={formFixo.descricao} onChange={e=>setFormFixo(p=>({...p,descricao:e.target.value}))} placeholder="Ex: Antecipação salarial, convênio farmácia..." style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={salvarFixo} style={{...s.btn,background:"#7C3AED"}} disabled={loadingFixos}>📌 Criar Fixo</button>
+                      <button onClick={()=>{setMostrarFormFixo(false);setStatusFixo(null);}} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                {loadingFixos?(
+                  <div style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
+                ):fixos.length===0?(
+                  <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
+                    <div style={{fontSize:32,marginBottom:8}}>📌</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Nenhum adiantamento fixo cadastrado</div>
+                    <div style={{fontSize:12}}>Clique em "+ Novo Fixo" para criar um desconto mensal recorrente.</div>
+                  </div>
+                ):(
+                  <div style={s.card}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{background:"#F9FAFB"}}>
+                          <th style={s.th}>Colaborador</th>
+                          <th style={s.th}>Valor/mês</th>
+                          <th style={s.th}>Descrição</th>
+                          <th style={{...s.th,textAlign:"center"}}>Status</th>
+                          <th style={{...s.th,textAlign:"right"}}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fixos.map(f=>(
+                          <tr key={f.id} style={{borderTop:"1px solid "+C.border,opacity:f.ativo?1:0.55}}>
+                            <td style={{...s.td,fontWeight:600}}>{f.colaborador_nome}</td>
+                            <td style={{...s.td,fontWeight:700,color:f.ativo?"#7C3AED":C.muted}}>{fmtBRL(Number(f.valor))}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{f.descricao||'—'}</td>
+                            <td style={{...s.td,textAlign:"center"}}>
+                              <span style={{background:f.ativo?"#EDE9FE":"#F3F4F6",color:f.ativo?"#5B21B6":C.muted,padding:"2px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>
+                                {f.ativo?'✅ Ativo':'⏸ Inativo'}
+                              </span>
+                            </td>
+                            <td style={{...s.td,textAlign:"right"}}>
+                              <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                                <button
+                                  onClick={()=>toggleAtivoFixo(f.id,f.ativo)}
+                                  style={{background:"none",border:`1px solid ${f.ativo?"#FCD34D":"#A78BFA"}`,color:f.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}
+                                  disabled={loadingFixos}
+                                >
+                                  {f.ativo?'⏸ Pausar':'▶ Ativar'}
+                                </button>
+                                <button
+                                  onClick={()=>excluirFixo(f.id,f.colaborador_nome)}
+                                  style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}
+                                  disabled={loadingFixos}
+                                >
+                                  🗑 Excluir
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {fixosAtivos.length>0&&(
+                      <div style={{marginTop:12,padding:"8px 12px",background:"#F5F3FF",borderRadius:7,fontSize:12,color:"#5B21B6",fontWeight:600}}>
+                        📌 Total descontado automaticamente todo mês: <strong>{fmtBRL(totalFixosAtivos)}</strong> · {fixosAtivos.length} colaborador{fixosAtivos.length!==1?"es":""}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3669,6 +3960,172 @@ function doPost(e) {
         );
       }
 
+      // ============================================================
+      // MÓDULO TERMOS DE ASSINATURA
+      // ============================================================
+      function TermosPage({ empresaId, colabAPI }) {
+        const [termos, setTermos] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const [status, setStatus] = React.useState(null);
+        const [mostrarForm, setMostrarForm] = React.useState(false);
+        const VAZIO = {nome:'',descricao:''};
+        const [form, setForm] = React.useState(VAZIO);
+        const [saving, setSaving] = React.useState(false);
+        const [stats, setStats] = React.useState({});
+
+        const carregar = async () => {
+          setLoading(true);
+          const {data:tdData} = await _supa.from('termos_assinatura').select('*').eq('empresa_id',empresaId).order('ordem');
+          setTermos(tdData||[]);
+          const {data:ctData} = await _supa.from('colaborador_termos').select('termo_id,assinado').eq('empresa_id',empresaId);
+          const m = {};
+          (ctData||[]).forEach(ct=>{
+            if(!m[ct.termo_id]) m[ct.termo_id]={assinados:0,total:0};
+            m[ct.termo_id].total++;
+            if(ct.assinado) m[ct.termo_id].assinados++;
+          });
+          setStats(m);
+          setLoading(false);
+        };
+
+        React.useEffect(()=>{ carregar(); },[empresaId]);
+
+        const salvar = async () => {
+          if(!form.nome.trim()){ setStatus({ok:false,msg:'Nome é obrigatório.'}); return; }
+          setSaving(true); setStatus(null);
+          const {error} = await _supa.from('termos_assinatura').insert({
+            empresa_id:empresaId,
+            nome:form.nome.trim(),
+            descricao:form.descricao.trim()||null,
+            ativo:true,
+            ordem:(termos.length+1),
+          });
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
+          else { setStatus({ok:true,msg:'✅ Termo criado com sucesso.'}); setMostrarForm(false); setForm(VAZIO); await carregar(); }
+          setSaving(false);
+        };
+
+        const toggleAtivo = async t => {
+          await _supa.from('termos_assinatura').update({ativo:!t.ativo}).eq('id',t.id);
+          await carregar();
+        };
+
+        const excluir = async t => {
+          if(t.campo_legado){ setStatus({ok:false,msg:'⚠️ Termos do sistema não podem ser excluídos. Você pode pausá-los.'}); return; }
+          if(!window.confirm(`Excluir "${t.nome}"? Todos os registros de assinatura deste termo serão removidos.`)) return;
+          await _supa.from('termos_assinatura').delete().eq('id',t.id);
+          await carregar();
+        };
+
+        const totalColab = (colabAPI||[]).length;
+
+        return (
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📝 Termos de Assinatura</div>
+                <div style={{fontSize:13,color:C.muted}}>Gerencie os documentos que os colaboradores precisam assinar</div>
+              </div>
+              <button style={s.btn} onClick={()=>{setMostrarForm(true);setForm(VAZIO);setStatus(null);}}>+ Novo Termo</button>
+            </div>
+
+            {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',margin:'12px 0',cursor:'pointer'}} onClick={()=>setStatus(null)}>{status.msg} <span style={{opacity:0.5,fontSize:11}}>✕</span></div>}
+
+            {mostrarForm&&(
+              <div style={{...s.card,border:'2px solid '+C.acc,marginBottom:16}}>
+                <div style={{fontWeight:700,fontSize:14,color:C.pri,marginBottom:14}}>➕ Novo Termo</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Nome do Termo *</label>
+                    <input style={s.input} value={form.nome} onChange={e=>setForm(p=>({...p,nome:e.target.value}))} placeholder="Ex: Termo de Uso de Equipamento" autoFocus/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Descrição (opcional)</label>
+                    <input style={s.input} value={form.descricao} onChange={e=>setForm(p=>({...p,descricao:e.target.value}))} placeholder="Breve descrição do documento..."/>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button style={s.btn} onClick={salvar} disabled={saving}>{saving?'Salvando...':'💾 Salvar Termo'}</button>
+                  <button style={s.btnOutline} onClick={()=>setMostrarForm(false)}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            {loading?(
+              <div style={{...s.card,color:C.muted,textAlign:'center',padding:32}}>Carregando termos...</div>
+            ):(
+              <div style={s.card}>
+                <div style={{display:'flex',gap:20,marginBottom:16}}>
+                  <div style={{background:'#EDE9E1',borderRadius:8,padding:'8px 16px',textAlign:'center'}}>
+                    <div style={{fontSize:20,fontWeight:800,color:C.pri}}>{termos.filter(t=>t.ativo).length}</div>
+                    <div style={{fontSize:11,color:C.muted}}>Termos ativos</div>
+                  </div>
+                  <div style={{background:'#F0FDF4',borderRadius:8,padding:'8px 16px',textAlign:'center'}}>
+                    <div style={{fontSize:20,fontWeight:800,color:'#16A34A'}}>{totalColab}</div>
+                    <div style={{fontSize:11,color:C.muted}}>Colaboradores</div>
+                  </div>
+                </div>
+                {termos.length===0?(
+                  <div style={{color:C.muted,textAlign:'center',padding:32}}>Nenhum termo cadastrado ainda.</div>
+                ):(
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead>
+                      <tr style={{background:'#F9FAFB'}}>
+                        <th style={s.th}>Termo / Documento</th>
+                        <th style={{...s.th,textAlign:'center',width:90}}>Status</th>
+                        <th style={{...s.th,textAlign:'center',width:130}}>Assinados</th>
+                        <th style={{...s.th,textAlign:'center',width:140}}>Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {termos.map(t=>{
+                        const st = stats[t.id]||{assinados:0,total:0};
+                        const pct = totalColab>0 ? Math.round(st.assinados/totalColab*100) : 0;
+                        return (
+                          <tr key={t.id} style={{borderTop:'1px solid '+C.border,opacity:t.ativo?1:0.55}}>
+                            <td style={s.td}>
+                              <div style={{fontWeight:600,fontSize:13,color:'#1E293B'}}>{t.nome}</div>
+                              {t.descricao&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{t.descricao}</div>}
+                              {t.campo_legado&&<div style={{fontSize:10,color:'#9333EA',marginTop:3}}>⚙️ Campo do sistema · {t.campo_legado}</div>}
+                            </td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              <span style={{background:t.ativo?'#DCFCE7':'#F1F5F9',color:t.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>
+                                {t.ativo?'Ativo':'Pausado'}
+                              </span>
+                            </td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              <div style={{fontWeight:700,fontSize:15,color:pct===100?'#16A34A':pct>0?C.acc:C.muted}}>{st.assinados}<span style={{fontSize:11,fontWeight:400,color:C.muted}}>/{totalColab}</span></div>
+                              <div style={{height:5,background:'#E5E7EB',borderRadius:3,marginTop:4,width:70,margin:'4px auto 0'}}>
+                                <div style={{height:5,borderRadius:3,background:pct===100?'#16A34A':C.acc,width:pct+'%',transition:'width 0.3s'}}/>
+                              </div>
+                              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{pct}%</div>
+                            </td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              <div style={{display:'flex',gap:6,justifyContent:'center'}}>
+                                <button
+                                  style={{padding:'3px 10px',borderRadius:6,fontSize:11,fontWeight:700,cursor:'pointer',border:'1px solid '+(t.ativo?C.border:'#FCD34D'),background:t.ativo?'#F9FAFB':'#FEF9C3',color:t.ativo?C.muted:'#92400E'}}
+                                  onClick={()=>toggleAtivo(t)}
+                                >{t.ativo?'Pausar':'Ativar'}</button>
+                                {!t.campo_legado&&(
+                                  <button
+                                    style={{padding:'3px 10px',borderRadius:6,fontSize:11,fontWeight:700,cursor:'pointer',border:'1px solid #FECACA',background:'#FEF2F2',color:'#991B1B'}}
+                                    onClick={()=>excluir(t)}
+                                  >Excluir</button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
       function PlaceholderPage({title,icon}){
         return(
           <div>
@@ -3703,6 +4160,7 @@ function doPost(e) {
         const [apiStatus, setApiStatus] = useState(null);
         const [saveStatus, setSaveStatus] = useState(null);
         const [adiantSupa, setAdiantSupa] = useState({});
+        const [adiantFixosSupa, setAdiantFixosSupa] = useState({});
         const [comprasSupa, setComprasSupa] = useState({});
         const [drag, setDrag] = useState(false);
         const [colabSelecionado, setColabSelecionado] = useState(null);
@@ -3718,8 +4176,12 @@ function doPost(e) {
 
         useEffect(()=>{
           if(!empresaId) return;
+          // Reset stale data before reloading so switching month/empresa never shows stale values
+          setAdiantSupa({});
+          setAdiantFixosSupa({});
+          setComprasSupa({});
           const mesR = mesAno.split('/').reverse().join('-');
-          const norm = (n)=>String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/s+/g,' ').trim();
+          const norm = (n)=>String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
           _supa.from('adiantamentos').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').then(({data})=>{
             const mapa = {};
             (data||[]).forEach(a=>{
@@ -3729,7 +4191,16 @@ function doPost(e) {
               mapa[k].ids.push(a.id);
             });
             setAdiantSupa(mapa);
-          });
+          }).catch(err=>console.error('adiantamentos load error:',err));
+          _supa.from('adiantamentos_fixos').select('colaborador_nome,valor').eq('empresa_id',empresaId).eq('ativo',true).then(({data})=>{
+            const mapa = {};
+            (data||[]).forEach(f=>{
+              const k = norm(f.colaborador_nome);
+              if(!mapa[k]) mapa[k]={valor:0};
+              mapa[k].valor += Number(f.valor);
+            });
+            setAdiantFixosSupa(mapa);
+          }).catch(err=>console.error('adiantamentos_fixos load error:',err));
           _supa.from('compras').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').then(({data})=>{
             const mapa = {};
             (data||[]).forEach(c=>{
@@ -3739,7 +4210,7 @@ function doPost(e) {
               mapa[k].ids.push(c.id);
             });
             setComprasSupa(mapa);
-          });
+          }).catch(err=>console.error('compras load error:',err));
           // Carrega registros de ponto do Supabase para o período
           const [mes2, ano2] = mesAno.split("/").map(Number);
           const iniISO = `${ano2}-${String(mes2-1||12).padStart(2,'0')}-26`;
@@ -3765,7 +4236,7 @@ function doPost(e) {
               });
               return merged;
             });
-          });
+          }).catch(err=>console.error('registros_ponto load error:',err));
         },[empresaId,mesAno]);
 
         const [mes, ano] = mesAno.split("/").map(n=>parseInt(n));
@@ -4049,7 +4520,10 @@ function doPost(e) {
 
           const aj = ajustes[nomeKey] || {};
           const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||(comprasSupa[nomeKey]?.valor||0);
-          const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",","."))||(adiantSupa[nomeKey]?.valor||0);
+          const adiantAvulso = adiantSupa[nomeKey]?.valor||0;
+          const adiantFixo   = adiantFixosSupa[nomeKey]?.valor||0;
+          const adiantAuto   = adiantAvulso + adiantFixo;
+          const adiantamento = parseFloat(String(aj.adiantamento||"").replace(",",".")) || adiantAuto;
           // Prêmio assiduidade: qualquer atraso injustificado = 0 dias; atestado/abono = perde só aquele dia
           const premioAssiduidadeDias = atrasosInjustificados > 0 ? 0 : Math.max(0, 30 - atestados - abonos);
           const premioAuto = faltas === 0 && atrasosInjustificados === 0;
@@ -4070,7 +4544,7 @@ function doPost(e) {
             dsrPerdidos, diasUteisPrevistos, diasEmExperiencia,
             cajuDias, cajuValor,
             premioAssiduidade, premioAssiduidadeDias, atrasosInjustificados, descontarVT, bancoHoras,
-            produtos, adiantamento, totalDesconto,
+            produtos, adiantamento, adiantAvulso, adiantFixo, adiantAuto, totalDesconto,
             diasFaltas, observacoes: aj.observacoes||"",
             emExperiencia: diasEmExperiencia > 0,
             valorTransporte: colabInfo?.transporte || 0
@@ -4528,7 +5002,10 @@ function doPost(e) {
                                 )}
                               </td>
                               <td style={{...s.tdC,color:r.calc.horasFaltasMin>0?C.amber:C.muted,fontWeight:600}}>{r.calc.horasFaltasMin>0?r.calc.horasFaltas:"—"}</td>
-                              <td style={{...s.tdC,fontWeight:600,color:r.calc.adiantamento>0?C.danger:C.muted}}>{r.calc.adiantamento>0?fmtBRL(r.calc.adiantamento):"—"}</td>
+                              <td style={{...s.tdC,fontWeight:600,color:r.calc.adiantamento>0?C.danger:C.muted}}>
+                                {r.calc.adiantamento>0?fmtBRL(r.calc.adiantamento):"—"}
+                                {r.calc.adiantFixo>0&&<div style={{fontSize:9,color:"#7C3AED",marginTop:1}}>📌 {fmtBRL(r.calc.adiantFixo)} fixo</div>}
+                              </td>
                               <td style={{...s.tdC}}>
                                 {temAtraso
                                   ? <span style={{color:C.danger,fontWeight:700}}>0 ⚠</span>
@@ -4614,12 +5091,15 @@ function doPost(e) {
                                      placeholder={comprasSupa[r.nomeKey]?.valor>0?String(comprasSupa[r.nomeKey].valor.toFixed(2)).replace(".",","):"0,00"}/>
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
-                              <input style={{...s.inputSm,width:62,textAlign:"right"}}
-                                     value={ajustes[r.nomeKey]?.adiantamento||""}
-                                     onChange={e=>setAjuste(r.nomeKey,"adiantamento",e.target.value)}
-                                     placeholder={adiantSupa[r.nomeKey]?.valor>0?String(adiantSupa[r.nomeKey].valor.toFixed(2)).replace(".",","):"0,00"}
-                                     style={{...s.inputSm,width:62,textAlign:"right",background:adiantSupa[r.nomeKey]?.valor>0&&!ajustes[r.nomeKey]?.adiantamento?"#FFFBEB":"#fff"}}
-                                     />
+                              <input
+                                value={ajustes[r.nomeKey]?.adiantamento||""}
+                                onChange={e=>setAjuste(r.nomeKey,"adiantamento",e.target.value)}
+                                placeholder={r.calc.adiantAuto>0?String(r.calc.adiantAuto.toFixed(2)).replace(".",","):"0,00"}
+                                style={{...s.inputSm,width:72,textAlign:"right",background:r.calc.adiantAuto>0&&!ajustes[r.nomeKey]?.adiantamento?"#FFFBEB":"#fff"}}
+                              />
+                              {r.calc.adiantFixo>0&&(
+                                <div style={{fontSize:9,color:"#7C3AED",marginTop:2,whiteSpace:"nowrap",textAlign:"center"}}>📌 {fmtBRL(r.calc.adiantFixo)} fixo</div>
+                              )}
                             </td>
                             <td style={{...s.tdC,fontWeight:800,color:r.calc.totalDesconto>0?C.danger:C.muted,fontSize:12}}>{fmtBRL(r.calc.totalDesconto)}</td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
@@ -5929,7 +6409,7 @@ function doPost(e) {
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','acessos','ajuda','config']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','termos','acessos','ajuda','config']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -5944,6 +6424,7 @@ function doPost(e) {
         {k:'compras',l:'🛍️ Compras'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
         {k:'ponto',l:'📋 Banco de Ponto'},
+        {k:'termos',l:'📝 Termos'},
         {k:'acessos',l:'🔐 Acessos'},
         {k:'ajuda',l:'❓ Ajuda'},
         {k:'config',l:'⚙️ Configurações'},
@@ -5988,6 +6469,7 @@ function doPost(e) {
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage gasUrl={gasUrl} empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
+              {page==="termos"&&<TermosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
               {page==="ajuda"&&<AjudaPage/>}
