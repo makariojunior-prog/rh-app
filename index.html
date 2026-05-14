@@ -1536,6 +1536,7 @@ function doPost(e) {
         const FORM_VAZIO = {
           nome:"", funcao:"", setor:"", cpf:"", telefone:"", chavePix:"", email:"",
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
+          bancoNome:"", bancoCodigo:"", bancoTipoConta:"", bancoAgencia:"", bancoConta:"",
           salario:"", transporte:"", periculosidade:false,
           contaSalario:false, aditivoContrato:false, usoArmario:false,
           lgpd:false, imagem:false, camera:false, epiUniforme:false,
@@ -1550,6 +1551,8 @@ function doPost(e) {
           telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
           nascimento:c.nascimento||'', admissao:c.admissao||'',
           experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
+          bancoNome:c.banco_nome||'', bancoCodigo:c.banco_codigo||'', bancoTipoConta:c.banco_tipo_conta||'',
+          bancoAgencia:c.banco_agencia||'', bancoConta:c.banco_conta||'',
           salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
           transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
           contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
@@ -1722,6 +1725,8 @@ function doPost(e) {
             telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
             nascimento:c.nascimento||'', admissao:c.admissao||'',
             experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
+            bancoNome:c.banco_nome||'', bancoCodigo:c.banco_codigo||'', bancoTipoConta:c.banco_tipo_conta||'',
+            bancoAgencia:c.banco_agencia||'', bancoConta:c.banco_conta||'',
             salario:String(c.salario||''), transporte:String(c.transporte||''),
             periculosidade:!!c.periculosidade,
             contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
@@ -1759,6 +1764,9 @@ function doPost(e) {
               nascimento:form.nascimento||null, admissao:form.admissao||null,
               experiencia_30:form.experiencia30||null, experiencia_90:form.experiencia90||null,
               data_encerramento:form.encerramento||null,
+              banco_nome:form.bancoNome?.trim()||null, banco_codigo:form.bancoCodigo?.trim()||null,
+              banco_tipo_conta:form.bancoTipoConta?.trim()||null, banco_agencia:form.bancoAgencia?.trim()||null,
+              banco_conta:form.bancoConta?.trim()||null,
               salario:parseFloat(String(form.salario).replace(",","."))||0,
               inss:calcINSS(parseFloat(String(form.salario).replace(",","."))||0),
               fgts:calcFGTS(parseFloat(String(form.salario).replace(",","."))||0),
@@ -1931,6 +1939,31 @@ function doPost(e) {
                 <CampoForm label="Fim Experiência 30d" campo="experiencia30" type="date" form={form} setForm={setForm}/>
                 <CampoForm label="Fim Experiência 90d" campo="experiencia90" type="date" form={form} setForm={setForm}/>
               </div>
+            </div>
+
+            <div style={s.card}>
+              <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>🏦 Dados Bancários</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                <CampoForm label="Banco" campo="bancoNome" placeholder="Ex: Itaú, Bradesco, Nubank" form={form} setForm={setForm}/>
+                <CampoForm label="Nº Banco (Código)" campo="bancoCodigo" placeholder="Ex: 341" form={form} setForm={setForm}/>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Tipo de Conta</label>
+                  <select style={s.input} value={form.bancoTipoConta} onChange={e=>setForm(p=>({...p,bancoTipoConta:e.target.value}))}>
+                    <option value="">Selecione...</option>
+                    <option value="Corrente PF">Corrente PF</option>
+                    <option value="Corrente PJ">Corrente PJ</option>
+                    <option value="Poupança PF">Poupança PF</option>
+                    <option value="Poupança PJ">Poupança PJ</option>
+                  </select>
+                </div>
+                <CampoForm label="Agência" campo="bancoAgencia" placeholder="Ex: 1234-5" form={form} setForm={setForm}/>
+                <CampoForm label="Conta Corrente" campo="bancoConta" placeholder="Ex: 12345-6" form={form} setForm={setForm}/>
+              </div>
+              {form.bancoNome&&form.bancoConta&&(
+                <div style={{marginTop:4,padding:"8px 12px",borderRadius:8,background:"#EFF6FF",border:"1px solid #BFDBFE",fontSize:12,color:"#1E40AF"}}>
+                  🏦 {form.bancoNome}{form.bancoCodigo?" ("+form.bancoCodigo+")":""} · {form.bancoTipoConta||"—"} · Ag. {form.bancoAgencia||"—"} · Conta {form.bancoConta}
+                </div>
+              )}
             </div>
 
             <div style={s.card}>
