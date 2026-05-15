@@ -878,6 +878,109 @@ function doPost(e) {
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:18}}>
 
+              {/* ---- AUSÊNCIAS ---- */}
+              <div style={s.card}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={s.cardTitle}>🚨 Ausências</div>
+                  <span style={{fontSize:12,color:C.muted}}>
+                    {ausencias.atestados.length} atestado{ausencias.atestados.length!==1?"s":""} · {ausencias.ferias.length} féria{ausencias.ferias.length!==1?"s":""}
+                  </span>
+                </div>
+                {ausencias.retornandoHoje.length>0&&(
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🔔 Retorno esperado HOJE — confirmar presença!</div>
+                    {ausencias.retornandoHoje.map((a,i)=>(
+                      <div key={i} style={{background:"#E8F5EE",border:`2px solid ${C.green}`,borderRadius:10,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:800,color:C.pri,fontSize:13}}>{a.nome}</div>
+                          <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+                            {a.tipo==='atestado'?'🏥 Atestado':'🏖️ Férias'} encerrado em <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
+                          </div>
+                        </div>
+                        <div style={{fontWeight:800,color:C.green,fontSize:12}}>Retorna hoje</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ausencias.atestados.length>0&&(
+                  <div style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#C2410C",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏥 Atestados em andamento</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8}}>
+                      {ausencias.atestados.map((a,i)=>(
+                        <div key={i} style={{background:"#FFF7ED",border:"1.5px solid #FED7AA",borderRadius:9,padding:"10px 13px"}}>
+                          <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{a.nome}</div>
+                          {a.setor&&a.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{a.setor}</div>}
+                          {a.cid&&<div style={{fontSize:11,color:"#C2410C",marginTop:4}}>CID: {a.cid}</div>}
+                          <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                            {a.inicio&&<span>de {new Date(a.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
+                            até <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {ausencias.ferias.length>0&&(
+                  <div style={{marginBottom:6}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#1D4ED8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏖️ Férias em andamento</div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8}}>
+                      {ausencias.ferias.map((f,i)=>(
+                        <div key={i} style={{background:"#EFF6FF",border:"1.5px solid #BFDBFE",borderRadius:9,padding:"10px 13px"}}>
+                          <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{f.nome}</div>
+                          {f.setor&&f.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{f.setor}</div>}
+                          <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                            {f.inicio&&<span>de {new Date(f.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
+                            até <strong>{new Date(f.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {ausencias.atestados.length===0&&ausencias.ferias.length===0&&ausencias.retornandoHoje.length===0&&(
+                  <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"18px 0"}}>Nenhuma ausência registrada hoje.</div>
+                )}
+              </div>
+
+              {/* ---- RECRUTAMENTO ---- */}
+              <div style={s.card}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                  <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>🧑‍💼 Recrutamento</div>
+                  <button onClick={()=>onNavegar('recrutamento')} style={{background:'none',border:'none',color:C.pri,fontSize:12,cursor:'pointer',fontWeight:600}}>Ver tudo →</button>
+                </div>
+                {recrutInfo.novos>0&&(
+                  <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
+                    <span style={{fontSize:20}}>📋</span>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:'#1D4ED8'}}>{recrutInfo.novos} currículo{recrutInfo.novos!==1?'s':''} novo{recrutInfo.novos!==1?'s':''}</div>
+                      <div style={{fontSize:12,color:'#3B82F6'}}>Aguardando triagem</div>
+                    </div>
+                  </div>
+                )}
+                {recrutInfo.entrevistas.length>0&&(
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:8}}>📅 Próximas entrevistas (7 dias)</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                      {recrutInfo.entrevistas.map((e,i)=>(
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'6px 10px',background:'#F9FAFB',borderRadius:6,fontSize:13}}>
+                          <span style={{fontWeight:700,color:C.pri,minWidth:80,fontSize:12}}>{new Date(e.data_entrevista+'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                          {e.hora_entrevista&&<span style={{color:C.muted,fontSize:12,minWidth:40}}>{e.hora_entrevista}</span>}
+                          <span style={{fontWeight:600}}>{e.candidato_nome}</span>
+                          {e.vaga&&<span style={{color:C.muted,fontSize:12}}>— {e.vaga}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {recrutInfo.novos===0&&recrutInfo.entrevistas.length===0&&(
+                  <div style={{color:C.muted,fontSize:13}}>Nenhum currículo novo ou entrevista nos próximos 7 dias.</div>
+                )}
+              </div>
+
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:18}}>
+
               {/* ---- ANIVERSARIANTES ---- */}
               <div style={s.card}>
                 <div style={s.cardTitle}>🎂 Aniversariantes — {MESES_FULL[mesAtual-1]}</div>
@@ -1046,112 +1149,6 @@ function doPost(e) {
               </div>
             </div>
 
-            {/* ---- AUSÊNCIAS ---- */}
-            <div style={s.card}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={s.cardTitle}>🚨 Ausências</div>
-                <span style={{fontSize:12,color:C.muted}}>
-                  {ausencias.atestados.length} atestado{ausencias.atestados.length!==1?"s":""} · {ausencias.ferias.length} féria{ausencias.ferias.length!==1?"s":""}
-                </span>
-              </div>
-
-              {/* Retornando hoje — alerta especial */}
-              {ausencias.retornandoHoje.length>0&&(
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>🔔 Retorno esperado HOJE — confirmar presença!</div>
-                  {ausencias.retornandoHoje.map((a,i)=>(
-                    <div key={i} style={{background:"#E8F5EE",border:`2px solid ${C.green}`,borderRadius:10,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:12}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:800,color:C.pri,fontSize:13}}>{a.nome}</div>
-                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>
-                          {a.tipo==='atestado'?'🏥 Atestado':'🏖️ Férias'} encerrado em <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
-                        </div>
-                      </div>
-                      <div style={{fontWeight:800,color:C.green,fontSize:12}}>Retorna hoje</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Atestados ativos */}
-              {ausencias.atestados.length>0&&(
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#C2410C",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏥 Atestados em andamento</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
-                    {ausencias.atestados.map((a,i)=>(
-                      <div key={i} style={{background:"#FFF7ED",border:"1.5px solid #FED7AA",borderRadius:9,padding:"10px 13px"}}>
-                        <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{a.nome}</div>
-                        {a.setor&&a.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{a.setor}</div>}
-                        {a.cid&&<div style={{fontSize:11,color:"#C2410C",marginTop:4}}>CID: {a.cid}</div>}
-                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>
-                          {a.inicio&&<span>de {new Date(a.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
-                          até <strong>{new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Férias ativas */}
-              {ausencias.ferias.length>0&&(
-                <div style={{marginBottom:6}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#1D4ED8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8}}>🏖️ Férias em andamento</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
-                    {ausencias.ferias.map((f,i)=>(
-                      <div key={i} style={{background:"#EFF6FF",border:"1.5px solid #BFDBFE",borderRadius:9,padding:"10px 13px"}}>
-                        <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{f.nome}</div>
-                        {f.setor&&f.setor!=='Não informado'&&<div style={{fontSize:10,color:C.muted}}>{f.setor}</div>}
-                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>
-                          {f.inicio&&<span>de {new Date(f.inicio+'T12:00:00').toLocaleDateString('pt-BR')} </span>}
-                          até <strong>{new Date(f.fim+'T12:00:00').toLocaleDateString('pt-BR')}</strong>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {ausencias.atestados.length===0&&ausencias.ferias.length===0&&ausencias.retornandoHoje.length===0&&(
-                <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"18px 0"}}>
-                  Nenhuma ausência registrada hoje.
-                </div>
-              )}
-            </div>
-
-            <div style={s.card}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>🧑‍💼 Recrutamento</div>
-                <button onClick={()=>onNavegar('recrutamento')} style={{background:'none',border:'none',color:C.pri,fontSize:12,cursor:'pointer',fontWeight:600}}>Ver tudo →</button>
-              </div>
-              {recrutInfo.novos>0&&(
-                <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
-                  <span style={{fontSize:20}}>📋</span>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:13,color:'#1D4ED8'}}>{recrutInfo.novos} currículo{recrutInfo.novos!==1?'s':''} novo{recrutInfo.novos!==1?'s':''}</div>
-                    <div style={{fontSize:12,color:'#3B82F6'}}>Aguardando triagem</div>
-                  </div>
-                </div>
-              )}
-              {recrutInfo.entrevistas.length>0&&(
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:8}}>📅 Próximas entrevistas (7 dias)</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    {recrutInfo.entrevistas.map((e,i)=>(
-                      <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'6px 10px',background:'#F9FAFB',borderRadius:6,fontSize:13}}>
-                        <span style={{fontWeight:700,color:C.pri,minWidth:80,fontSize:12}}>{new Date(e.data_entrevista+'T12:00:00').toLocaleDateString('pt-BR')}</span>
-                        {e.hora_entrevista&&<span style={{color:C.muted,fontSize:12,minWidth:40}}>{e.hora_entrevista}</span>}
-                        <span style={{fontWeight:600}}>{e.candidato_nome}</span>
-                        {e.vaga&&<span style={{color:C.muted,fontSize:12}}>— {e.vaga}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {recrutInfo.novos===0&&recrutInfo.entrevistas.length===0&&(
-                <div style={{color:C.muted,fontSize:13}}>Nenhum currículo novo ou entrevista nos próximos 7 dias.</div>
-              )}
-            </div>
           </div>
         );
       }
