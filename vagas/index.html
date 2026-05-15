@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trabalhe Conosco — Cantina em Casa / Lumar Alimentos</title>
+  <meta name="description" content="Envie seu currículo e candidate-se a uma vaga na Cantina em Casa ou Lumar Alimentos em Goiânia, GO.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FFF8F3;
+      color: #1a1a1a;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #E8560A 0%, #C44008 100%);
+      color: #fff;
+      padding: 28px 20px 24px;
+      text-align: center;
+    }
+    .header-logo { font-size: 40px; margin-bottom: 8px; }
+    .header h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
+    .header-sub { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    .header-empresa { font-size: 15px; font-weight: 600; margin-top: 6px; opacity: 0.95; }
+
+    .prog-wrap { width: 100%; height: 4px; background: rgba(255,255,255,0.25); margin-top: 16px; border-radius: 2px; display: none; }
+    .prog-bar   { height: 100%; background: #fff; border-radius: 2px; transition: width 0.35s ease; width: 0%; }
+
+    /* ── Container ── */
+    .container { max-width: 560px; margin: 0 auto; padding: 20px 14px 72px; }
+
+    /* ── Card ── */
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px 18px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.04);
+    }
+    .card-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #E8560A; margin-bottom: 16px;
+    }
+
+    /* ── Field ── */
+    .field { margin-bottom: 16px; }
+    .field:last-child { margin-bottom: 0; }
+
+    label {
+      display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 7px;
+    }
+    label .req { color: #E8560A; margin-left: 2px; }
+    label .opt { font-weight: 400; color: #9CA3AF; font-size: 12px; margin-left: 4px; }
+
+    input[type=text], input[type=tel], select, textarea {
+      width: 100%;
+      border: 1.5px solid #E5E7EB;
+      border-radius: 9px;
+      padding: 13px 14px;
+      font-size: 16px;
+      color: #111;
+      background: #FAFAFA;
+      font-family: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #E8560A;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(232,86,10,0.12);
+    }
+    textarea { resize: vertical; min-height: 80px; line-height: 1.55; }
+    select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236B7280' d='M1 1l5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+
+    /* ── Radio pills ── */
+    .radio-group { display: flex; gap: 10px; }
+    .radio-opt { flex: 1; }
+    .radio-opt input[type=radio] { position: absolute; opacity: 0; width: 0; height: 0; }
+    .radio-opt label {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 12px 10px; border: 1.5px solid #E5E7EB; border-radius: 9px;
+      cursor: pointer; font-size: 14px; font-weight: 600; color: #6B7280;
+      background: #FAFAFA; transition: all 0.15s; user-select: none; margin: 0;
+      text-align: center;
+    }
+    .radio-opt input[type=radio]:checked + label {
+      background: #FFF0E8; border-color: #E8560A; color: #C44008;
+    }
+    .radio-opt label:hover { border-color: #E8560A; }
+
+    /* ── Upload zone ── */
+    .upload-zone {
+      border: 2px dashed #D1D5DB;
+      border-radius: 10px;
+      padding: 24px 16px;
+      text-align: center;
+      cursor: pointer;
+      background: #FAFAFA;
+      transition: all 0.15s;
+    }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: #E8560A; background: #FFF5F0; }
+    .upload-zone.has-file { border-color: #16A34A; background: #F0FDF4; border-style: solid; }
+    .upload-icon { font-size: 32px; margin-bottom: 8px; line-height: 1; }
+    .upload-main { font-size: 14px; font-weight: 600; color: #374151; }
+    .upload-sub  { font-size: 12px; color: #9CA3AF; margin-top: 4px; }
+    .upload-zone.has-file .upload-main { color: #166534; }
+
+    /* ── Submit button ── */
+    .btn-submit {
+      display: block; width: 100%;
+      padding: 17px;
+      background: linear-gradient(135deg, #E8560A, #C44008);
+      color: #fff; border: none; border-radius: 12px;
+      font-size: 17px; font-weight: 800; letter-spacing: 0.2px;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+      font-family: inherit; margin-top: 6px;
+    }
+    .btn-submit:active { transform: scale(0.98); }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ── Error ── */
+    .error-banner {
+      background: #FEE2E2; color: #991B1B; padding: 12px 14px;
+      border-radius: 9px; font-size: 13px; margin-top: 12px; line-height: 1.5;
+    }
+
+    /* ── Conditional field ── */
+    .conditional { display: none; margin-top: 14px; }
+    .conditional.visible { display: block; }
+
+    /* ── Success screen ── */
+    #success-area {
+      display: none; text-align: center; padding: 48px 20px;
+    }
+    .success-icon { font-size: 72px; margin-bottom: 20px; }
+    .success-title { font-size: 24px; font-weight: 800; color: #166534; margin-bottom: 12px; }
+    .success-body  { font-size: 15px; color: #555; line-height: 1.65; }
+
+    /* ── Footer ── */
+    .footer { text-align: center; font-size: 11px; color: #C4BAB4; padding: 16px 0 32px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo">🍽️</div>
+  <h1>Trabalhe Conosco</h1>
+  <div class="header-empresa" id="js-empresa-nome">Cantina em Casa / Lumar Alimentos</div>
+  <div class="header-sub">📍 Goiânia, GO — Preencha o formulário abaixo</div>
+  <div class="prog-wrap" id="js-prog"><div class="prog-bar" id="js-prog-bar"></div></div>
+</div>
+
+<div class="container">
+
+  <!-- ═══ FORMULÁRIO ═══ -->
+  <div id="form-area">
+
+    <!-- Dados pessoais -->
+    <div class="card">
+      <div class="card-title">👤 Seus dados</div>
+
+      <div class="field">
+        <label for="nome">Nome completo <span class="req">*</span></label>
+        <input type="text" id="nome" placeholder="Como consta no seu documento" autocomplete="name">
+      </div>
+
+      <div class="field">
+        <label for="whatsapp">WhatsApp com DDD <span class="req">*</span></label>
+        <input type="tel" id="whatsapp" placeholder="(62) 9 9999-9999" autocomplete="tel" inputmode="numeric">
+      </div>
+
+      <div class="field">
+        <label>Você mora em Goiânia ou região? <span class="req">*</span></label>
+        <div class="radio-group">
+          <div class="radio-opt">
+            <input type="radio" name="mora_goiania" id="mg_sim" value="sim">
+            <label for="mg_sim">✅ Sim</label>
+          </div>
+          <div class="radio-opt">
+            <input type="radio" name="mora_goiania" id="mg_nao" value="nao">
+            <label for="mg_nao">❌ Não</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vaga -->
+    <div class="card">
+      <div class="card-title">💼 Vaga</div>
+
+      <div class="field">
+        <label for="vaga">Qual vaga você está se candidatando? <span class="req">*</span></label>
+        <select id="vaga">
+          <option value="">— Selecione a vaga —</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Você tem disponibilidade no turno necessário para a vaga? <span class="req">*</span></label>
+        <div class="radio-group">
+          <div class="radio-opt">
+            <input type="radio" name="turno" id="t_sim" value="sim">
+            <label for="t_sim">✅ Sim</label>
+          </div>
+          <div class="radio-opt">
+            <input type="radio" name="turno" id="t_nao" value="nao">
+            <label for="t_nao">❌ Não</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="pode_comecar">Quando você poderia começar? <span class="req">*</span></label>
+        <input type="text" id="pode_comecar" placeholder="Ex: imediatamente, em 2 semanas, 01/07…">
+      </div>
+    </div>
+
+    <!-- Experiência -->
+    <div class="card">
+      <div class="card-title">📋 Experiência</div>
+
+      <div class="field">
+        <label>Você tem experiência na área da vaga? <span class="req">*</span></label>
+        <div class="radio-group">
+          <div class="radio-opt">
+            <input type="radio" name="tem_exp" id="exp_sim" value="sim" onchange="toggleExpDesc()">
+            <label for="exp_sim">✅ Sim</label>
+          </div>
+          <div class="radio-opt">
+            <input type="radio" name="tem_exp" id="exp_nao" value="nao" onchange="toggleExpDesc()">
+            <label for="exp_nao">❌ Não</label>
+          </div>
+        </div>
+
+        <div class="conditional" id="exp_desc_wrap">
+          <label for="exp_desc" style="margin-top:0">Descreva brevemente sua experiência profissional <span class="opt">(opcional)</span></label>
+          <textarea id="exp_desc" placeholder="Conte sobre onde trabalhou e o que fazia…"></textarea>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Possui CNH? <span class="req">*</span></label>
+        <div class="radio-group">
+          <div class="radio-opt">
+            <input type="radio" name="cnh" id="cnh_sim" value="sim">
+            <label for="cnh_sim">✅ Sim</label>
+          </div>
+          <div class="radio-opt">
+            <input type="radio" name="cnh" id="cnh_nao" value="nao">
+            <label for="cnh_nao">❌ Não</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Motivação + Currículo -->
+    <div class="card">
+      <div class="card-title">🤝 Sobre você</div>
+
+      <div class="field">
+        <label for="motivacao">Por que você quer trabalhar na Cantina em Casa / Lumar Alimentos? <span class="req">*</span></label>
+        <textarea id="motivacao" placeholder="Conte um pouco sobre sua motivação…" style="min-height:90px"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Envie seu currículo <span class="opt">(opcional · PDF, DOC ou DOCX · máx. 5 MB)</span></label>
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('curriculo-file').click()">
+          <div class="upload-icon" id="upload-icon">📄</div>
+          <div class="upload-main" id="upload-main">Toque aqui para selecionar o arquivo</div>
+          <div class="upload-sub" id="upload-sub">Arraste ou clique para escolher</div>
+        </div>
+        <input type="file" id="curriculo-file" accept=".pdf,.doc,.docx" style="display:none" onchange="onFileChange(this)">
+      </div>
+    </div>
+
+    <button class="btn-submit" id="btn-submit" onclick="enviar()">Enviar Inscrição →</button>
+    <div id="error-area"></div>
+
+  </div>
+  <!-- fim #form-area -->
+
+  <!-- ═══ SUCESSO ═══ -->
+  <div id="success-area" class="card">
+    <div class="success-icon">🎉</div>
+    <div class="success-title">Inscrição enviada!</div>
+    <p class="success-body">
+      Recebemos sua candidatura com sucesso!<br><br>
+      Nossa equipe vai analisar seu perfil e entraremos em contato pelo
+      <strong>WhatsApp</strong> em breve.<br><br>
+      Obrigado pelo seu interesse em fazer parte do nosso time! 🙌
+    </p>
+  </div>
+
+  <div class="footer">Cantina em Casa / Lumar Alimentos · Goiânia, GO</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+  /* ── Supabase ── */
+  const _supa = supabase.createClient(
+    'https://taicaxtjtikdajmhtsxc.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhaWNheHRqdGlrZGFqbWh0c3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjgwNzcsImV4cCI6MjA5MzAwNDA3N30.G923g-1cmjrQZi7EoOcZcP1PieO9AKmk4mMMUgT4hbE'
+  );
+
+  /* ── Empresa via ?e=cantina ou ?e=lumar ── */
+  const _params    = new URLSearchParams(location.search);
+  const _empresaId = ['cantina','lumar'].includes(_params.get('e')) ? _params.get('e') : 'cantina';
+
+  const EMPRESA_NOMES = { cantina: 'Cantina em Casa', lumar: 'Lumar Alimentos' };
+
+  const VAGAS = {
+    cantina: [
+      'Atendente de Balcão',
+      'Auxiliar de Produção',
+      'Auxiliar de Produção - Empacotador',
+      'Auxiliar Financeiro e Departamento Pessoal',
+      'Motorista - Entregador',
+      'Outro / Não encontrei minha vaga',
+    ],
+    lumar: [
+      'Atendente de Balcão',
+      'Auxiliar de Produção',
+      'Auxiliar de Produção - Empacotador',
+      'Auxiliar Financeiro e Departamento Pessoal',
+      'Motorista - Entregador',
+      'Outro / Não encontrei minha vaga',
+    ],
+  };
+
+  /* Ajusta nome da empresa no header */
+  document.getElementById('js-empresa-nome').textContent = EMPRESA_NOMES[_empresaId];
+
+  /* Popula lista de vagas */
+  const _vagaSel = document.getElementById('vaga');
+  (VAGAS[_empresaId] || VAGAS.cantina).forEach(v => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    _vagaSel.appendChild(o);
+  });
+
+  /* ── Helpers ── */
+  function normStr(s) {
+    return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]/g,'').toUpperCase();
+  }
+  function getRadio(name) {
+    const el = document.querySelector(`input[name="${name}"]:checked`);
+    return el ? el.value : null;
+  }
+  function setProgress(pct, visible) {
+    document.getElementById('js-prog').style.display = visible ? 'block' : 'none';
+    document.getElementById('js-prog-bar').style.width = pct + '%';
+  }
+  function showError(msg) {
+    const el = document.getElementById('error-area');
+    el.innerHTML = msg ? `<div class="error-banner">⚠️ ${msg}</div>` : '';
+    if (msg) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+
+  /* ── Condicional experiência ── */
+  function toggleExpDesc() {
+    const sim = document.getElementById('exp_sim').checked;
+    document.getElementById('exp_desc_wrap').classList.toggle('visible', sim);
+  }
+
+  /* ── Upload de arquivo ── */
+  let _arquivo = null;
+
+  function onFileChange(input) {
+    const f = input.files[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) {
+      showError('O arquivo deve ter no máximo 5 MB. Comprima o PDF ou escolha outro arquivo.');
+      input.value = '';
+      return;
+    }
+    _arquivo = f;
+    const zone = document.getElementById('upload-zone');
+    zone.classList.add('has-file');
+    document.getElementById('upload-icon').textContent = '✅';
+    document.getElementById('upload-main').textContent = f.name;
+    document.getElementById('upload-sub').textContent  = (f.size/1024).toFixed(0) + ' KB · clique para trocar';
+  }
+
+  /* Drag-and-drop */
+  const _zone = document.getElementById('upload-zone');
+  _zone.addEventListener('dragover',  e => { e.preventDefault(); _zone.classList.add('drag-over'); });
+  _zone.addEventListener('dragleave', ()  => _zone.classList.remove('drag-over'));
+  _zone.addEventListener('drop', e => {
+    e.preventDefault(); _zone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const input = document.getElementById('curriculo-file');
+    /* Simula seleção */
+    try {
+      const dt = new DataTransfer(); dt.items.add(f); input.files = dt.files;
+    } catch(_) {}
+    onFileChange({ files: [f] });
+  });
+
+  /* ── Máscara de telefone ── */
+  document.getElementById('whatsapp').addEventListener('input', function() {
+    let v = this.value.replace(/\D/g, '');
+    if (v.length > 11) v = v.slice(0, 11);
+    if (v.length > 7)       v = '(' + v.slice(0,2) + ') ' + v.slice(2,7) + '-' + v.slice(7);
+    else if (v.length > 2)  v = '(' + v.slice(0,2) + ') ' + v.slice(2);
+    this.value = v;
+  });
+
+  /* ── Enviar ── */
+  async function enviar() {
+    showError('');
+
+    const nome        = document.getElementById('nome').value.trim();
+    const whatsapp    = document.getElementById('whatsapp').value.trim();
+    const moraGoiania = getRadio('mora_goiania');
+    const vaga        = document.getElementById('vaga').value;
+    const turno       = getRadio('turno');
+    const podeComecar = document.getElementById('pode_comecar').value.trim();
+    const temExp      = getRadio('tem_exp');
+    const expDesc     = document.getElementById('exp_desc').value.trim();
+    const possuiCnh   = getRadio('cnh');
+    const motivacao   = document.getElementById('motivacao').value.trim();
+
+    /* Validações */
+    if (!nome)        { showError('Por favor, informe seu nome completo.'); return; }
+    if (!whatsapp || whatsapp.replace(/\D/g,'').length < 10)
+                      { showError('Por favor, informe seu WhatsApp com DDD (ex: 62 9 9999-9999).'); return; }
+    if (!moraGoiania) { showError('Por favor, informe se mora em Goiânia ou região.'); return; }
+    if (!vaga)        { showError('Por favor, selecione a vaga desejada.'); return; }
+    if (!turno)       { showError('Por favor, informe sua disponibilidade de turno.'); return; }
+    if (!podeComecar) { showError('Por favor, informe quando poderia começar.'); return; }
+    if (!temExp)      { showError('Por favor, informe se tem experiência na área.'); return; }
+    if (!possuiCnh)   { showError('Por favor, informe se possui CNH.'); return; }
+    if (!motivacao)   { showError('Por favor, escreva sua motivação (campo obrigatório).'); return; }
+
+    const btn = document.getElementById('btn-submit');
+    btn.disabled = true;
+    btn.textContent = '⏳ Enviando...';
+    setProgress(10, true);
+
+    try {
+      /* 1. Upload do currículo (se houver) */
+      let curriculoUrl = null;
+      if (_arquivo) {
+        btn.textContent = '⏳ Enviando currículo...';
+        setProgress(30, true);
+        const ext      = _arquivo.name.split('.').pop().toLowerCase();
+        const fileName = `${_empresaId}/${Date.now()}_${normStr(nome)}.${ext}`;
+        const { error: upErr } = await _supa.storage.from('curriculos').upload(fileName, _arquivo, { contentType: _arquivo.type });
+        if (upErr) throw new Error('Erro ao enviar currículo: ' + upErr.message);
+        const { data: { publicUrl } } = _supa.storage.from('curriculos').getPublicUrl(fileName);
+        curriculoUrl = publicUrl;
+      }
+
+      /* 2. Salva candidato no Supabase */
+      btn.textContent = '⏳ Salvando inscrição...';
+      setProgress(70, true);
+
+      const ts = Date.now();
+      const id = _empresaId + '_' + normStr(nome) + '_' + ts;
+
+      const { error } = await _supa.from('candidatos').insert({
+        id,
+        empresa_id:            _empresaId,
+        nome,
+        whatsapp,
+        mora_goiania:          moraGoiania === 'sim',
+        vaga,
+        disponibilidade_turno: turno === 'sim',
+        pode_comecar:          podeComecar,
+        tem_experiencia:       temExp === 'sim',
+        descricao_experiencia: expDesc || null,
+        possui_cnh:            possuiCnh === 'sim',
+        motivacao,
+        curriculo_url:         curriculoUrl,
+        status:                'novo',
+        data_inscricao:        new Date().toISOString().slice(0, 10),
+      });
+
+      if (error) throw new Error(error.message);
+
+      setProgress(100, true);
+      setTimeout(() => {
+        document.getElementById('form-area').style.display    = 'none';
+        document.getElementById('success-area').style.display = 'block';
+        setProgress(100, false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 400);
+
+    } catch (e) {
+      showError(e.message || 'Ocorreu um erro inesperado. Tente novamente em instantes.');
+      btn.disabled    = false;
+      btn.textContent = 'Enviar Inscrição →';
+      setProgress(0, false);
+    }
+  }
+</script>
+</body>
+</html>
