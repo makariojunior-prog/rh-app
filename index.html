@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -230,412 +230,10 @@
       codeBlock:{background:"#1B3A2B",color:"#A8D5A2",borderRadius:8,padding:"14px 16px",fontSize:11.5,fontFamily:"monospace",overflowX:"auto",marginBottom:14,lineHeight:1.6},
     };
 
-    const GAS_SCRIPT = `// ============================================================
-// RegistroVT.gs v3 — Web App do RH
-// Suporta:
-//   GET ?acao=colaboradores    → lista colaboradores ativos com todos os campos
-//   GET ?acao=atestados        → atestados no período (?ini=yyyy-mm-dd&fim=yyyy-mm-dd)
-//   GET ?acao=folha_dados      → combina colaboradores + atestados em 1 chamada
-//   GET ?acao=candidatos       → candidatos da aba RECRUTAMENTO
-//   POST tipo=vt               → grava VT na aba VT
-//   POST tipo=folha            → grava folha na aba FOLHA{ANO}
-// ============================================================
-// Publicar: Implantar → Gerenciar implantações → editar → Nova versão → Implantar
-// ============================================================
-
-var SPREADSHEET_ID = '1I_dQgjotKP4s-y_8z9gPAT8gTZlwEcNLBBv23dsSBDU';
-var SUPABASE_URL   = 'https://taicaxtjtikdajmhtsxc.supabase.co';
-var SUPABASE_KEY   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhaWNheHRqdGlrZGFqbWh0c3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjgwNzcsImV4cCI6MjA5MzAwNDA3N30.G923g-1cmjrQZi7EoOcZcP1PieO9AKmk4mMMUgT4hbE';
-
-function _resp(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function _fmtDate(d) {
-  if (!d) return '';
-  if (d instanceof Date) return Utilities.formatDate(d, 'America/Sao_Paulo', 'yyyy-MM-dd');
-  return String(d);
-}
-
-function _isoToDate(iso) {
-  if (!iso) return null;
-  var parts = String(iso).split('-');
-  if (parts.length !== 3) return null;
-  return new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
-}
-
-// ---------------------------------------------------------------
-// GET
-// ---------------------------------------------------------------
-function doGet(e) {
-  try {
-    var acao = (e && e.parameter && e.parameter.acao) || 'folha_dados';
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-
-    if (acao === 'colaboradores' || acao === 'folha_dados') {
-      var resp = { ok: true };
-      resp.colaboradores = _lerColaboradores(ss);
-
-      if (acao === 'folha_dados') {
-        var ini = e.parameter.ini || '';
-        var fim = e.parameter.fim || '';
-        resp.atestados = _lerAtestados(ss, ini, fim);
-      }
-      return _resp(resp);
-    }
-
-    if (acao === 'atestados') {
-      var ini = e.parameter.ini || '';
-      var fim = e.parameter.fim || '';
-      return _resp({ ok: true, atestados: _lerAtestados(ss, ini, fim) });
-    }
-
-    if (acao === 'candidatos') {
-      return _resp({ ok: true, candidatos: _lerCandidatos(ss) });
-    }
-
-    if (acao === 'backup') {
-      var empresaIdBkp = e.parameter.empresa_id || 'cantina';
-      var agora = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm');
-      var TABELAS_BKP = ['colaboradores','atestados','ferias','adiantamentos','adiantamentos_fixos','historico_salario','candidatos','entrevistas','logs','termos_assinatura','colaborador_termos'];
-      var totalRecs = 0;
-      var erros = [];
-
-      TABELAS_BKP.forEach(function(tabela) {
-        try {
-          var url = SUPABASE_URL + '/rest/v1/' + tabela
-            + '?select=*&empresa_id=eq.' + encodeURIComponent(empresaIdBkp) + '&limit=10000';
-          var respSupa = UrlFetchApp.fetch(url, {
-            method: 'GET',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + SUPABASE_KEY,
-              'Accept': 'application/json'
-            },
-            muteHttpExceptions: true
-          });
-          var rows = JSON.parse(respSupa.getContentText());
-          if (!Array.isArray(rows)) rows = [];
-
-          var nomAba = 'BKP_' + tabela.toUpperCase();
-          var aba = ss.getSheetByName(nomAba);
-          if (!aba) {
-            aba = ss.insertSheet(nomAba);
-          } else {
-            aba.clearContents();
-          }
-
-          if (rows.length > 0) {
-            var headers = Object.keys(rows[0]);
-            var matrix = [headers].concat(rows.map(function(r) {
-              return headers.map(function(h) {
-                var v = r[h];
-                if (v === null || v === undefined) return '';
-                if (typeof v === 'object') return JSON.stringify(v);
-                return String(v);
-              });
-            }));
-            aba.getRange(1, 1, matrix.length, headers.length).setValues(matrix);
-            aba.getRange(1, 1, 1, headers.length)
-              .setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
-          } else {
-            aba.getRange(1,1).setValue('(sem registros — ' + agora + ')');
-          }
-          totalRecs += rows.length;
-        } catch(errTabela) {
-          erros.push(tabela + ': ' + errTabela.message);
-        }
-      });
-
-      // Log do backup
-      var logAba = ss.getSheetByName('BKP_LOG');
-      if (!logAba) {
-        logAba = ss.insertSheet('BKP_LOG');
-        logAba.appendRow(['Data/Hora','Empresa','Total registros','Erros','Status']);
-        logAba.getRange(1,1,1,5).setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
-      }
-      logAba.appendRow([agora, empresaIdBkp, totalRecs, erros.join('; ') || '—', erros.length===0?'OK':'PARCIAL']);
-
-      var msg = 'Backup realizado em ' + agora + ' (' + totalRecs + ' registros em ' + TABELAS_BKP.length + ' tabelas)';
-      if (erros.length > 0) msg += ' — erros: ' + erros.join(', ');
-      return _resp({ ok: erros.length === 0, msg: msg, total: totalRecs });
-    }
-
-    return _resp({ ok: false, msg: 'Ação desconhecida: ' + acao });
-  } catch (err) {
-    return _resp({ ok: false, msg: err.message });
-  }
-}
-
-// ---------------------------------------------------------------
-// Leitura de COLABORADORES
-// ---------------------------------------------------------------
-function _bool(v) {
-  if (typeof v === 'boolean') return v;
-  var s = String(v).trim().toUpperCase();
-  if (!s) return false;
-  // Negative patterns (Portuguese Google Forms responses start with Não/Nao)
-  if (s === 'NÃO' || s === 'NAO' || s === 'FALSE' || s === '0' || s === 'NO' || s === 'N') return false;
-  if (s.indexOf('NÃO,') === 0 || s.indexOf('NÃO ') === 0 || s.indexOf('NAO,') === 0 || s.indexOf('NAO ') === 0) return false;
-  // Any non-empty, non-negative value = true (covers "Sim, ...", "Cat. A+B", etc.)
-  return true;
-}
-
-function _lerColaboradores(ss) {
-  var aba = ss.getSheetByName('COLABORADORES');
-  if (!aba) throw new Error('Aba COLABORADORES não encontrada');
-  var ultimaLinha = aba.getLastRow();
-  if (ultimaLinha < 2) return [];
-
-  var dados = aba.getRange(2, 1, ultimaLinha - 1, 37).getValues();
-  var lista = [];
-  for (var i = 0; i < dados.length; i++) {
-    var linha = dados[i];
-    var nome = linha[1];         // col B - NOME
-    var encerramento = linha[6]; // col G - ENCERRAMENTO
-    if (!nome || String(nome).trim() === '') continue;
-    if (encerramento && String(encerramento).trim() !== '') continue; // pula desligados
-
-    lista.push({
-      nome:                   String(nome).trim(),
-      telefone:               linha[2]  ? String(linha[2]).trim()  : '',  // C
-      chavePix:               linha[3]  ? String(linha[3]).trim()  : '',  // D
-      email:                  linha[4]  ? String(linha[4]).trim()  : '',  // E
-      admissao:               _fmtDate(linha[5]),                         // F
-      experiencia30:          _fmtDate(linha[7]),                         // H
-      experiencia90:          _fmtDate(linha[8]),                         // I
-      setor:                  linha[9]  ? String(linha[9]).trim()  : '',  // J
-      funcao:                 linha[10] ? String(linha[10]).trim() : '',  // K
-      cpf:                    linha[12] ? String(linha[12]).trim() : '',  // M
-      nascimento:             _fmtDate(linha[13]),                        // N
-      salario:                linha[14] || 0,                             // O
-      transporte:             linha[18] || 0,                             // S
-      contaSalario:           _bool(linha[24]),                          // Y
-      aditivoContrato:        _bool(linha[25]),                          // Z
-      usoArmario:             _bool(linha[26]),                          // AA
-      lgpd:                   _bool(linha[27]),                          // AB
-      imagem:                 _bool(linha[28]),                          // AC
-      camera:                 _bool(linha[29]),                          // AD
-      epiUniforme:            _bool(linha[30]),                          // AE
-      acompanhamentoProducao: _bool(linha[31]),                          // AF
-      usoCelular:             _bool(linha[32]),                          // AG
-      usoVeiculo:             _bool(linha[33]),                          // AH
-      termoConfidencialidade: _bool(linha[34]),                          // AI
-      termoAssiduidade:       _bool(linha[35]),                          // AJ
-      termoMudancaHorario:    _bool(linha[36])                           // AK
-    });
-  }
-  return lista;
-}
-
-// ---------------------------------------------------------------
-// Leitura de ATESTADOS no período
-// ---------------------------------------------------------------
-function _lerAtestados(ss, isoIni, isoFim) {
-  var aba = ss.getSheetByName('ATESTADOS');
-  if (!aba) return [];
-  var ultimaLinha = aba.getLastRow();
-  if (ultimaLinha < 2) return [];
-
-  var dataIni = _isoToDate(isoIni);
-  var dataFim = _isoToDate(isoFim);
-
-  var dados = aba.getRange(2, 1, ultimaLinha - 1, 6).getValues();
-  var lista = [];
-  for (var i = 0; i < dados.length; i++) {
-    var linha = dados[i];
-    var nome   = linha[0]; // A - NOME
-    var setor  = linha[1]; // B - SETOR
-    var cid    = linha[2]; // C - CID
-    var inicio = linha[3]; // D - INÍCIO
-    var fim    = linha[4]; // E - FIM
-    var obs    = linha[5]; // F - OBSERVAÇÕES
-    if (!nome || !inicio) continue;
-
-    var dIni = inicio instanceof Date ? inicio : null;
-    var dFim = fim    instanceof Date ? fim    : dIni;
-    if (!dIni) continue;
-
-    if (dataIni && dataFim) {
-      if (dFim < dataIni || dIni > dataFim) continue;
-    }
-
-    lista.push({
-      nome:   String(nome).trim(),
-      setor:  setor ? String(setor).trim() : '',
-      cid:    cid   ? String(cid).trim()   : '',
-      inicio: _fmtDate(dIni),
-      fim:    _fmtDate(dFim),
-      obs:    obs   ? String(obs).trim()   : ''
-    });
-  }
-  return lista;
-}
-
-// ---------------------------------------------------------------
-// Leitura de RECRUTAMENTO
-// ---------------------------------------------------------------
-function _lerCandidatos(ss) {
-  var aba = ss.getSheetByName('RECRUTAMENTO');
-  if (!aba) return [];
-  var ultimaLinha = aba.getLastRow();
-  if (ultimaLinha < 2) return [];
-
-  var dados = aba.getRange(2, 1, ultimaLinha - 1, 21).getValues();
-  var lista = [];
-  for (var i = 0; i < dados.length; i++) {
-    var l = dados[i];
-    var ts = l[0]; // A - Carimbo de data/hora
-    if (!ts) continue;
-    var tsStr = ts instanceof Date
-      ? Utilities.formatDate(ts, 'America/Sao_Paulo', 'yyyyMMddHHmmss')
-      : String(ts).replace(/[^0-9]/g, '');
-    var tsIso = ts instanceof Date
-      ? Utilities.formatDate(ts, 'America/Sao_Paulo', 'yyyy-MM-dd HH:mm:ss')
-      : String(ts);
-    lista.push({
-      timestamp:      tsIso,
-      ts_key:         tsStr,
-      nome:           String(l[1]||'').trim(),                  // B
-      whatsapp:       String(l[2]||'').trim(),                  // C
-      mora_goiania:   _bool(l[3]),                              // D
-      vaga:           String(l[4]||'').trim(),                  // E
-      disponibilidade_turno: _bool(l[5]),                       // F
-      pode_comecar:   String(l[6]||'').trim(),                  // G
-      tem_experiencia: _bool(l[7]),                             // H
-      experiencia_tipo: String(l[7]||'').trim(),                // H texto completo
-      descricao_experiencia: String(l[8]||'').trim(),           // I
-      possui_cnh:     _bool(l[9]),                              // J
-      cnh_tipo:       String(l[9]||'').trim(),                  // J texto completo
-      motivacao:      String(l[10]||'').trim(),                 // K
-      curriculo_url:  String(l[11]||'').trim(),                 // L
-      area_desejada:  String(l[12]||'').trim(),                 // M (manual)
-      outra_area:     String(l[13]||'').trim(),                 // N (manual)
-      diferencial:    String(l[14]||'').trim(),                 // O (manual)
-      status_planilha: String(l[15]||'').trim().toLowerCase(),  // P (manual)
-      data_entrevista_plan: l[16] instanceof Date
-        ? Utilities.formatDate(l[16], 'America/Sao_Paulo', 'yyyy-MM-dd')
-        : String(l[16]||'').trim(),                             // Q (manual)
-      hora_entrevista_plan: String(l[17]||'').trim(),           // R (manual)
-      avaliacao_plan: l[18] ? parseInt(String(l[18])) || null : null, // S (manual)
-      obs_plan:       String(l[19]||'').trim(),                 // T (manual)
-      contratado:     _bool(l[20])                              // U (manual)
-    });
-  }
-  return lista;
-}
-
-// ---------------------------------------------------------------
-// POST
-// ---------------------------------------------------------------
-function doPost(e) {
-  try {
-    var dados = JSON.parse(e.postData.contents);
-    var tipo  = dados.tipo || 'vt';
-    var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var agora = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm');
-
-    if (tipo === 'vt') {
-      var aba = ss.getSheetByName('VT');
-      if (!aba) return _resp({ok:false, msg:'Aba VT não encontrada'});
-      if (aba.getLastRow() === 0) {
-        aba.appendRow(['Semana Início','Semana Fim','Colaborador','Escala','Dias Trabalhados','Passagens','Valor Calculado','Valor Pago','Afastado','Registrado em']);
-      }
-      dados.employees.forEach(function(emp) {
-        aba.appendRow([
-          dados.semanaIni, dados.semanaFim,
-          emp.nome, emp.escala,
-          emp.diasTrabalhados, emp.diasTrabalhados * 2,
-          emp.valorCalculado, emp.valorPago,
-          emp.afastado ? 'Sim' : 'Não', agora
-        ]);
-      });
-      return _resp({ok:true, msg:'VT salvo com ' + dados.employees.length + ' registros'});
-    }
-
-    if (tipo === 'folha') {
-      var ano    = dados.periodo ? dados.periodo.substring(3) : new Date().getFullYear();
-      var nomeAba = 'FOLHA' + ano;
-      var aba = ss.getSheetByName(nomeAba);
-      if (!aba) aba = ss.insertSheet(nomeAba);
-      if (aba.getLastRow() === 0) {
-        aba.appendRow([
-          'Período','Colaborador','Função','Dias Trabalhados','Faltas Injust.','Atestados','Férias','Folgas',
-          'Horas Extras','Horas Faltas','DSR Perdidos','Feriados Perdidos','Caju (dias)','Caju (R$)',
-          'Prêmio Assiduidade','Descontar VT','Produtos (R$)','Adiantamento (R$)','Total Desconto (R$)',
-          'Banco Horas','Dias Faltas','Observações','Registrado em'
-        ]);
-      }
-      dados.colaboradores.forEach(function(c) {
-        aba.appendRow([
-          dados.periodo, c.nome, c.funcao || '',
-          c.diasTrabalhados, c.faltas, c.atestados, c.ferias, c.folgas,
-          c.horasExtras, c.horasFaltas, c.dsrPerdidos, c.feriadosPerdidos,
-          c.cajuDias, c.cajuValor,
-          c.premioAssiduidade ? 'Sim' : 'Não',
-          c.descontarVT       ? 'Sim' : 'Não',
-          c.produtos || 0, c.adiantamento || 0, c.totalDesconto,
-          c.bancoHoras ? 'Sim' : 'Não',
-          (c.diasFaltas || []).join(', '),
-          c.observacoes || '', agora
-        ]);
-      });
-      return _resp({ok:true, msg:'Folha ' + dados.periodo + ' salva com ' + dados.colaboradores.length + ' registros'});
-    }
-
-    if (tipo === 'backup') {
-      var tabelas = dados.tabelas || {};
-      var nomeTabelas = Object.keys(tabelas);
-      nomeTabelas.forEach(function(nomeTabela) {
-        var rows = tabelas[nomeTabela] || [];
-        var nomAba = 'BKP_' + nomeTabela.toUpperCase();
-        var aba = ss.getSheetByName(nomAba);
-        if (!aba) {
-          aba = ss.insertSheet(nomAba);
-        } else {
-          aba.clearContents();
-        }
-        if (rows.length === 0) {
-          aba.getRange(1,1).setValue('(sem registros — ' + agora + ')');
-          return;
-        }
-        var headers = Object.keys(rows[0]);
-        var matrix = [headers].concat(rows.map(function(r) {
-          return headers.map(function(h) {
-            var v = r[h];
-            if (v === null || v === undefined) return '';
-            if (typeof v === 'object') return JSON.stringify(v);
-            return String(v);
-          });
-        }));
-        aba.getRange(1, 1, matrix.length, headers.length).setValues(matrix);
-        aba.getRange(1, 1, 1, headers.length)
-          .setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
-      });
-      // Log do backup
-      var logAba = ss.getSheetByName('BKP_LOG');
-      if (!logAba) {
-        logAba = ss.insertSheet('BKP_LOG');
-        logAba.appendRow(['Data/Hora','Usuário','Tabelas exportadas','Total registros','Status']);
-        logAba.getRange(1,1,1,5).setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
-      }
-      var totalRecs = nomeTabelas.reduce(function(acc, t){ return acc + (tabelas[t]?tabelas[t].length:0); }, 0);
-      logAba.appendRow([agora, dados.usuario||'sistema', nomeTabelas.join(', '), totalRecs, 'OK']);
-      return _resp({ok:true, msg:'Backup realizado em ' + agora + ' (' + totalRecs + ' registros em ' + nomeTabelas.length + ' tabelas)'});
-    }
-
-    return _resp({ok:false, msg:'Tipo desconhecido: ' + tipo});
-  } catch (err) {
-    return _resp({ok:false, msg:err.message});
-  }
-}`;
-
       // ============================================================
       // DASHBOARD
       // ============================================================
-      function DashboardPage({ onNavegar, gasUrl, colabAPI, setColabAPI, empresaId }) {
+      function DashboardPage({ onNavegar, colabAPI, setColabAPI, empresaId }) {
         const hoje = new Date();
         hoje.setHours(12, 0, 0, 0);
 
@@ -701,36 +299,7 @@ function doPost(e) {
         });
 
         const [dados, setDados] = useState(lerStorage);
-        const [loadingColab, setLoadingColab] = useState(false);
-        const [buscaStatus, setBuscaStatus] = useState(null);
         const marcacoes = dados.marcacoes;
-
-        const atualizar = async () => {
-          const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
-          if (!url) {
-            setDados(lerStorage());
-            setBuscaStatus({ok:false, msg:"URL do Web App não configurada. Acesse ⚙️ Configurações para configurar a URL do Web App."});
-            return;
-          }
-          setLoadingColab(true);
-          setBuscaStatus(null);
-          try {
-            const res = await fetch(`${url}?acao=colaboradores`);
-            const json = await res.json();
-            if (json.ok) {
-              localStorage.setItem("rh_colab_api", JSON.stringify(json.colaboradores || []));
-              setColabAPI(json.colaboradores || []);
-              setBuscaStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores atualizados.`});
-            } else {
-              setBuscaStatus({ok:false, msg:"Erro: " + (json.msg || "desconhecido")});
-            }
-          } catch(err) {
-            setBuscaStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App. Erro: " + err.message});
-          } finally {
-            setDados(lerStorage());
-            setLoadingColab(false);
-          }
-        };
 
         const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/\s+/g," ").trim();
         const parseISODate = iso => { if (!iso) return null; const [y,m,d] = iso.split("-"); return new Date(+y, +m-1, +d, 12, 0, 0); };
@@ -855,22 +424,11 @@ function doPost(e) {
               </div>
             )}
 
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
-              <button onClick={atualizar} disabled={loadingColab} style={{...s.btnAcc,fontSize:12,padding:"5px 14px",gap:5,opacity:loadingColab?0.65:1}}>
-                {loadingColab ? "⏳ Atualizando..." : "🔄 Atualizar dashboard"}
-              </button>
-            </div>
-            {buscaStatus && (
-              <div style={{...(buscaStatus.ok ? s.successBox : s.warnBox), marginBottom:14}}>
-                {buscaStatus.msg}
-              </div>
-            )}
-
             {semDados && (
               <div style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:10,padding:"14px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
                 <div>
                   <div style={{fontWeight:700,color:"#1D4ED8",fontSize:13,marginBottom:2}}>📋 Nenhum colaborador carregado ainda</div>
-                  <div style={{color:"#3B82F6",fontSize:12}}>Sincronize a planilha para carregar os colaboradores no banco de dados. Após a primeira sincronização, os dados carregam automaticamente.</div>
+                  <div style={{color:"#3B82F6",fontSize:12}}>Cadastre colaboradores no módulo Colaboradores para que eles apareçam aqui.</div>
                 </div>
                 {onNavegar && <button onClick={()=>onNavegar("colaboradores")} style={{...s.btn,fontSize:12,padding:"6px 14px",flexShrink:0}}>Ir para Colaboradores →</button>}
               </div>
@@ -1511,7 +1069,7 @@ function doPost(e) {
         );
       }
 
-      function ColaboradoresPage({ empresaId, setColabAPI, gasUrl }) {
+      function ColaboradoresPage({ empresaId, setColabAPI }) {
         const [lista, setLista] = useState([]);
         const [listaDesligados, setListaDesligados] = useState([]);
         const [mostrarDesligados, setMostrarDesligados] = useState(false);
@@ -1564,19 +1122,6 @@ function doPost(e) {
 
         const carregarHistorico = async (colab) => {
           setLoadingHistorico(true);
-          const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
-          if (url) {
-            try {
-              const ini = new Date(new Date().getFullYear()-3, 0, 1).toISOString().slice(0,10);
-              const fim = new Date().toISOString().slice(0,10);
-              const res = await fetch(url+'?acao=atestados&ini='+ini+'&fim='+fim);
-              const json = await res.json();
-              if (json.ok) {
-                const nome = (colab.nome||'').toLowerCase();
-                setHistoricoAtestados((json.atestados||[]).filter(a=>(a.nome||'').toLowerCase().includes(nome)));
-              }
-            } catch(e) { setHistoricoAtestados([]); }
-          }
           try {
             const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
             setHistoricoFerias(data||[]);
@@ -1640,79 +1185,6 @@ function doPost(e) {
           }
           if(str.includes('-')) return str; // já está em ISO
           return null;
-        };
-
-        const sincronizarPlanilha = async () => {
-          const url = gasUrl || localStorage.getItem("rh_gas_url") || "";
-          if(!url) {
-            setStatus({ok:false, msg:"❌ URL do Web App (GAS) não configurada. Acesse ⚙️ Configurações para configurar a URL do Web App."}); return;
-          }
-          setLoading(true); setStatus({ok:null, msg:"⏳ Buscando colaboradores na planilha..."});
-          try {
-            const res = await fetch(`${url}?acao=colaboradores`);
-            if(!res.ok) throw new Error(`Servidor retornou ${res.status}`);
-            const json = await res.json();
-            if(!json.ok) throw new Error(json.msg || "Resposta inválida do GAS");
-            const colab = json.colaboradores || [];
-            if(colab.length === 0) throw new Error("Nenhum colaborador encontrado na planilha");
-            setStatus({ok:null, msg:`⏳ Salvando ${colab.length} colaboradores no Supabase...`});
-            const records = colab.map(c => {
-              const nome = (c.nome || c.NOME || "").trim();
-              const nomeKey = normNome(nome);
-              return {
-                id: `${empresaId}_${nomeKey}`,
-                empresa_id: empresaId,
-                nome,
-                nome_key: nomeKey,
-                funcao: c.funcao||null, setor: c.setor||null, cpf: c.cpf||null,
-                telefone: c.telefone||null, chave_pix: c.chavePix||null, email: c.email||null,
-                nascimento: parseDateBR(c.nascimento),
-                admissao: parseDateBR(c.admissao),
-                experiencia_30: parseDateBR(c.experiencia30),
-                experiencia_90: parseDateBR(c.experiencia90),
-                salario: Number(c.salario)||0, inss: calcINSS(c.salario),
-                fgts: calcFGTS(c.salario), transporte: Number(c.transporte)||0,
-                conta_salario: !!c.contaSalario, aditivo_contrato: !!c.aditivoContrato,
-                uso_armario: !!c.usoArmario, lgpd: !!c.lgpd, imagem: !!c.imagem,
-                camera: !!c.camera, epi_uniforme: !!c.epiUniforme,
-                acompanhamento_producao: !!c.acompanhamentoProducao,
-                uso_celular: !!c.usoCelular, uso_veiculo: !!c.usoVeiculo,
-                termo_confidencialidade: !!c.termoConfidencialidade,
-                termo_assiduidade: !!c.termoAssiduidade,
-                termo_mudanca_horario: !!c.termoMudancaHorario,
-                periculosidade: false, periculosidade_valor: 0,
-                ativo: true, atualizado_em: new Date().toISOString()
-              };
-            });
-            const {error} = await _supa.from('colaboradores').upsert(records, {onConflict:'id'});
-            if(error) throw error;
-            // Populate colabAPI from GAS data (preserves nascimento/datas even sem colunas no Supabase)
-            const colabParaApp = colab.map(c=>({
-              nome:(c.nome||c.NOME||"").trim(), funcao:c.funcao||'', setor:c.setor||'',
-              cpf:c.cpf||'', nascimento:c.nascimento||'', admissao:c.admissao||'',
-              telefone:c.telefone||'', chavePix:c.chavePix||'', email:c.email||'',
-              experiencia30:c.experiencia30||'', experiencia90:c.experiencia90||'',
-              salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
-              transporte:Number(c.transporte)||0, periculosidade:false,
-              contaSalario:!!c.contaSalario, aditivoContrato:!!c.aditivoContrato,
-              usoArmario:!!c.usoArmario, lgpd:!!c.lgpd, imagem:!!c.imagem,
-              camera:!!c.camera, epiUniforme:!!c.epiUniforme,
-              acompanhamentoProducao:!!c.acompanhamentoProducao,
-              usoCelular:!!c.usoCelular, usoVeiculo:!!c.usoVeiculo,
-              termoConfidencialidade:!!c.termoConfidencialidade,
-              termoAssiduidade:!!c.termoAssiduidade,
-              termoMudancaHorario:!!c.termoMudancaHorario
-            }));
-            setColabAPI(colabParaApp);
-            const {data:supaColab} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
-            setLista(supaColab||[]);
-            const {data:supaD} = await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',false).order('nome');
-            setListaDesligados(supaD||[]);
-            setStatus({ok:true, msg:`✅ ${colab.length} colaboradores sincronizados com sucesso!`});
-          } catch(e) {
-            setStatus({ok:false, msg:"❌ Erro ao sincronizar: " + e.message});
-          }
-          setLoading(false);
         };
 
         const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); };
@@ -2153,7 +1625,6 @@ function doPost(e) {
               <div style={{fontSize:20,fontWeight:800,color:C.pri}}>👥 Colaboradores</div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={carregar} style={s.btnOutline} disabled={loading}>🔄 Atualizar</button>
-                <button onClick={sincronizarPlanilha} style={{...s.btnOutline,color:"#166534",borderColor:"#16A34A"}} disabled={loading}>📥 Sincronizar Planilha</button>
                 <button onClick={abrirNovo} style={s.btn}>+ Novo</button>
               </div>
             </div>
@@ -2170,12 +1641,9 @@ function doPost(e) {
                         <div style={{fontSize:32,marginBottom:12}}>📋</div>
                         <div style={{fontWeight:700,fontSize:15,color:C.pri,marginBottom:8}}>Banco de dados vazio</div>
                         <div style={{color:C.muted,marginBottom:16,lineHeight:1.5}}>
-                          Nenhum colaborador encontrado no banco de dados.<br/>
-                          Clique em <strong>"📥 Sincronizar Planilha"</strong> para importar os colaboradores<br/>
-                          da planilha Google Sheets. Após a primeira sincronização,<br/>
-                          os dados carregam automaticamente sempre que abrir o app.
+                          Nenhum colaborador encontrado no banco de dados.
                         </div>
-                        <div style={{fontSize:12,color:C.muted}}>Ou clique em <strong>"+ Novo"</strong> para cadastrar manualmente.</div>
+                        <div style={{fontSize:12,color:C.muted}}>Clique em <strong>"+ Novo"</strong> para cadastrar o primeiro colaborador.</div>
                       </div>
                     )}
                   </div>
@@ -2510,7 +1978,7 @@ function doPost(e) {
         );
       }
 
-      function AtestadosPage({gasUrl, colabAPI, empresaId}) {
+      function AtestadosPage({colabAPI, empresaId}) {
         function normStr(s) {
           return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]/g,'').toUpperCase();
         }
@@ -2526,7 +1994,6 @@ function doPost(e) {
         const [fimF, setFimF] = React.useState(ultDia);
         const [lista, setLista] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
-        const [syncing, setSyncing] = React.useState(false);
         const [status, setStatus] = React.useState(null);
         const [filtroColab, setFiltroColab] = React.useState('');
         const [form, setForm] = React.useState(VAZIO);
@@ -2544,40 +2011,6 @@ function doPost(e) {
         };
 
         React.useEffect(()=>{ carregar(); },[empresaId,iniF,fimF]);
-
-        const sincronizar = async () => {
-          const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
-          if(!url){ setStatus({ok:false,msg:'URL do GAS não configurada em ⚙️ Configurações.'}); return; }
-          setSyncing(true); setStatus({ok:null,msg:'⏳ Buscando atestados na planilha...'});
-          try {
-            const ini5 = new Date(hoje.getFullYear()-5,0,1).toISOString().slice(0,10);
-            const fim5 = new Date().toISOString().slice(0,10);
-            const res = await fetch(url+'?acao=atestados&ini='+ini5+'&fim='+fim5);
-            if(!res.ok) throw new Error('Servidor retornou '+res.status);
-            const json = await res.json();
-            if(!json.ok) throw new Error(json.msg||'Erro no GAS');
-            const atestados = json.atestados||[];
-            if(atestados.length===0){ setStatus({ok:true,msg:'Planilha sem atestados no período.'}); setSyncing(false); return; }
-            setStatus({ok:null,msg:'⏳ Salvando '+atestados.length+' atestados no Supabase...'});
-            const records = atestados.map(a=>({
-              id: empresaId+'_'+normStr(a.nome)+'_'+(a.inicio||'').replace(/-/g,''),
-              empresa_id: empresaId,
-              colaborador_nome: (a.nome||'').trim(),
-              setor: a.setor||null,
-              cid: a.cid||null,
-              inicio: a.inicio||null,
-              fim: a.fim||a.inicio||null,
-              dias: calcDias(a.inicio,a.fim||a.inicio),
-              obs: a.obs||null,
-              origem: 'planilha'
-            })).filter(r=>r.inicio);
-            const {error} = await _supa.from('atestados').upsert(records,{onConflict:'id'});
-            if(error) throw error;
-            setStatus({ok:true,msg:'✅ '+records.length+' atestados sincronizados!'});
-            carregar();
-          } catch(e){ setStatus({ok:false,msg:'❌ '+e.message}); }
-          setSyncing(false);
-        };
 
         const salvarNovo = async () => {
           if(!form.colaboradorNome||!form.inicio||!form.fim){
@@ -2620,7 +2053,6 @@ function doPost(e) {
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>{ setMostrarForm(true); setForm(VAZIO); setStatus(null); }} style={s.btn}>➕ Novo Atestado</button>
-                <button onClick={sincronizar} style={s.btnOutline} disabled={syncing}>{syncing?'Sincronizando...':'🔄 Sincronizar Planilha'}</button>
               </div>
             </div>
 
@@ -2707,7 +2139,7 @@ function doPost(e) {
                     <tr><td colSpan={9} style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</td></tr>
                   ):filtrados.length===0?(
                     <tr><td colSpan={9} style={{textAlign:"center",padding:"32px",color:C.muted}}>
-                      Nenhum atestado no período. Use "Sincronizar Planilha" para importar ou "Novo Atestado" para incluir.
+                      Nenhum atestado no período. Clique em "➕ Novo Atestado" para incluir.
                     </td></tr>
                   ):filtrados.map(a=>{
                     const d1=a.inicio?new Date(a.inicio+'T12:00:00'):null;
@@ -2891,7 +2323,7 @@ function doPost(e) {
       // ============================================================
       // MÓDULO RECRUTAMENTO
       // ============================================================
-      function RecrutamentoPage({ gasUrl, empresaId }) {
+      function RecrutamentoPage({ empresaId }) {
         function normStr(s){ return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]/g,'').toUpperCase(); }
 
         const STATUS_C=[
@@ -2913,7 +2345,6 @@ function doPost(e) {
         const [aba, setAba]               = React.useState('curriculos');
         const [candidatos, setCandidatos] = React.useState([]);
         const [loadingC, setLoadingC]     = React.useState(true);
-        const [syncing, setSyncing]       = React.useState(false);
         const [statusMsg, setStatusMsg]   = React.useState(null);
         const [filtroVaga, setFiltroVaga] = React.useState('');
         const [filtroSt, setFiltroSt]     = React.useState('');
@@ -2946,49 +2377,6 @@ function doPost(e) {
           setLoadingE(false);
         };
         React.useEffect(()=>{ carregarCandidatos(); carregarEntrevistas(); carregarLogs(); carregarConfig(); },[empresaId]);
-
-        const sincronizar = async () => {
-          const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
-          if(!url){ setStatusMsg({ok:false,msg:'URL do GAS não configurada em ⚙️ Configurações.'}); return; }
-          setSyncing(true); setStatusMsg({ok:null,msg:'⏳ Buscando candidatos na planilha...'});
-          try {
-            const res = await fetch(url+'?acao=candidatos');
-            if(!res.ok) throw new Error('Servidor retornou '+res.status);
-            const json = await res.json();
-            if(!json.ok) throw new Error(json.msg||'Erro no GAS');
-            const lista = (json.candidatos||[]).filter(c=>c.nome);
-            if(!lista.length){ setStatusMsg({ok:true,msg:'Nenhum candidato na planilha.'}); setSyncing(false); return; }
-            setStatusMsg({ok:null,msg:'⏳ Salvando '+lista.length+' candidatos...'});
-            const MAP_ST = {aprovado:'aprovado',reprovado:'reprovado',entrevista:'entrevista',triagem:'triagem',banco:'banco',contratado:'aprovado'};
-            const records = lista.map(c=>({
-              id: empresaId+'_'+normStr(c.nome)+'_'+c.ts_key,
-              empresa_id: empresaId,
-              nome: c.nome,
-              whatsapp: c.whatsapp||null,
-              mora_goiania: c.mora_goiania,
-              vaga: c.vaga||null,
-              disponibilidade_turno: c.disponibilidade_turno,
-              pode_comecar: c.pode_comecar||null,
-              tem_experiencia: c.tem_experiencia,
-              experiencia_tipo: c.experiencia_tipo||null,
-              descricao_experiencia: c.descricao_experiencia||null,
-              possui_cnh: c.possui_cnh,
-              cnh_tipo: c.cnh_tipo||null,
-              motivacao: c.motivacao||null,
-              curriculo_url: c.curriculo_url||null,
-              area_desejada: c.area_desejada||null,
-              outra_area: c.outra_area||null,
-              diferencial: c.diferencial||null,
-              data_inscricao: c.timestamp?c.timestamp.slice(0,10):null,
-              status: MAP_ST[c.status_planilha]||'novo'
-            }));
-            const {error} = await _supa.from('candidatos').upsert(records,{onConflict:'id'});
-            if(error) throw error;
-            setStatusMsg({ok:true,msg:'✅ '+records.length+' candidatos sincronizados!'});
-            carregarCandidatos();
-          } catch(e){ setStatusMsg({ok:false,msg:'❌ '+e.message}); }
-          setSyncing(false);
-        };
 
         const atualizarStatusC = async (id, novoSt) => {
           await _supa.from('candidatos').update({status:novoSt}).eq('id',id);
@@ -3115,7 +2503,6 @@ function doPost(e) {
                     {STATUS_C.map(sc=>(<option key={sc.k} value={sc.k}>{sc.l}</option>))}
                   </select>
                   <div style={{flex:1}}/>
-                  <button onClick={sincronizar} disabled={syncing} style={{...s.btnOutline,color:'#166534',borderColor:'#16A34A'}}>{syncing?'⏳ Sincronizando...':'📥 Sincronizar Planilha'}</button>
                 </div>
                 <div style={{fontSize:12,color:C.muted,marginBottom:10}}>{filtrados.length} candidato{filtrados.length!==1?'s':''}</div>
                 {loadingC?<div style={{textAlign:'center',padding:'32px',color:C.muted}}>Carregando...</div>
@@ -3123,7 +2510,7 @@ function doPost(e) {
                   <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>
                     <div style={{fontSize:32,marginBottom:8}}>📋</div>
                     <div style={{fontWeight:700,marginBottom:4}}>Nenhum candidato encontrado</div>
-                    <div style={{fontSize:12}}>Sincronize a planilha ou ajuste os filtros.</div>
+                    <div style={{fontSize:12}}>Ajuste os filtros ou aguarde novos candidatos.</div>
                   </div>
                 ):(
                   <div style={s.card}>
@@ -4370,9 +3757,8 @@ function doPost(e) {
       // ============================================================
       // MÓDULO FOLHA DE PAGAMENTO
       // ============================================================
-      function FolhaPage({ colabAPI, setColabAPI, gasUrl, empresaId, valorDSR }) {
+      function FolhaPage({ colabAPI, setColabAPI, empresaId, valorDSR }) {
         const dsrUnitario = parseFloat(String(valorDSR||"7,20").replace(",",".")) || 7.20;
-        const GAS_URL = gasUrl || "https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec";
 
         const hoje = new Date();
         const [mesAno, setMesAno] = useState(()=>{
@@ -4384,14 +3770,12 @@ function doPost(e) {
         const [feriados, setFeriados] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_feriados")||"[]");}catch(e){return [];} });
         const [ajustes, setAjustes] = useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_folha_ajustes")||"{}");}catch(e){return {};} });
         const [csvStatus, setCsvStatus] = useState(null);
-        const [apiStatus, setApiStatus] = useState(null);
         const [saveStatus, setSaveStatus] = useState(null);
         const [adiantSupa, setAdiantSupa] = useState({});
         const [adiantFixosSupa, setAdiantFixosSupa] = useState({});
         const [comprasSupa, setComprasSupa] = useState({});
         const [drag, setDrag] = useState(false);
         const [colabSelecionado, setColabSelecionado] = useState(null);
-        const [loadingAPI, setLoadingAPI] = useState(false);
         const [showRegras, setShowRegras] = useState(false);
         const [folhaTab, setFolhaTab] = useState("contabilidade");
         const [historicoFolha, setHistoricoFolha] = useState([]);
@@ -4541,47 +3925,6 @@ function doPost(e) {
           });
           setAnosFeriadosCarregados(prev => [...new Set([...prev, ...anosFaltando])]);
         }, [ano, anosFeriadosCarregados]);
-
-        const buscarColaboradores = useCallback(async ()=>{
-          setLoadingAPI(true);
-          setApiStatus({ok:null,msg:"Buscando colaboradores e atestados na planilha..."});
-          try {
-            const isoIni = toISO(dataIni);
-            const isoFim = toISO(dataFim);
-            const res = await fetch(`${GAS_URL}?acao=folha_dados&ini=${isoIni}&fim=${isoFim}`);
-            const json = await res.json();
-            if (json.ok) {
-              setColabAPI(json.colaboradores || []);
-              // Aplicar atestados automaticamente nas marcações
-              const novasMarc = { ...marcacoes };
-              (json.atestados || []).forEach(at => {
-                const nomeKey = at.nome; // vamos matching pelo nome normalizado no app
-                const dIni = new Date(at.inicio + "T12:00:00");
-                const dFim = new Date(at.fim + "T12:00:00");
-                const d = new Date(dIni);
-                while (d <= dFim) {
-                  const iso = toISO(d);
-                  if (!novasMarc[nomeKey]) novasMarc[nomeKey] = {};
-                  else novasMarc[nomeKey] = { ...novasMarc[nomeKey] };
-                  // Não sobrescreve férias/folgas marcadas manualmente
-                  if (!novasMarc[nomeKey][iso] || novasMarc[nomeKey][iso] === "atestado") {
-                    novasMarc[nomeKey][iso] = "atestado";
-                  }
-                  d.setDate(d.getDate()+1);
-                }
-              });
-              setMarcacoes(novasMarc);
-              const atMsg = (json.atestados || []).length > 0 ? ` · ${json.atestados.length} atestados aplicados` : "";
-              setApiStatus({ok:true, msg:`✅ ${json.colaboradores?.length || 0} colaboradores carregados${atMsg}.`});
-            } else {
-              setApiStatus({ok:false, msg:"Erro: " + (json.msg||"desconhecido")});
-            }
-          } catch(err) {
-            setApiStatus({ok:false, msg:"⚠️ Não foi possível acessar o Web App do GAS. Verifique se (1) a implantação foi atualizada com Nova Versão após o último deploy e (2) o acesso está como 'Qualquer pessoa'. Erro técnico: " + err.message});
-          } finally {
-            setLoadingAPI(false);
-          }
-        }, [GAS_URL, dataIni, dataFim, marcacoes]);
 
         // ---- Detectar período do CSV importado ----
         const csvPeriodoSugerido = (()=>{
@@ -5723,75 +5066,10 @@ function doPost(e) {
       // ============================================================
       // MÓDULO CONFIGURAÇÕES (admin only)
       // ============================================================
-      function ConfiguracoesPage({ gasUrl, setGasUrl, empresa, setEmpresa, responsavel, setResponsavel, passagemStr, setPassagemStr, copiedScript, setCopiedScript, empresaId, valorDSR, setValorDSR }) {
-        const [statusBkp, setStatusBkp] = React.useState(null);
-        const [loadingBkp, setLoadingBkp] = React.useState(false);
-        const realizarBackupSheets = async () => {
-          if (!gasUrl) { setStatusBkp({ok:false,msg:'Configure a URL do GAS primeiro.'}); return; }
-          setLoadingBkp(true); setStatusBkp({ok:null,msg:'⏳ Solicitando backup ao GAS (pode levar ~30s)...'});
-          try {
-            const resp = await fetch(gasUrl + '?acao=backup&empresa_id=' + encodeURIComponent(empresaId));
-            const json = await resp.json();
-            setStatusBkp(json.ok
-              ? {ok:true, msg:'✅ ' + json.msg}
-              : {ok:false, msg:'❌ ' + json.msg});
-          } catch(e) { setStatusBkp({ok:false,msg:'❌ Erro: '+e.message}); }
-          setLoadingBkp(false);
-        };
+      function ConfiguracoesPage({ empresa, setEmpresa, responsavel, setResponsavel, passagemStr, setPassagemStr, empresaId, valorDSR, setValorDSR }) {
         return (
           <div>
             <div style={{fontSize:20,fontWeight:800,color:C.pri,marginBottom:20}}>⚙️ Configurações</div>
-
-            <div style={s.card}>
-              <div style={s.cardTitle}>🔧 Google Apps Script (Web App)</div>
-              <div style={s.infoBox}>
-                Cole o script abaixo no <strong>Apps Script</strong> da sua planilha e publique como <strong>Web App</strong>
-                {' '}(Executar como: <em>Eu</em> · Acesso: <em>Qualquer pessoa</em>).{' '}
-                Sempre que atualizar o script, crie uma <strong>Nova versão</strong> antes de reimplantar.
-              </div>
-              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-                <button
-                  onClick={()=>{ navigator.clipboard.writeText(GAS_SCRIPT).then(()=>{ setCopiedScript(true); setTimeout(()=>setCopiedScript(false),2500); }); }}
-                  style={{...s.btnAcc,fontSize:12,padding:"7px 16px"}}
-                >
-                  {copiedScript?"✅ Copiado!":"📋 Copiar script completo"}
-                </button>
-              </div>
-              <pre style={{...s.codeBlock,maxHeight:380,overflowY:"auto",fontSize:11}}>{GAS_SCRIPT}</pre>
-              <div style={{marginTop:12}}>
-                <label style={s.label}>URL do Web App (cole aqui após implantar)</label>
-                <input
-                  style={s.input}
-                  value={gasUrl}
-                  onChange={e=>setGasUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                />
-              </div>
-            </div>
-
-            <div style={s.card}>
-              <div style={s.cardTitle}>📤 Backup para Google Sheets</div>
-              <div style={s.infoBox}>
-                Exporta <strong>todos os dados</strong> do banco (colaboradores, atestados, férias, adiantamentos, histórico salarial, candidatos, entrevistas e log de auditoria) para abas <strong>BKP_*</strong> na sua planilha do Google Sheets.
-                Execute após salvar o GAS atualizado.
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:12,marginTop:14}}>
-                <button
-                  onClick={realizarBackupSheets}
-                  disabled={loadingBkp}
-                  style={{...s.btnAcc,opacity:loadingBkp?0.6:1}}
-                >
-                  {loadingBkp?'⏳ Exportando...':'📤 Exportar agora para Sheets'}
-                </button>
-              </div>
-              {statusBkp&&(
-                <div style={{marginTop:10,padding:'9px 14px',borderRadius:6,fontSize:13,
-                  background:statusBkp.ok===true?'#D1FAE5':statusBkp.ok===false?'#FEE2E2':'#FEF3C7',
-                  color:statusBkp.ok===true?'#065F46':statusBkp.ok===false?'#991B1B':'#92400E'}}>
-                  {statusBkp.msg}
-                </div>
-              )}
-            </div>
 
             <div style={s.card}>
               <div style={s.cardTitle}>🏢 Empresa</div>
@@ -5835,10 +5113,7 @@ function doPost(e) {
       const [vtTab,setVtTab]=useState("import");
       // Novos estados
       const [feriadosDia,setFeriadosDia]=useState({});
-      const [gasUrl,setGasUrl]=useState(()=>localStorage.getItem("rh_gas_url")||"https://script.google.com/macros/s/AKfycbw2KhlWuitfSpPFO6Q6M6vHnK5MzaatvemNQ44Hr3zbyLT8xx9Es-tqSe_v5pi0xtAo/exec");
       const [valorDSR,setValorDSR]=useState(()=>localStorage.getItem("rh_valor_dsr")||"7,20");
-      const [gasStatus,setGasStatus]=useState(null);
-      const [copiedScript,setCopiedScript]=useState(false);
       const [copiedCsv,setCopiedCsv]=useState(false);
       const [colabAPI,setColabAPI]=useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_colab_api")||"[]");}catch(e){return [];} });
       const [empresaId,setEmpresaId]=useState(()=>localStorage.getItem("rh_empresa_id")||"cantina");
@@ -5853,7 +5128,6 @@ function doPost(e) {
       useEffect(()=>{ localStorage.setItem("rh_semanaFim",semanaFim); },[semanaFim]);
       useEffect(()=>{ localStorage.setItem("rh_employees",JSON.stringify(employees)); },[employees]);
       useEffect(()=>{ localStorage.setItem("rh_historico",JSON.stringify(historico)); },[historico]);
-      useEffect(()=>{ localStorage.setItem("rh_gas_url",gasUrl); },[gasUrl]);
       useEffect(()=>{ localStorage.setItem("rh_valor_dsr",valorDSR); },[valorDSR]);
       useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
       useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
@@ -6042,34 +5316,6 @@ function doPost(e) {
         });
       },[employees,semanaIni,semanaFim,valorPassagem]);
 
-      // Salvar na planilha via GAS web app
-      const salvarNaPlanilha=useCallback(async()=>{
-        if(!gasUrl.trim()){ setGasStatus({ok:false,msg:"Cole a URL do Web App antes de salvar."}); return; }
-        if(employees.length===0){ setGasStatus({ok:false,msg:"Nenhum colaborador carregado."}); return; }
-        const payload={
-          semanaIni,semanaFim,
-          employees:employees.map(emp=>({
-            nome:emp.nome,escala:emp.escala,
-            afastado:emp.afastado||false,
-            diasTrabalhados:getDias(emp),
-            valorCalculado:getDias(emp)*2*valorPassagem,
-            valorPago:getValorFinal(emp),
-          }))
-        };
-        setGasStatus({ok:null,msg:"Enviando dados..."});
-        try{
-          // no-cors: dados chegam ao GAS mas não conseguimos ler a resposta
-          await fetch(gasUrl,{
-            method:"POST",
-            mode:"no-cors",
-            body:JSON.stringify(payload),
-          });
-          setGasStatus({ok:true,msg:"✅ Dados enviados! Verifique a aba VT na planilha para confirmar o registro."});
-        }catch(err){
-          setGasStatus({ok:false,msg:`Erro: ${err.message}. Tente exportar o CSV manualmente.`});
-        }
-      },[gasUrl,employees,semanaIni,semanaFim,valorPassagem]);
-
       const printRecibo=useCallback(()=>{
         const vp=parseFloat(passagemStr.replace(",","."))||0;
         const fd=feriadosDia;
@@ -6186,7 +5432,7 @@ function doPost(e) {
         {k:"ponto",l:"📋 Ponto"},
         {k:"recibo",l:"🖨️ Recibo"},
         {k:"hist",l:"📚 Histórico"},
-        {k:"sheets",l:"💾 Salvar pagamento do VT"},
+        {k:"sheets",l:"📊 Exportar VT"},
       ];
 
       const vtPageContent=(
@@ -6587,13 +5833,13 @@ function doPost(e) {
             </div>
           )}
 
-          {/* ── TAB GOOGLE SHEETS ── */}
+          {/* ── TAB EXPORTAR VT ── */}
           {vtTab==="sheets"&&(
             <div>
               <div style={s.card}>
-                <div style={s.cardTitle}>💾 Salvar pagamento do VT</div>
+                <div style={s.cardTitle}>📊 Exportar pagamento do VT</div>
                 <div style={s.infoBox}>
-                  Salve o pagamento da semana diretamente na aba <strong>VT</strong> da planilha, ou exporte como CSV.
+                  Exporte os dados de pagamento do VT como arquivo CSV ou copie para a área de transferência.
                 </div>
                 {employees.length===0&&(
                   <div style={{fontSize:12,color:C.muted,marginBottom:14,padding:"10px 14px",background:C.rowAlt,borderRadius:7,border:`1px solid ${C.border}`}}>
@@ -6601,13 +5847,6 @@ function doPost(e) {
                   </div>
                 )}
                 <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:4}}>
-                  <button
-                    style={{...s.btnAcc,opacity:employees.length===0?0.5:1,fontSize:14,padding:"11px 24px"}}
-                    onClick={salvarNaPlanilha}
-                    disabled={employees.length===0}
-                  >
-                    💾 Salvar automaticamente
-                  </button>
                   <button style={{...s.btn,opacity:employees.length===0?0.5:1}} onClick={exportarCSV} disabled={employees.length===0}>
                     ⬇️ Baixar CSV
                   </button>
@@ -6615,13 +5854,8 @@ function doPost(e) {
                     {copiedCsv?"✅ Copiado!":"📋 Copiar dados"}
                   </button>
                 </div>
-                {gasStatus&&(
-                  <div style={{...(gasStatus.ok===true?s.successBox:gasStatus.ok===false?s.warnBox:s.infoBox),marginTop:14,marginBottom:0}}>
-                    {gasStatus.msg}
-                  </div>
-                )}
-                {copiedCsv&&!gasStatus&&(
-                  <div style={{...s.successBox,marginTop:12}}>✅ Dados copiados! Cole na aba VT da planilha (Ctrl+V).</div>
+                {copiedCsv&&(
+                  <div style={{...s.successBox,marginTop:12}}>✅ Dados copiados para a área de transferência.</div>
                 )}
               </div>
             </div>
@@ -6682,20 +5916,20 @@ function doPost(e) {
               ))}
             </nav>
             <main style={s.main}>
-              {page==="dashboard"&&<DashboardPage onNavegar={setPage} gasUrl={gasUrl} colabAPI={colabAPI} setColabAPI={setColabAPI} empresaId={empresaId}/>}
-              {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI} gasUrl={gasUrl}/>}
+              {page==="dashboard"&&<DashboardPage onNavegar={setPage} colabAPI={colabAPI} setColabAPI={setColabAPI} empresaId={empresaId}/>}
+              {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI}/>}
               {page==="vt"&&vtPageContent}
-              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} gasUrl={gasUrl} empresaId={empresaId} valorDSR={valorDSR}/>}
+              {page==="folha"&&<FolhaPage colabAPI={colabAPI} setColabAPI={setColabAPI} empresaId={empresaId} valorDSR={valorDSR}/>}
               {page==="orcamento"&&<OrcamentoPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ferias"&&<FeriasPage colabAPI={colabAPI} empresaId={empresaId}/>}
-              {page==="atestados"&&<AtestadosPage gasUrl={gasUrl} colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="atestados"&&<AtestadosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
-              {page==="recrutamento"&&<RecrutamentoPage gasUrl={gasUrl} empresaId={empresaId}/>}
+              {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
               {page==="termos"&&<TermosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
-              {page==="config"&&isAdmin&&<ConfiguracoesPage gasUrl={gasUrl} setGasUrl={setGasUrl} empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} copiedScript={copiedScript} setCopiedScript={setCopiedScript} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
+              {page==="config"&&isAdmin&&<ConfiguracoesPage empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
               {page==="ajuda"&&<AjudaPage/>}
             </main>
           </div>
