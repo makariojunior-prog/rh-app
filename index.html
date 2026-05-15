@@ -2930,6 +2930,9 @@ function doPost(e) {
         const [editandoE, setEditandoE]   = React.useState(null);
         const [resultado, setResultado]   = React.useState(null);
         const [logs, setLogs]             = React.useState([]);
+        const [configForm, setConfigForm] = React.useState(null);
+        const [novaVaga, setNovaVaga]     = React.useState('');
+        const [savingCfg, setSavingCfg]   = React.useState(false);
 
         const carregarCandidatos = async () => {
           if(!empresaId) return;
@@ -2945,7 +2948,7 @@ function doPost(e) {
           setEntrevistas(data||[]);
           setLoadingE(false);
         };
-        React.useEffect(()=>{ carregarCandidatos(); carregarEntrevistas(); carregarLogs(); },[empresaId]);
+        React.useEffect(()=>{ carregarCandidatos(); carregarEntrevistas(); carregarLogs(); carregarConfig(); },[empresaId]);
 
         const sincronizar = async () => {
           const url = gasUrl || localStorage.getItem('rh_gas_url') || '';
@@ -3049,6 +3052,19 @@ function doPost(e) {
           const {data} = await _supa.from('logs').select('*').eq('empresa_id',empresaId).order('criado_em',{ascending:false}).limit(100);
           setLogs(data||[]);
         };
+        const carregarConfig = async () => {
+          if(!empresaId) return;
+          const {data} = await _supa.from('formulario_config').select('*').eq('empresa_id',empresaId).single();
+          setConfigForm(data||{empresa_id:empresaId,vagas:[],formulario_aberto:true,mensagem_encerrado:''});
+        };
+        const salvarConfig = async () => {
+          if(!configForm) return;
+          setSavingCfg(true);
+          const {error} = await _supa.from('formulario_config').upsert({...configForm,empresa_id:empresaId,atualizado_em:new Date().toISOString()},{onConflict:'empresa_id'});
+          setSavingCfg(false);
+          setStatusMsg(error?{ok:false,msg:'❌ '+error.message}:{ok:true,msg:'✅ Configurações salvas! O formulário será atualizado automaticamente.'});
+          setTimeout(()=>setStatusMsg(null),4000);
+        };
         const registrarLog = async (acao,tabela,id,antes,depois,user) => {
           try {
             await _supa.from('logs').insert({empresa_id:empresaId,usuario:user,acao,tabela,registro_id:String(id),dados_antes:antes||null,dados_depois:depois||null});
@@ -3083,6 +3099,7 @@ function doPost(e) {
                 <button style={tabSt('curriculos')} onClick={()=>setAba('curriculos')}>📋 Currículos</button>
                 <button style={tabSt('entrevistas')} onClick={()=>setAba('entrevistas')}>📅 Entrevistas</button>
                 <button style={tabSt('log')} onClick={()=>{setAba('log');carregarLogs();}}>🔍 Log</button>
+                <button style={tabSt('formulario')} onClick={()=>{setAba('formulario');carregarConfig();}}>⚙️ Formulário</button>
               </div>
             </div>
 
@@ -3286,6 +3303,68 @@ function doPost(e) {
                       </tbody>
                     </table>
                   </div>
+                )}
+              </div>
+            )}
+
+            {aba==='formulario'&&(
+              <div>
+                <div style={{fontWeight:700,color:C.pri,marginBottom:16,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>⚙️ Configurações do Formulário Público</div>
+                {!configForm?<div style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</div>:(
+                <div>
+                  {/* Link */}
+                  <div style={{...s.card,marginBottom:14}}>
+                    <div style={{fontWeight:700,marginBottom:10,fontSize:13}}>🔗 Link do Formulário</div>
+                    <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                      <code style={{flex:1,minWidth:200,background:'#F3F4F6',padding:'10px 12px',borderRadius:6,fontSize:12,color:'#374151',wordBreak:'break-all'}}>https://vagas.cantinaemcasa.com</code>
+                      <button onClick={()=>{navigator.clipboard.writeText('https://vagas.cantinaemcasa.com');setStatusMsg({ok:true,msg:'✅ Link copiado!'});setTimeout(()=>setStatusMsg(null),2000);}} style={{...s.btnOutline,whiteSpace:'nowrap'}}>📋 Copiar</button>
+                      <a href="https://vagas.cantinaemcasa.com" target="_blank" rel="noreferrer" style={{...s.btnOutline,textDecoration:'none',whiteSpace:'nowrap'}}>🌐 Abrir</a>
+                    </div>
+                  </div>
+                  {/* Status aberto/fechado */}
+                  <div style={{...s.card,marginBottom:14}}>
+                    <div style={{fontWeight:700,marginBottom:12,fontSize:13}}>📢 Status do Formulário</div>
+                    <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+                      <div onClick={()=>setConfigForm(p=>({...p,formulario_aberto:!p.formulario_aberto}))}
+                        style={{width:48,height:26,borderRadius:13,background:configForm.formulario_aberto?'#16A34A':'#D1D5DB',cursor:'pointer',position:'relative',transition:'background 0.2s',flexShrink:0}}>
+                        <div style={{position:'absolute',top:3,left:configForm.formulario_aberto?22:3,width:20,height:20,borderRadius:'50%',background:'#fff',transition:'left 0.2s',boxShadow:'0 1px 3px rgba(0,0,0,0.3)'}}/>
+                      </div>
+                      <span style={{fontWeight:600,color:configForm.formulario_aberto?'#166534':'#991B1B'}}>
+                        {configForm.formulario_aberto?'✅ Aberto — aceitando inscrições':'🔴 Fechado — não aceitando inscrições'}
+                      </span>
+                    </div>
+                    {!configForm.formulario_aberto&&(
+                      <div>
+                        <label style={s.label}>Mensagem exibida ao candidato</label>
+                        <textarea value={configForm.mensagem_encerrado||''} onChange={e=>setConfigForm(p=>({...p,mensagem_encerrado:e.target.value}))} rows={3}
+                          placeholder="Ex: Não temos vagas abertas no momento. Acompanhe nossas redes sociais!"
+                          style={{...s.input,resize:'vertical'}}/>
+                      </div>
+                    )}
+                  </div>
+                  {/* Vagas */}
+                  <div style={{...s.card,marginBottom:14}}>
+                    <div style={{fontWeight:700,marginBottom:12,fontSize:13}}>💼 Vagas Disponíveis no Formulário</div>
+                    {(configForm.vagas||[]).length===0&&<div style={{fontSize:12,color:C.muted,marginBottom:10}}>Nenhuma vaga cadastrada.</div>}
+                    {(configForm.vagas||[]).map((v,i)=>(
+                      <div key={i} style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,background:'#F9FAFB',padding:'8px 10px',borderRadius:6,border:'1px solid '+C.border}}>
+                        <div style={{flex:1,fontSize:13,fontWeight:600}}>{v}</div>
+                        <div style={{display:'flex',gap:4}}>
+                          <button onClick={()=>{const a=[...(configForm.vagas||[])];if(i>0){[a[i-1],a[i]]=[a[i],a[i-1]];setConfigForm(p=>({...p,vagas:a}));}}} disabled={i===0} style={{...s.btnOutline,padding:'2px 7px',fontSize:12,opacity:i===0?0.3:1}} title="Mover para cima">↑</button>
+                          <button onClick={()=>{const a=[...(configForm.vagas||[])];if(i<a.length-1){[a[i],a[i+1]]=[a[i+1],a[i]];setConfigForm(p=>({...p,vagas:a}));}}} disabled={i===(configForm.vagas||[]).length-1} style={{...s.btnOutline,padding:'2px 7px',fontSize:12,opacity:i===(configForm.vagas||[]).length-1?0.3:1}} title="Mover para baixo">↓</button>
+                          <button onClick={()=>setConfigForm(p=>({...p,vagas:(p.vagas||[]).filter((_,j)=>j!==i)}))} style={{...s.btnOutline,padding:'2px 8px',fontSize:12,color:'#991B1B',borderColor:'#FCA5A5'}} title="Remover vaga">✕</button>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{display:'flex',gap:8,marginTop:10}}>
+                      <input value={novaVaga} onChange={e=>setNovaVaga(e.target.value)}
+                        onKeyDown={e=>{if(e.key==='Enter'&&novaVaga.trim()){setConfigForm(p=>({...p,vagas:[...(p.vagas||[]),novaVaga.trim()]}));setNovaVaga('');}}}
+                        placeholder="Nome da nova vaga..." style={{...s.input,flex:1,marginBottom:0}}/>
+                      <button onClick={()=>{if(novaVaga.trim()){setConfigForm(p=>({...p,vagas:[...(p.vagas||[]),novaVaga.trim()]}));setNovaVaga('');}}} style={s.btn}>+ Adicionar</button>
+                    </div>
+                  </div>
+                  <button onClick={salvarConfig} disabled={savingCfg} style={s.btn}>{savingCfg?'⏳ Salvando...':'💾 Salvar Configurações'}</button>
+                </div>
                 )}
               </div>
             )}
