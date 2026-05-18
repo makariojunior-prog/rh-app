@@ -966,12 +966,25 @@
         const [senha, setSenha] = useState('');
         const [loading, setLoading] = useState(false);
         const [erro, setErro] = useState(null);
+        const [info, setInfo] = useState(null);
+        const [modoReset, setModoReset] = useState(false);
 
         const entrar = async () => {
           if(!email.trim()||!senha.trim()){ setErro('Preencha email e senha.'); return; }
           setLoading(true); setErro(null);
           const {error} = await _supa.auth.signInWithPassword({email:email.trim(), password:senha});
           if(error) setErro('Email ou senha incorretos.');
+          setLoading(false);
+        };
+
+        const enviarReset = async () => {
+          if(!email.trim()){ setErro('Informe o email para receber o link de redefinição.'); return; }
+          setLoading(true); setErro(null); setInfo(null);
+          const {error} = await _supa.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: window.location.origin + window.location.pathname
+          });
+          if(error) setErro('❌ '+error.message);
+          else setInfo('✅ Link de redefinição enviado para '+email.trim()+'. Verifique sua caixa de entrada (e o spam).');
           setLoading(false);
         };
 
@@ -984,18 +997,74 @@
                 <div style={{fontSize:13,color:C.muted}}>Lumar Alimentos</div>
               </div>
               {erro && <div style={{background:'#FEE2E2',color:'#991B1B',borderRadius:8,padding:'10px 14px',fontSize:13,marginBottom:16}}>{erro}</div>}
+              {info && <div style={{background:'#DCFCE7',color:'#166534',borderRadius:8,padding:'10px 14px',fontSize:13,marginBottom:16}}>{info}</div>}
               <div style={{marginBottom:14}}>
                 <label style={s.label}>Email</label>
                 <input style={s.input} type="email" placeholder="seu@email.com" value={email}
-                  onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()} autoFocus/>
+                  onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&(modoReset?enviarReset():entrar())} autoFocus/>
               </div>
-              <div style={{marginBottom:24}}>
-                <label style={s.label}>Senha</label>
-                <input style={s.input} type="password" placeholder="••••••••" value={senha}
-                  onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()}/>
+              {!modoReset && (
+                <div style={{marginBottom:8}}>
+                  <label style={s.label}>Senha</label>
+                  <input style={s.input} type="password" placeholder="••••••••" value={senha}
+                    onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()}/>
+                </div>
+              )}
+              <div style={{textAlign:'right',marginBottom:24}}>
+                <button onClick={()=>{setModoReset(!modoReset);setErro(null);setInfo(null);}} style={{background:'none',border:'none',color:C.pri,fontSize:12,cursor:'pointer',textDecoration:'underline',padding:0}}>
+                  {modoReset ? '← Voltar ao login' : 'Esqueci minha senha'}
+                </button>
               </div>
-              <button onClick={entrar} disabled={loading} style={{...s.btn,width:'100%',justifyContent:'center',padding:'11px',fontSize:14}}>
-                {loading ? 'Entrando...' : 'Entrar'}
+              {modoReset ? (
+                <button onClick={enviarReset} disabled={loading} style={{...s.btnAcc,width:'100%',justifyContent:'center',padding:'11px',fontSize:14}}>
+                  {loading ? 'Enviando...' : '📧 Enviar link de redefinição'}
+                </button>
+              ) : (
+                <button onClick={entrar} disabled={loading} style={{...s.btn,width:'100%',justifyContent:'center',padding:'11px',fontSize:14}}>
+                  {loading ? 'Entrando...' : 'Entrar'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // Página exibida quando o usuário entra via link de "recovery" (Supabase auth state PASSWORD_RECOVERY).
+      // Permite definir uma nova senha imediatamente.
+      function NovaSenhaPage({ onPronto }){
+        const [novaSenha, setNovaSenha] = useState('');
+        const [conf, setConf] = useState('');
+        const [loading, setLoading] = useState(false);
+        const [erro, setErro] = useState(null);
+        const salvar = async () => {
+          if(novaSenha.length < 6){ setErro('A senha deve ter no mínimo 6 caracteres.'); return; }
+          if(novaSenha !== conf){ setErro('As duas senhas precisam ser iguais.'); return; }
+          setLoading(true); setErro(null);
+          const {error} = await _supa.auth.updateUser({password: novaSenha});
+          if(error){ setErro('❌ '+error.message); setLoading(false); return; }
+          await _supa.auth.signOut();
+          setLoading(false);
+          onPronto?.();
+        };
+        return (
+          <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div style={{background:C.card,borderRadius:16,padding:'40px 44px',width:420,boxShadow:'0 8px 32px rgba(0,0,0,0.12)',border:`1px solid ${C.border}`}}>
+              <div style={{textAlign:'center',marginBottom:24}}>
+                <div style={{fontSize:30,marginBottom:8}}>🔑</div>
+                <div style={{fontSize:18,fontWeight:800,color:C.pri,marginBottom:4}}>Definir nova senha</div>
+                <div style={{fontSize:12,color:C.muted}}>Você acessou via link de redefinição. Crie sua nova senha abaixo.</div>
+              </div>
+              {erro && <div style={{background:'#FEE2E2',color:'#991B1B',borderRadius:8,padding:'10px 14px',fontSize:13,marginBottom:14}}>{erro}</div>}
+              <div style={{marginBottom:14}}>
+                <label style={s.label}>Nova senha</label>
+                <input style={s.input} type="password" value={novaSenha} onChange={e=>setNovaSenha(e.target.value)} autoFocus/>
+              </div>
+              <div style={{marginBottom:20}}>
+                <label style={s.label}>Confirmar nova senha</label>
+                <input style={s.input} type="password" value={conf} onChange={e=>setConf(e.target.value)} onKeyDown={e=>e.key==='Enter'&&salvar()}/>
+              </div>
+              <button onClick={salvar} disabled={loading} style={{...s.btn,width:'100%',justifyContent:'center',padding:'11px',fontSize:14}}>
+                {loading ? 'Salvando...' : '💾 Salvar nova senha'}
               </button>
             </div>
           </div>
@@ -1093,6 +1162,7 @@
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
           bancoNome:"", bancoCodigo:"", bancoTipoConta:"", bancoAgencia:"", bancoConta:"",
           salario:"", transporte:"", periculosidade:false,
+          jornada:"SEG-SAB",
           contaSalario:false, aditivoContrato:false, usoArmario:false,
           lgpd:false, imagem:false, camera:false, epiUniforme:false,
           acompanhamentoProducao:false, usoCelular:false, usoVeiculo:false,
@@ -1110,6 +1180,7 @@
           bancoAgencia:c.banco_agencia||'', bancoConta:c.banco_conta||'',
           salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
           transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
+          jornada:c.jornada||'SEG-SAB',
           contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
           usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
           camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -1198,6 +1269,7 @@
             bancoAgencia:c.banco_agencia||'', bancoConta:c.banco_conta||'',
             salario:String(c.salario||''), transporte:String(c.transporte||''),
             periculosidade:!!c.periculosidade,
+            jornada:c.jornada||'SEG-SAB',
             contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
             usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
             camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -1240,6 +1312,7 @@
               inss:calcINSS(parseFloat(String(form.salario).replace(",","."))||0),
               fgts:calcFGTS(parseFloat(String(form.salario).replace(",","."))||0),
               transporte:parseFloat(String(form.transporte).replace(",","."))||0,
+              jornada:form.jornada||'SEG-SAB',
               periculosidade:!!form.periculosidade,
               periculosidade_valor:form.periculosidade?calcPericulosidade(parseFloat(String(form.salario).replace(",","."))||0):0,
               conta_salario:!!form.contaSalario, aditivo_contrato:!!form.aditivoContrato,
@@ -1407,6 +1480,14 @@
                 <CampoForm label="Data de Encerramento" campo="encerramento" type="date" form={form} setForm={setForm} hint={form.encerramento?"⚠️ Preencher esta data torna o colaborador inativo":undefined}/>
                 <CampoForm label="Fim Experiência 30d" campo="experiencia30" type="date" form={form} setForm={setForm}/>
                 <CampoForm label="Fim Experiência 90d" campo="experiencia90" type="date" form={form} setForm={setForm}/>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Jornada de Trabalho</label>
+                  <select style={s.input} value={form.jornada||'SEG-SAB'} onChange={e=>setForm(p=>({...p,jornada:e.target.value}))}>
+                    <option value="SEG-SAB">Seg → Sáb (6x1)</option>
+                    <option value="SEG-SEX">Seg → Sex (5x2 — folga sábado)</option>
+                  </select>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Define se o sábado conta como dia útil para folha/ponto.</div>
+                </div>
               </div>
             </div>
 
@@ -1785,21 +1866,95 @@
                 storage: { getItem:()=>null, setItem:()=>{}, removeItem:()=>{} }
               }
             });
-            const {data, error: signUpErr} = await tmpCliente.auth.signUp({
-              email: form.email.trim(), password: form.senha
-            });
-            if(signUpErr) throw new Error('Erro ao criar conta: ' + signUpErr.message);
-            if(!data?.user) throw new Error('Este email já está cadastrado no sistema. Use um email diferente.');
+            const emailLimpo = form.email.trim().toLowerCase();
             const pagsFinal = form.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : form.paginas;
-            const {error: perfilErr} = await _supa.from('perfis').insert({
-              id: data.user.id, nome: form.nome.trim(), email: form.email.trim(),
-              empresa_id: empresaId, role: form.role, paginas: pagsFinal
+            let userId = null;
+            const {data, error: signUpErr} = await tmpCliente.auth.signUp({
+              email: emailLimpo, password: form.senha
             });
-            if(perfilErr) throw new Error('Conta criada, mas erro ao salvar permissões: ' + perfilErr.message);
-            setStatus({ok:true, msg:`✅ Acesso criado!\n📧 Email: ${form.email}\n🔑 Senha: ${form.senha}`});
+            if(signUpErr){
+              // Caso típico: usuário já existe no Auth (ex: foi removido apenas da tabela perfis).
+              // Tentamos autenticar com a senha informada para recuperar o id e recriar o perfil.
+              const {data:loginData, error:loginErr} = await tmpCliente.auth.signInWithPassword({
+                email: emailLimpo, password: form.senha
+              });
+              if(loginErr || !loginData?.user){
+                throw new Error(
+                  'Este email já existe no sistema de autenticação, mas a senha informada não confere. '+
+                  'Use a senha original do usuário OU peça para ele clicar em "Esqueci minha senha" na tela de login e tente novamente com a nova senha.'
+                );
+              }
+              userId = loginData.user.id;
+              await tmpCliente.auth.signOut();
+            } else if(data?.user){
+              userId = data.user.id;
+            } else {
+              // signUp sem erro mas sem user: significa email já registrado (Supabase devolve user:null por segurança).
+              // Tenta autenticar com a senha enviada para reaproveitar conta órfã.
+              const {data:loginData, error:loginErr} = await tmpCliente.auth.signInWithPassword({
+                email: emailLimpo, password: form.senha
+              });
+              if(loginErr || !loginData?.user){
+                throw new Error(
+                  'Este email já existe no sistema de autenticação, mas não foi possível validar com a senha informada. '+
+                  'Use a senha real do usuário, ou peça que ele use "Esqueci minha senha" na tela de login.'
+                );
+              }
+              userId = loginData.user.id;
+              await tmpCliente.auth.signOut();
+            }
+            if(!userId) throw new Error('Não foi possível obter o ID do usuário.');
+            // upsert no perfil (cria se não existir; se existir, atualiza dados)
+            const {error: perfilErr} = await _supa.from('perfis').upsert({
+              id: userId, nome: form.nome.trim(), email: emailLimpo,
+              empresa_id: empresaId, role: form.role, paginas: pagsFinal
+            }, {onConflict:'id'});
+            if(perfilErr) throw new Error('Conta validada, mas erro ao salvar permissões: ' + perfilErr.message);
+            setStatus({ok:true, msg:`✅ Acesso criado/vinculado!\n📧 Email: ${emailLimpo}\n🔑 Senha: ${form.senha}`});
             setCriando(false); setForm(FORM_VAZIO); carregar();
           } catch(e) {
             setStatus({ok:false, msg:'❌ ' + e.message});
+          }
+          setLoading(false);
+        };
+
+        // Envia link de redefinição de senha por email. Funciona com chave anon.
+        const resetarSenha = async (p) => {
+          if(!await confirmar(`Enviar link de redefinição de senha para ${p.email}?\n\nO usuário receberá um email para criar uma nova senha.`,'Resetar senha')) return;
+          setLoading(true); setStatus(null);
+          try {
+            const {error} = await _supa.auth.resetPasswordForEmail(p.email, {
+              redirectTo: window.location.origin + window.location.pathname
+            });
+            if(error) throw error;
+            setStatus({ok:true, msg:`✅ Link de redefinição enviado para ${p.email}.`});
+          } catch(e) {
+            setStatus({ok:false, msg:'❌ '+e.message});
+          }
+          setLoading(false);
+        };
+
+        // Permite ao próprio usuário logado trocar a sua senha (Supabase exige usuário autenticado).
+        const alterarSenhaPropria = async () => {
+          if(!editando) return;
+          if(editando.id !== adminPerfil?.id){
+            setStatus({ok:false,msg:'⚠️ Você só pode trocar a sua própria senha. Para resetar a senha de outro usuário, use o botão "Resetar senha" na listagem.'});
+            return;
+          }
+          const novaSenha = (editando.novaSenha||'').trim();
+          if(novaSenha.length < 6){
+            setStatus({ok:false,msg:'A nova senha deve ter pelo menos 6 caracteres.'});
+            return;
+          }
+          if(!await confirmar('Confirmar alteração da sua senha? Você precisará fazer login novamente.','Alterar Senha')) return;
+          setLoading(true); setStatus(null);
+          try {
+            const {error} = await _supa.auth.updateUser({password: novaSenha});
+            if(error) throw error;
+            setStatus({ok:true,msg:'✅ Sua senha foi alterada. Faça login novamente.'});
+            setEditando(p=>({...p,novaSenha:''}));
+          } catch(e) {
+            setStatus({ok:false,msg:'❌ '+e.message});
           }
           setLoading(false);
         };
@@ -1875,6 +2030,34 @@
                 <button onClick={()=>setEditando(null)} style={s.btnOutline}>Cancelar</button>
               </div>
             </div>
+
+            {/* ----- Seção de senha ----- */}
+            <div style={{...s.card,borderLeft:`4px solid ${C.acc}`}}>
+              <div style={{fontWeight:700,color:C.pri,marginBottom:6,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>🔑 Senha do Usuário</div>
+              {editando.id === adminPerfil?.id ? (
+                <>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Como você está editando o seu próprio acesso, pode definir uma nova senha aqui. Após salvar, será necessário fazer login novamente.</div>
+                  <div style={{marginBottom:12}}>
+                    <label style={s.label}>Nova senha (mínimo 6 caracteres)</label>
+                    <input style={s.input} type="text" autoComplete="new-password" placeholder="Digite a nova senha"
+                      value={editando.novaSenha||''}
+                      onChange={e=>setEditando(p=>({...p,novaSenha:e.target.value}))}/>
+                  </div>
+                  <button onClick={alterarSenhaPropria} style={{...s.btnAcc}} disabled={loading||!(editando.novaSenha||'').trim()}>
+                    {loading?'Alterando...':'🔑 Alterar minha senha'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:10}}>
+                    Por questões de segurança do Supabase Auth, não é possível alterar a senha de outro usuário diretamente. Envie um link de redefinição para o email cadastrado — o usuário cria a nova senha em seguida.
+                  </div>
+                  <button onClick={()=>resetarSenha(editando)} style={{...s.btnAcc}} disabled={loading}>
+                    {loading?'Enviando...':'📧 Enviar link de redefinição por email'}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         );
 
@@ -1899,6 +2082,9 @@
                   <label style={s.label}>Senha temporária *</label>
                   <input style={s.input} placeholder="Mínimo 6 caracteres" value={form.senha} onChange={e=>setForm(p=>({...p,senha:e.target.value}))}/>
                 </div>
+              </div>
+              <div style={{...s.infoBox,marginBottom:14,fontSize:12}}>
+                💡 <strong>Conta antiga / removida?</strong> Se o email já existia no sistema antes e foi removido só da lista de acessos, informe a <strong>senha original</strong> do usuário aqui — o sistema vai revalidar e recriar o perfil. Se não souber a senha, crie o acesso com qualquer senha e use o botão "🔑 Reset senha" na listagem para enviar um link de redefinição por email.
               </div>
               <div style={{marginBottom:16}}>
                 <label style={s.label}>Perfil de acesso</label>
@@ -1965,6 +2151,7 @@
                           </td>
                           <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
                             <button onClick={()=>setEditando({...p})} style={{...s.btnOutline,fontSize:11,padding:'4px 10px',marginRight:6}}>✏️ Editar</button>
+                            {p.id!==adminPerfil?.id&&<button onClick={()=>resetarSenha(p)} style={{background:'none',border:`1px solid ${C.acc}`,color:C.acc,borderRadius:5,fontSize:11,padding:'4px 10px',cursor:'pointer',marginRight:6}} title="Enviar link de redefinição de senha por email">🔑 Reset senha</button>}
                             {p.id!==adminPerfil?.id&&<button onClick={()=>removerAcesso(p)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'4px 10px',cursor:'pointer'}}>Remover</button>}
                           </td>
                         </tr>
@@ -3913,18 +4100,21 @@
         useEffect(()=>{ localStorage.setItem("rh_anos_feriados", JSON.stringify(anosFeriadosCarregados)); }, [anosFeriadosCarregados]);
 
         useEffect(()=>{
+          // Garante que feriados nacionais do ano e ano-1 SEMPRE estejam na lista,
+          // independente da flag de "anos carregados". Evita situações em que um feriado
+          // nacional fica de fora (ex: Terça de Carnaval) e cai como falta indevida.
           const anosPrecisos = [ano-1, ano];
-          const anosFaltando = anosPrecisos.filter(y => !anosFeriadosCarregados.includes(y));
-          if (anosFaltando.length === 0) return;
           const novosFeriados = {};
-          anosFaltando.forEach(y => Object.assign(novosFeriados, calcularFeriadosBR(y)));
+          anosPrecisos.forEach(y => Object.assign(novosFeriados, calcularFeriadosBR(y)));
           setFeriados(prev => {
             const set = new Set(prev);
-            Object.keys(novosFeriados).forEach(iso => set.add(iso));
-            return Array.from(set).sort();
+            let changed = false;
+            Object.keys(novosFeriados).forEach(iso => { if(!set.has(iso)){ set.add(iso); changed = true; } });
+            return changed ? Array.from(set).sort() : prev;
           });
-          setAnosFeriadosCarregados(prev => [...new Set([...prev, ...anosFaltando])]);
-        }, [ano, anosFeriadosCarregados]);
+          const anosFaltando = anosPrecisos.filter(y => !anosFeriadosCarregados.includes(y));
+          if(anosFaltando.length) setAnosFeriadosCarregados(prev => [...new Set([...prev, ...anosFaltando])]);
+        }, [ano]);
 
         // ---- Detectar período do CSV importado ----
         const csvPeriodoSugerido = (()=>{
@@ -3979,13 +4169,25 @@
           return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
         };
 
-        const analisarDia = (nomeKey, iso, diaDados)=>{
+        const analisarDia = (nomeKey, iso, diaDados, colabInfo)=>{
           // nomeKey vem normalizado para buscar em marcacoes
           const marc = marcacoes[nomeKey]?.[iso];
           const isFeriado = feriados.includes(iso);
           const horarioValido = (h)=> h && h !== "" && h !== "00:00";
           const temPrevisao = diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2));
           const temBatida = diaDados && (horarioValido(diaDados.real.b1) || horarioValido(diaDados.real.b2) || horarioValido(diaDados.real.b3) || horarioValido(diaDados.real.b4));
+          // Jornada do colaborador (SEG-SEX = 5x2 não trabalha sábado, SEG-SAB = 6x1 padrão).
+          // Se não houver info, assume SEG-SAB (todos os dias úteis previstos contam).
+          const jornada = colabInfo?.jornada || "SEG-SAB";
+          // Dia da semana (0=Dom..6=Sáb). Usar T12:00:00 para evitar offset de timezone.
+          const dow = new Date(iso + "T12:00:00").getDay();
+          // Domingo nunca conta como dia previsto (afasta qualquer batida residual ou previsão fantasma).
+          if (dow === 0) return {status:"nao_previsto", diaUtilPrevisto: false};
+          // Se jornada é SEG-SEX e dia é sábado, NUNCA gera falta — fora da escala.
+          if (jornada === "SEG-SEX" && dow === 6) {
+            if (temBatida) return {status:"trabalhou", diaUtilPrevisto: false};
+            return {status:"nao_previsto", diaUtilPrevisto: false};
+          }
           if (marc === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (marc === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
           if (marc === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
@@ -4012,7 +4214,7 @@
 
           datasPeriodo.forEach(iso=>{
             const diaDados = dados?.dias?.[iso];
-            const a = analisarDia(nomeKey, iso, diaDados);
+            const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
             if (a.status === "trabalhou") {
               diasTrabalhados++;
               if (diaDados?.horaExtra) horasExtrasMin += hhmmToMin(diaDados.horaExtra);
@@ -4051,7 +4253,7 @@
             const isosSemana = semanasMap[semKey];
             let temFaltaSemana = false;
             isosSemana.forEach(iso=>{
-              const a = analisarDia(nomeKey, iso, dados?.dias?.[iso]);
+              const a = analisarDia(nomeKey, iso, dados?.dias?.[iso], colabInfo);
               if (a.status === "falta") temFaltaSemana = true;
             });
             if (temFaltaSemana) {
@@ -4080,7 +4282,7 @@
 
             // Conta caju só se já saiu da experiência E está presente/atestado/férias (não conta falta)
             if (!emExperiencia && temPrev) {
-              const a = analisarDia(nomeKey, iso, diaDados);
+              const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
               if (a.status === "trabalhou" || a.status === "atestado" || a.status === "ferias") {
                 cajuDias++;
               }
@@ -4140,6 +4342,7 @@
               experiencia90: c.experiencia90 || "",
               admissao: c.admissao || "",
               nascimento: c.nascimento || "",
+              jornada: c.jornada || "SEG-SAB",
               fonteCadastro: true, fonteCSV: false, dadosCSV: null
             });
           });
@@ -4154,6 +4357,7 @@
               mapa.set(nomeKey, {
                 nomeKey, nome: nomeCSV, funcao:"", setor:"", salario:0,
                 transporte: 0, experiencia30:"", experiencia90:"", admissao:"",
+                jornada: "SEG-SAB",
                 fonteCadastro:false, fonteCSV:true, dadosCSV: folhaData[nomeCSV]
               });
             }
@@ -4717,7 +4921,7 @@
                 onMarcar={(iso,valor)=>setMarcacao(colabSelecionado,iso,valor)}
                 onAjustar={(campo,val)=>setAjuste(colabSelecionado,campo,val)}
                 onClose={()=>setColabSelecionado(null)}
-                analisarDia={(iso,diaDados)=>analisarDia(colabSelecionado,iso,diaDados)}
+                analisarDia={(iso,diaDados)=>analisarDia(colabSelecionado,iso,diaDados,colabInfoAtual)}
               />
             )}
 
@@ -4795,7 +4999,11 @@
               <div style={{background:C.pri,color:"#fff",padding:"18px 22px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"sticky",top:0,zIndex:10}}>
                 <div>
                   <div style={{fontSize:16,fontWeight:800}}>{colab.nome}</div>
-                  {colab.funcao&&<div style={{fontSize:11,opacity:0.7,marginTop:2}}>{colab.funcao}{colab.setor?` · ${colab.setor}`:""}</div>}
+                  {(colab.funcao||colab.setor||colab.jornada)&&(
+                    <div style={{fontSize:11,opacity:0.7,marginTop:2}}>
+                      {[colab.funcao, colab.setor, colab.jornada==='SEG-SEX'?'5x2 (Seg→Sex)':colab.jornada==='SEG-SAB'?'6x1 (Seg→Sáb)':null].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
                 </div>
                 <button onClick={onClose} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.3)",color:"#fff",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:13}}>✕ Fechar</button>
               </div>
@@ -5142,6 +5350,7 @@
               experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'',
               salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
               transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
+              jornada:c.jornada||'SEG-SAB',
               contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
               usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
               camera:!!c.camera, epiUniforme:!!c.epi_uniforme,
@@ -5171,12 +5380,20 @@
         setLoadingAuth(false);
       },[]);
 
+      const [modoRecovery, setModoRecovery] = useState(false);
       useEffect(()=>{
         _supa.auth.getSession().then(({data:{session}})=>{
           if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
           else setLoadingAuth(false);
         });
         const {data:{subscription}} = _supa.auth.onAuthStateChange((event,session)=>{
+          if(event === 'PASSWORD_RECOVERY'){
+            // Link de redefinição de senha — exibe NovaSenhaPage.
+            setModoRecovery(true);
+            if(session?.user) setUsuario(session.user);
+            setLoadingAuth(false);
+            return;
+          }
           if(session?.user){ setUsuario(session.user); carregarPerfil(session.user.id); }
           else { setUsuario(null); setPerfil(null); setLoadingAuth(false); }
         });
@@ -5217,6 +5434,10 @@
         const {data,error}=await _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',semanaIni).lte('data',semanaFim).order('colaborador_nome').order('data');
         if(error){ setCsvStatus({ok:false,msg:"❌ "+error.message}); return; }
         if(!data||data.length===0){ setCsvStatus({ok:false,msg:"Nenhum registro encontrado para este período no Banco de Ponto. Importe o CSV no módulo 📋 Banco de Ponto primeiro."}); return; }
+        // Mapa de jornada cadastrada no perfil do colaborador (chave: nome normalizado)
+        const normNome = n => String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+        const jornadaPorNome = {};
+        (colabAPI||[]).forEach(c=>{ if(c?.nome) jornadaPorNome[normNome(c.nome)] = c.jornada || 'SEG-SAB'; });
         const empMap={};
         data.forEach(r=>{
           const dt=new Date(r.data+'T12:00:00');
@@ -5227,14 +5448,20 @@
           empMap[r.colaborador_nome].presente[diaKey]=!!temBatida;
           if(diaKey==='SAB'&&temBatida) empMap[r.colaborador_nome].trabalhouSab=true;
         });
-        const emps=Object.values(empMap).map((e,i)=>({
-          id:i+1,cracha:e.cracha,nome:e.nome,
-          escala:e.trabalhouSab?"SEG-SAB":"SEG-SEX",
-          presente:e.presente,afastado:false,valorPago:""
-        }));
+        const emps=Object.values(empMap).map((e,i)=>{
+          // Prioriza a jornada cadastrada no perfil do colaborador (Colaboradores > Jornada de Trabalho).
+          // Apenas se não houver cadastro é que cai no fallback de auto-detecção pelo sábado.
+          const jornadaCadastro = jornadaPorNome[normNome(e.nome)];
+          const escalaFinal = jornadaCadastro || (e.trabalhouSab ? "SEG-SAB" : "SEG-SEX");
+          return {
+            id:i+1,cracha:e.cracha,nome:e.nome,
+            escala: escalaFinal,
+            presente:e.presente,afastado:false,valorPago:""
+          };
+        });
         setEmployees(emps);
         setCsvStatus({ok:true,msg:`✅ ${emps.length} colaboradores carregados do Banco de Ponto. Período: ${fmtDate(semanaIni)} a ${fmtDate(semanaFim)}.`});
-      },[semanaIni,semanaFim,empresaId]);
+      },[semanaIni,semanaFim,empresaId,colabAPI]);
 
       const carregarDoHistorico=useCallback((entrada)=>{
         setEmployees(entrada.employees.map(e=>({afastado:false,valorPago:"",...e})));
@@ -5252,6 +5479,15 @@
             const bytes=new Uint8Array(e.target.result);
             const text=new TextDecoder("iso-8859-1").decode(bytes);
             const {employees:emps,semanaIni:ini,semanaFim:fim}=parseCSV(text);
+            // Sobrescreve a escala auto-detectada pelo CSV com a jornada cadastrada no perfil do colaborador,
+            // quando disponível. Evita marcar como SEG-SEX um colaborador SEG-SAB que faltou no sábado.
+            const normNome = n => String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+            const jornadaPorNome = {};
+            (colabAPI||[]).forEach(c=>{ if(c?.nome) jornadaPorNome[normNome(c.nome)] = c.jornada || 'SEG-SAB'; });
+            emps.forEach(emp => {
+              const j = jornadaPorNome[normNome(emp.nome)];
+              if(j) emp.escala = j;
+            });
             setEmployees(emps.map((emp,i)=>({...emp,id:i+1})));
             setSemanaIni(ini);
             setSemanaFim(fim);
@@ -5273,7 +5509,7 @@
           }
         };
         reader.readAsArrayBuffer(file);
-      },[empresaId]);
+      },[empresaId,colabAPI]);
 
       const onDrop=useCallback((e)=>{ e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); },[handleFile]);
 
@@ -5889,6 +6125,7 @@
       ].filter(n=>paginasPermitidas.includes(n.k));
 
       if(loadingAuth) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg,color:C.muted,fontSize:14}}>Carregando...</div>;
+      if(modoRecovery) return <NovaSenhaPage onPronto={()=>{setModoRecovery(false);}}/>;
       if(!usuario) return <LoginPage/>;
       if(!perfil) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg}}><div style={{textAlign:'center'}}><div style={{fontSize:40,marginBottom:16}}>🚫</div><div style={{fontWeight:700,fontSize:16,color:C.pri,marginBottom:8}}>Acesso não autorizado</div><div style={{color:C.muted,fontSize:13,marginBottom:20}}>Seu usuário não tem um perfil configurado.<br/>Solicite ao administrador do sistema.</div><button onClick={()=>_supa.auth.signOut()} style={s.btnOutline}>Sair</button></div></div>;
 
