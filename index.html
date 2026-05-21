@@ -2173,7 +2173,7 @@
           if(!ini||!fim) return 1;
           return Math.max(1, Math.round((new Date(fim+'T12:00:00')-new Date(ini+'T12:00:00'))/86400000)+1);
         };
-        const VAZIO = {colaboradorNome:'',setor:'',cid:'',inicio:'',fim:'',obs:''};
+        const VAZIO = {colaboradorNome:'',setor:'',cid:'',inicio:'',fim:'',obs:'',periodo:'dia_todo'};
         const hoje = new Date();
         const priDia = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
         const ultDia = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).toISOString().slice(0,10);
@@ -2206,6 +2206,9 @@
           if(form.fim < form.inicio){
             setStatus({ok:false,msg:'A data de fim não pode ser anterior ao início.'}); return;
           }
+          if(form.periodo !== 'dia_todo' && form.inicio !== form.fim){
+            setStatus({ok:false,msg:'Atestado de meio período deve ter início e fim no mesmo dia.'}); return;
+          }
           setLoading(true);
           const dias = calcDias(form.inicio,form.fim);
           const {error} = await _supa.from('atestados').insert({
@@ -2214,7 +2217,8 @@
             colaborador_nome: form.colaboradorNome.trim(),
             setor: form.setor||null, cid: form.cid||null,
             inicio: form.inicio, fim: form.fim, dias,
-            obs: form.obs||null, origem: 'manual'
+            obs: form.obs||null, origem: 'manual',
+            periodo: form.periodo||'dia_todo'
           });
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
           else { setStatus({ok:true,msg:'✅ Atestado incluído!'}); setMostrarForm(false); setForm(VAZIO); carregar(); }
@@ -2228,7 +2232,7 @@
         };
 
         const filtrados = lista.filter(a=>!filtroColab||(a.colaborador_nome||'').toLowerCase().includes(filtroColab.toLowerCase()));
-        const totalDias = filtrados.reduce((acc,a)=>acc+(a.dias||0),0);
+        const totalDias = filtrados.reduce((acc,a)=>acc+(a.periodo&&a.periodo!=='dia_todo'?0.5:(a.dias||0)),0);
         const colab = [...new Set(filtrados.map(a=>a.colaborador_nome))].length;
 
         return (
@@ -2280,8 +2284,18 @@
                     <input type="date" value={form.fim} onChange={e=>setForm(p=>({...p,fim:e.target.value}))} style={s.input}/>
                   </div>
                   <div style={{marginBottom:14}}>
+                    <label style={s.label}>Período</label>
+                    <select value={form.periodo} onChange={e=>setForm(p=>({...p,periodo:e.target.value}))} style={{...s.input,width:"100%"}}>
+                      <option value="dia_todo">🌕 Dia todo</option>
+                      <option value="manha">🌅 Somente manhã</option>
+                      <option value="tarde">🌇 Somente tarde</option>
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14}}>
                     <label style={s.label}>Duração</label>
-                    <div style={{...s.input,background:"#F9FAFB",color:C.muted}}>{form.inicio&&form.fim?calcDias(form.inicio,form.fim)+' dia(s)':'—'}</div>
+                    <div style={{...s.input,background:"#F9FAFB",color:C.muted}}>
+                      {form.inicio&&form.fim ? (form.periodo!=='dia_todo' ? '½ dia' : calcDias(form.inicio,form.fim)+' dia(s)') : '—'}
+                    </div>
                   </div>
                   <div style={{marginBottom:14,gridColumn:"1/-1"}}>
                     <label style={s.label}>Observações</label>
@@ -2318,14 +2332,15 @@
                   <th style={s.th}>Colaborador</th><th style={s.th}>Setor</th><th style={s.th}>CID</th>
                   <th style={s.th}>Início</th><th style={s.th}>Fim</th>
                   <th style={{...s.th,textAlign:"center"}}>Dias</th>
+                  <th style={s.th}>Período</th>
                   <th style={s.th}>Obs.</th><th style={s.th}>Origem</th>
                   <th style={{...s.th,textAlign:"right"}}></th>
                 </tr></thead>
                 <tbody>
                   {loading?(
-                    <tr><td colSpan={9} style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</td></tr>
+                    <tr><td colSpan={10} style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</td></tr>
                   ):filtrados.length===0?(
-                    <tr><td colSpan={9} style={{textAlign:"center",padding:"32px",color:C.muted}}>
+                    <tr><td colSpan={10} style={{textAlign:"center",padding:"32px",color:C.muted}}>
                       Nenhum atestado no período. Clique em "➕ Novo Atestado" para incluir.
                     </td></tr>
                   ):filtrados.map(a=>{
@@ -2338,7 +2353,17 @@
                         <td style={{...s.td,fontSize:12}}>{a.cid||"—"}</td>
                         <td style={{...s.td,fontSize:12}}>{d1?d1.toLocaleDateString('pt-BR'):'—'}</td>
                         <td style={{...s.td,fontSize:12}}>{d2?d2.toLocaleDateString('pt-BR'):'—'}</td>
-                        <td style={{...s.td,textAlign:"center",fontWeight:700,color:(a.dias||0)>3?"#DC2626":C.text}}>{a.dias||1}</td>
+                        <td style={{...s.td,textAlign:"center",fontWeight:700,color:(a.dias||0)>3?"#DC2626":C.text}}>
+                          {a.periodo&&a.periodo!=='dia_todo' ? '½' : (a.dias||1)}
+                        </td>
+                        <td style={{...s.td,fontSize:12}}>
+                          {!a.periodo||a.periodo==='dia_todo'
+                            ? <span style={{color:C.muted}}>Dia todo</span>
+                            : <span style={{background:"#FEF3C7",color:"#92400E",padding:"2px 7px",borderRadius:8,fontWeight:600,fontSize:11}}>
+                                {a.periodo==='manha'?'🌅 Manhã':'🌇 Tarde'}
+                              </span>
+                          }
+                        </td>
                         <td style={{...s.td,fontSize:12,color:C.muted,maxWidth:160}}>{a.obs||"—"}</td>
                         <td style={{...s.td,fontSize:11}}>
                           <span style={{background:a.origem==='manual'?"#EDE9FE":"#F0F9F4",color:a.origem==='manual'?"#6D28D9":"#166534",padding:"2px 7px",borderRadius:8,fontWeight:600}}>{a.origem==='manual'?'Manual':'Planilha'}</span>
@@ -3640,6 +3665,7 @@
         const STATUS_OPTS = [
           {v:"",l:"Auto"},
           {v:"atestado",l:"Atestado"},
+          {v:"atestado_meio",l:"Atestado ½ Per."},
           {v:"abono",l:"Abono"},
           {v:"ferias",l:"Férias"},
           {v:"folga",l:"Folga"},
@@ -3740,7 +3766,7 @@
                               <td style={s.td}>
                                 <select value={r.status_manual||""} onChange={e=>salvarStatus(r.id,e.target.value)}
                                   style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 4px",
-                                    background:r.status_manual==="atestado"?"#FFF7ED":r.status_manual==="abono"?"#EFF6FF":r.status_manual?"#F0FFF4":"#fff"}}>
+                                    background:r.status_manual==="atestado"?"#FFF7ED":r.status_manual==="atestado_meio"?"#FEF3C7":r.status_manual==="abono"?"#EFF6FF":r.status_manual?"#F0FFF4":"#fff"}}>
                                   {STATUS_OPTS.map(o=>(<option key={o.v} value={o.v}>{o.l}</option>))}
                                 </select>
                                 {isFalta&&<span style={{marginLeft:4,fontSize:10,color:C.danger,fontWeight:700}}>FALTA</span>}
@@ -4190,11 +4216,13 @@
           }
           if (marc === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (marc === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (marc === "atestado_meio") return {status:"atestado_meio", diaUtilPrevisto: !!temPrevisao};
           if (marc === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
           if (marc === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
           // Verificar status_manual vindo do banco de ponto
           const smDb = diaDados?.statusManual;
           if (smDb === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (smDb === "atestado_meio") return {status:"atestado_meio", diaUtilPrevisto: !!temPrevisao};
           if (smDb === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
           if (smDb === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (smDb === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
@@ -4205,7 +4233,7 @@
         };
 
         const calcularColab = useCallback((nomeKey, dados, colabInfo)=>{
-          let diasTrabalhados=0, faltas=0, atestados=0, ferias=0, folgas=0, abonos=0;
+          let diasTrabalhados=0, faltas=0, atestados=0, atestadosMeio=0, ferias=0, folgas=0, abonos=0;
           let horasExtrasMin=0, horasFaltasMin=0;
           let atrasosInjustificados=0;
           const diasFaltas = [];
@@ -4233,6 +4261,7 @@
               faltas++;
               diasFaltas.push(iso.split("-").reverse().join("/"));
             } else if (a.status === "atestado") { atestados++; }
+            else if (a.status === "atestado_meio") { diasTrabalhados++; atestadosMeio++; }
             else if (a.status === "abono")  { abonos++; }
             else if (a.status === "ferias") { ferias++; }
             else if (a.status === "folga")  { folgas++; }
@@ -4283,7 +4312,7 @@
             // Conta caju só se já saiu da experiência E está presente/atestado/férias (não conta falta)
             if (!emExperiencia && temPrev) {
               const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
-              if (a.status === "trabalhou" || a.status === "atestado" || a.status === "ferias") {
+              if (a.status === "trabalhou" || a.status === "atestado" || a.status === "atestado_meio" || a.status === "ferias") {
                 cajuDias++;
               }
             }
@@ -4307,7 +4336,7 @@
           const totalDesconto = produtos + adiantamento;
 
           return {
-            diasTrabalhados, faltas, atestados, ferias, folgas, abonos,
+            diasTrabalhados, faltas, atestados, atestadosMeio, ferias, folgas, abonos,
             feriadosPerdidos: feriadosNaSemanaPerdidos,
             horasExtras: minToHHMM(horasExtrasMin),
             horasExtrasMin,
@@ -4520,7 +4549,8 @@
                         {[
                           {s:"trabalhou",l:"Trabalhado",c:C.green,bg:"#E8F5EE",d:"Dia com registro de ponto (batida) dentro do horário previsto."},
                           {s:"falta",l:"Falta",c:C.danger,bg:"#FEE2E2",d:"Dia previsto sem batida e sem justificativa. Gera perda de DSR na semana."},
-                          {s:"atestado",l:"Atestado",c:C.amber,bg:"#FFF8E7",d:"Afastamento médico justificado. Conta para CAJU, não gera falta nem perde DSR."},
+                          {s:"atestado",l:"Atestado",c:C.amber,bg:"#FFF8E7",d:"Afastamento médico justificado (dia todo). Conta para CAJU, não gera falta nem perde DSR. Desconta 1 dia do prêmio assiduidade."},
+                          {s:"atestado_meio",l:"Atestado ½ Per.",c:"#D97706",bg:"#FEF3C7",d:"Atestado de meio período (manhã ou tarde). Conta como dia trabalhado: não desconta assiduidade, não perde VT e conta para CAJU."},
                           {s:"ferias",l:"Férias",c:"#3b82f6",bg:"#DBEAFE",d:"Período de férias. Conta para CAJU. Não gera falta."},
                           {s:"folga",l:"Folga",c:"#8b5cf6",bg:"#EDE9FE",d:"Folga compensatória ou escala. Não conta como falta nem como dia trabalhado."},
                           {s:"feriado",l:"Feriado",c:"#D4972A",bg:"#FFF8E7",d:"Feriado nacional, estadual ou municipal marcado. Não conta como falta. Se houver falta na mesma semana, o feriado também é perdido."},
@@ -4561,7 +4591,7 @@
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🍱 CAJU — Vale Alimentação</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado, atestado ou em férias.</li>
+                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado, atestado (dia todo ou meio período) ou em férias.</li>
                           <li>Falta, folga, feriado e abono <strong>não</strong> geram crédito CAJU.</li>
                           <li>Colaboradores em <strong>período de experiência (90 dias)</strong> não recebem CAJU durante esse período.</li>
                         </ul>
@@ -4586,7 +4616,8 @@
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
                           <li>Base: <strong>30 dias fixos</strong> por mês (independente do mês).</li>
                           <li>Qualquer <strong>atraso injustificado superior a 10 minutos</strong> → perde <strong>todo</strong> o prêmio (0 dias).</li>
-                          <li>Dia com <strong>atestado</strong> ou <strong>abono</strong> → desconta apenas aquele dia (30 − dias atestado/abono).</li>
+                          <li>Dia com <strong>atestado (dia todo)</strong> ou <strong>abono</strong> → desconta apenas aquele dia (30 − dias atestado/abono).</li>
+                          <li><strong>Atestado de meio período</strong> (manhã ou tarde) → <strong>não desconta</strong> o prêmio assiduidade. Também não perde VT nem CAJU.</li>
                           <li>Sem nenhuma ocorrência → <strong>30 dias</strong> completos.</li>
                           <li><strong>Abono:</strong> Status definido manualmente em 📋 Banco de Ponto. Ausência justificada sem atestado — não perde DSR mas perde o dia do prêmio.</li>
                         </ul>
@@ -4982,6 +5013,7 @@
           trabalhou:{l:"Trab.",c:C.green,bg:"#E8F5EE"},
           falta:{l:"Falta",c:C.danger,bg:"#FEE2E2"},
           atestado:{l:"Atest.",c:C.amber,bg:C.amberBg},
+          atestado_meio:{l:"½Atst.",c:"#D97706",bg:"#FEF3C7"},
           ferias:{l:"Férias",c:"#3b82f6",bg:"#DBEAFE"},
           folga:{l:"Folga",c:"#8b5cf6",bg:"#EDE9FE"},
           feriado:{l:"Feriado",c:"#D4972A",bg:"#FFF8E7"},
@@ -5013,7 +5045,7 @@
                   {[
                     {l:"Trab.",v:colab.calc.diasTrabalhados,c:C.green},
                     {l:"Faltas",v:colab.calc.faltas,c:C.danger},
-                    {l:"Atest.",v:colab.calc.atestados,c:C.amber},
+                    {l:"Atest.",v:colab.calc.atestados+(colab.calc.atestadosMeio?` (+½×${colab.calc.atestadosMeio})`:''),c:C.amber},
                     {l:"Férias",v:colab.calc.ferias,c:"#3b82f6"},
                     {l:"H.Extras",v:colab.calc.horasExtras,c:C.green},
                     {l:"DSR",v:`${colab.calc.dsrPerdidos}${colab.calc.feriadosPerdidos>0?`+${colab.calc.feriadosPerdidos}f`:""}`,c:C.danger},
@@ -5030,7 +5062,7 @@
 
               <div style={{padding:"16px 22px"}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.pri,marginBottom:10}}>📅 Calendário do período</div>
-                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Clique em um dia para ciclar: <strong>Normal → Atestado → Férias → Folga → Normal</strong></div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Clique em um dia para ciclar: <strong>Normal → Atestado → ½ Atestado → Férias → Folga → Normal</strong></div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:6}}>
                   {["D","S","T","Q","Q","S","S"].map((d,i)=>(
                     <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.muted,padding:"4px 0"}}>{d}</div>
@@ -5047,7 +5079,7 @@
                     const isFer = feriados.includes(iso);
                     const marc = marcacoes[iso];
                     const clique = () => {
-                      const ciclo = ["", "atestado", "ferias", "folga"];
+                      const ciclo = ["", "atestado", "atestado_meio", "ferias", "folga"];
                       const atual = marc || "";
                       const next = ciclo[(ciclo.indexOf(atual)+1)%ciclo.length];
                       onMarcar(iso, next || null);
