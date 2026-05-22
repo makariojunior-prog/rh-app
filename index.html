@@ -1194,6 +1194,10 @@
         const carregarHistorico = async (colab) => {
           setLoadingHistorico(true);
           try {
+            const {data} = await _supa.from('atestados').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
+            setHistoricoAtestados(data||[]);
+          } catch(e) { setHistoricoAtestados([]); }
+          try {
             const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
             setHistoricoFerias(data||[]);
           } catch(e) { setHistoricoFerias([]); }
