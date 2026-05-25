@@ -1844,6 +1844,7 @@
           {k:'compras',      l:'🛍️ Compras'},
           {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
           {k:'orcamento',    l:'📊 Orçamento Folha'},
+          {k:'comissoes',    l:'💰 Comissões'},
           {k:'termos',       l:'📝 Termos de Assinatura'},
         ];
 
@@ -5471,6 +5472,8 @@
       const [expandido,setExpandido]=useState(null);
       const [historico,setHistorico]=useState([]);
       const [loadingHist,setLoadingHist]=useState(false);
+      const [editandoId,setEditandoId]=useState(null);
+      const [editValor,setEditValor]=useState('');
 
       useEffect(()=>{
         if(aba==='vincular') carregarCrm();
@@ -5548,6 +5551,24 @@
         const {data}=await _supa.from('comissoes_mensais').select('*').eq('empresa_id',empresaId).order('data_fim',{ascending:false}).limit(60);
         setHistorico(data||[]);
         setLoadingHist(false);
+      }
+
+      async function salvarEdicao(h){
+        const novoValor=parseFloat(String(editValor).replace(',','.'))||0;
+        const {error}=await _supa.from('comissoes_mensais').update({valor_total:novoValor,confirmado_em:new Date().toISOString()}).eq('id',h.id);
+        if(error){alert('Erro ao salvar: '+error.message);return;}
+        const periodo=h.data_fim.substring(0,7);
+        await _supa.from('folha_mensal').update({comissao_varejo:novoValor}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        setEditandoId(null);
+        carregarHist();
+      }
+
+      async function cancelarComissao(h){
+        if(!confirm(`Cancelar a comissão de ${h.colaborador_nome} (${h.data_inicio} → ${h.data_fim})?\n\nO valor na folha será zerado.`)) return;
+        await _supa.from('comissoes_mensais').delete().eq('id',h.id);
+        const periodo=h.data_fim.substring(0,7);
+        await _supa.from('folha_mensal').update({comissao_varejo:0}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        carregarHist();
       }
 
       const fm=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -5676,6 +5697,7 @@
                     <th style={{...s.th,textAlign:'right'}}>Pedidos</th>
                     <th style={{...s.th,textAlign:'right'}}>Comissão</th>
                     <th style={s.th}>Confirmado em</th>
+                    <th style={s.th}>Ações</th>
                   </tr></thead>
                   <tbody>
                     {historico.map((h,i)=>(
@@ -5684,8 +5706,26 @@
                         <td style={{...s.td,fontSize:12}}>{h.data_inicio} → {h.data_fim}</td>
                         <td style={s.td}><span style={{background:C.amberBg,color:C.amber,fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:10}}>{h.fonte}</span></td>
                         <td style={{...s.td,textAlign:'right'}}>{h.pedidos_count}</td>
-                        <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>{fm(h.valor_total)}</td>
+                        <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>
+                          {editandoId===h.id
+                            ? <input type="number" step="0.01" value={editValor} onChange={e=>setEditValor(e.target.value)}
+                                style={{width:90,padding:'2px 6px',border:'1px solid #ccc',borderRadius:4,fontSize:13}} autoFocus />
+                            : fm(h.valor_total)}
+                        </td>
                         <td style={{...s.td,fontSize:11,color:C.muted}}>{h.confirmado_em?new Date(h.confirmado_em).toLocaleString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,whiteSpace:'nowrap'}}>
+                          {editandoId===h.id ? (
+                            <span style={{display:'flex',gap:4}}>
+                              <button onClick={()=>salvarEdicao(h)} style={{fontSize:11,padding:'2px 8px',background:C.acc,color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>✔ Salvar</button>
+                              <button onClick={()=>setEditandoId(null)} style={{fontSize:11,padding:'2px 8px',background:'#eee',border:'none',borderRadius:4,cursor:'pointer'}}>✕</button>
+                            </span>
+                          ) : (
+                            <span style={{display:'flex',gap:4}}>
+                              <button onClick={()=>{setEditandoId(h.id);setEditValor(String(h.valor_total))}} style={{fontSize:11,padding:'2px 8px',background:'#f0f0f0',border:'1px solid #ccc',borderRadius:4,cursor:'pointer'}}>✏️</button>
+                              <button onClick={()=>cancelarComissao(h)} style={{fontSize:11,padding:'2px 8px',background:'#fee2e2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:4,cursor:'pointer'}}>✕</button>
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
