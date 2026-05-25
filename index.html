@@ -4020,12 +4020,24 @@
         const [loadingHistFolha, setLoadingHistFolha] = useState(false);
         const [terminadosMap, setTerminadosMap] = useState({});
         const [excluidos, setExcluidos] = useState(()=>{ try{return new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]'));}catch(e){return new Set();} });
+        const [comissoesMap, setComissoesMap] = useState({});
 
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
         useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
         useEffect(()=>{localStorage.setItem("rh_folha_ajustes",JSON.stringify(ajustes));},[ajustes]);
         useEffect(()=>{ try{setExcluidos(new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]')));}catch(e){setExcluidos(new Set());} },[mesAno]);
         useEffect(()=>{ localStorage.setItem('rh_folha_excluidos_'+mesAno,JSON.stringify([...excluidos])); },[excluidos,mesAno]);
+        useEffect(()=>{
+          async function _loadComissoes(){
+            const [m,a]=mesAno.split('/').map(Number);
+            const fim=new Date(a,m-1,25).toISOString().split('T')[0];
+            const {data}=await _supa.from('comissoes_mensais').select('colaborador_nome,valor_total').eq('empresa_id',empresaId).eq('data_fim',fim);
+            const map={};
+            (data||[]).forEach(c=>{map[c.colaborador_nome]=(c.valor_total||0);});
+            setComissoesMap(map);
+          }
+          _loadComissoes();
+        },[mesAno,empresaId]);
 
         useEffect(()=>{
           if(!empresaId) return;
@@ -4839,6 +4851,7 @@
                           <th style={{...s.thC,minWidth:110}}>H. Faltas Parcial</th>
                           <th style={{...s.thC,minWidth:100}}>Antecipação</th>
                           <th style={{...s.thC,minWidth:110}}>Prêmio 5% (Dias)</th>
+                          <th style={{...s.thC,minWidth:100}}>Comissão</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4884,6 +4897,9 @@
                                   : <span style={{color:r.calc.premioAssiduidadeDias===30?C.green:r.calc.premioAssiduidadeDias>0?C.amber:C.danger,fontWeight:700}}>{r.calc.premioAssiduidadeDias} dias</span>
                                 }
                                 {temAtraso&&<div style={{fontSize:9,color:C.danger}}>atraso inject.</div>}
+                              </td>
+                              <td style={{...s.tdC,fontWeight:700,color:comissoesMap[r.nome]>0?C.acc:C.muted}}>
+                                {comissoesMap[r.nome]>0?fmtBRL(comissoesMap[r.nome]):'—'}
                               </td>
                             </tr>
                           );
