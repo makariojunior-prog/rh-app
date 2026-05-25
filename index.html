@@ -5416,6 +5416,271 @@
         );
       }
 
+    function VinculoRow({u,colabAPI,onSalvar,vincMsg,rowSt,tdSt,selSt}){
+      const [sel,setSel]=useState(u.colaborador_id||'');
+      return(
+        <tr style={rowSt}>
+          <td style={tdSt}><strong>{u.nome}</strong></td>
+          <td style={{...tdSt,fontSize:11,color:C.muted}}>{u.email}</td>
+          <td style={tdSt}>
+            <select value={sel} onChange={e=>setSel(e.target.value)} style={{...selSt,width:220}}>
+              <option value="">— Não vinculado —</option>
+              {(colabAPI||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(
+                <option key={c.id_supa} value={c.id_supa}>{c.nome}</option>
+              ))}
+            </select>
+          </td>
+          <td style={tdSt}>
+            <button onClick={()=>onSalvar(u.id,sel)} style={{...s.btn,fontSize:11,padding:'4px 12px'}}>
+              {vincMsg||'Salvar'}
+            </button>
+          </td>
+        </tr>
+      );
+    }
+
+    function ComissoesPage({colabAPI,empresaId}){
+      const [aba,setAba]=useState('comissoes');
+      const [crmUsers,setCrmUsers]=useState([]);
+      const [loadingCrm,setLoadingCrm]=useState(false);
+      const [vincMsgs,setVincMsgs]=useState({});
+      const mkIni=()=>{const t=new Date();return new Date(t.getFullYear(),t.getMonth()-1,26).toISOString().split('T')[0];};
+      const mkFim=()=>{const t=new Date();return new Date(t.getFullYear(),t.getMonth(),25).toISOString().split('T')[0];};
+      const [dataIni,setDataIni]=useState(mkIni);
+      const [dataFim,setDataFim]=useState(mkFim);
+      const [resumo,setResumo]=useState([]);
+      const [loading,setLoading]=useState(false);
+      const [confirmando,setConfirmando]=useState(false);
+      const [msgBox,setMsgBox]=useState(null);
+      const [expandido,setExpandido]=useState(null);
+      const [historico,setHistorico]=useState([]);
+      const [loadingHist,setLoadingHist]=useState(false);
+
+      useEffect(()=>{
+        if(aba==='vincular') carregarCrm();
+        if(aba==='historico') carregarHist();
+      },[aba]);
+
+      async function carregarCrm(){
+        setLoadingCrm(true);
+        const {data}=await _supa.from('crm_users').select('id,nome,email,colaborador_id').eq('ativo',true).order('nome');
+        setCrmUsers(data||[]);
+        setLoadingCrm(false);
+      }
+
+      async function salvarVinculo(uid,colabId){
+        const {error}=await _supa.from('crm_users').update({colaborador_id:colabId||null}).eq('id',uid);
+        setVincMsgs(p=>({...p,[uid]:error?'❌ Erro':'✅ Salvo'}));
+        setTimeout(()=>setVincMsgs(p=>{const n={...p};delete n[uid];return n;}),2000);
+      }
+
+      async function calcular(){
+        setLoading(true);setMsgBox(null);setResumo([]);
+        const {data:ped,error}=await _supa.from('varejo_pedidos')
+          .select('atendente,valor_liquido,num_pedido,cliente,data_entrega')
+          .eq('origem','CARDAPIO WEB').eq('status_icon','✅')
+          .gte('data_entrega',dataIni).lte('data_entrega',dataFim);
+        if(error){setMsgBox({ok:false,txt:'Erro ao buscar pedidos: '+error.message});setLoading(false);return;}
+        const {data:users}=await _supa.from('crm_users').select('id,nome,colaborador_id').eq('ativo',true);
+        const uMap={};
+        (users||[]).forEach(u=>{uMap[u.nome]=u;});
+        const grps={};
+        (ped||[]).forEach(p=>{
+          const u=uMap[p.atendente];
+          const cId=u?.colaborador_id;
+          const colab=cId?(colabAPI||[]).find(c=>c.id_supa===cId):null;
+          const key=colab?.nome||p.atendente||'(sem vínculo)';
+          const crmNome=p.atendente||'';
+          if(!grps[key]) grps[key]={nome:key,crmNome,pedidos:0,totalVendas:0,det:[]};
+          grps[key].pedidos++;
+          grps[key].totalVendas+=Number(p.valor_liquido)||0;
+          grps[key].det.push(p);
+        });
+        const res=Object.values(grps).map(g=>({...g,comissao:g.totalVendas*0.01})).sort((a,b)=>b.comissao-a.comissao);
+        setResumo(res);
+        setLoading(false);
+        if(!res.length) setMsgBox({ok:false,txt:'Nenhum pedido Cardápio Web entregue neste período.'});
+      }
+
+      async function confirmar(){
+        if(!resumo.length) return;
+        setConfirmando(true);setMsgBox(null);
+        const periodo=dataFim.substring(0,7);
+        const erros=[];
+        for(const r of resumo){
+          if(r.nome==='(sem vínculo)') continue;
+          const {error:e1}=await _supa.from('comissoes_mensais').upsert({
+            empresa_id:empresaId,colaborador_nome:r.nome,
+            data_inicio:dataIni,data_fim:dataFim,fonte:'VAREJO',
+            valor_total:Math.round(r.comissao*100)/100,
+            pedidos_count:r.pedidos,confirmado:true,
+            confirmado_em:new Date().toISOString(),
+          },{onConflict:'empresa_id,colaborador_nome,data_inicio,data_fim,fonte'});
+          if(e1){erros.push(r.nome+': '+e1.message);continue;}
+          await _supa.from('folha_mensal')
+            .update({comissao_varejo:Math.round(r.comissao*100)/100})
+            .eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',r.nome);
+        }
+        setConfirmando(false);
+        if(erros.length) setMsgBox({ok:false,txt:'Erros: '+erros.join('; ')});
+        else setMsgBox({ok:true,txt:'✅ Período '+dataIni+' → '+dataFim+' confirmado! Folha '+periodo+' atualizada.'});
+        carregarHist();
+      }
+
+      async function carregarHist(){
+        setLoadingHist(true);
+        const {data}=await _supa.from('comissoes_mensais').select('*').eq('empresa_id',empresaId).order('data_fim',{ascending:false}).limit(60);
+        setHistorico(data||[]);
+        setLoadingHist(false);
+      }
+
+      const fm=v=>'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      const totalGeral=resumo.reduce((s,r)=>s+r.comissao,0);
+      const tabSt=(a)=>({background:'none',border:'none',borderBottom:aba===a?`2px solid ${C.acc}`:'2px solid transparent',color:aba===a?C.acc:C.muted,fontWeight:aba===a?700:400,fontSize:13,padding:'8px 16px',cursor:'pointer',marginBottom:-1});
+
+      return(
+        <div>
+          <div style={{fontWeight:700,fontSize:18,color:C.pri,marginBottom:20}}>💰 Comissionamento</div>
+          <div style={{display:'flex',gap:4,marginBottom:20,borderBottom:`1px solid ${C.border}`}}>
+            {[['comissoes','📊 Comissões'],['vincular','🔗 Vincular Usuários'],['historico','📋 Histórico']].map(([k,l])=>(
+              <button key={k} onClick={()=>setAba(k)} style={tabSt(k)}>{l}</button>
+            ))}
+          </div>
+
+          {aba==='comissoes'&&(
+            <div>
+              <div style={{...s.card,display:'flex',alignItems:'flex-end',gap:14,flexWrap:'wrap'}}>
+                <div><label style={s.label}>Data início (26 do mês anterior)</label><input type="date" value={dataIni} onChange={e=>setDataIni(e.target.value)} style={{...s.input,width:170}}/></div>
+                <div><label style={s.label}>Data fim (25 do mês atual)</label><input type="date" value={dataFim} onChange={e=>setDataFim(e.target.value)} style={{...s.input,width:170}}/></div>
+                <button onClick={calcular} disabled={loading} style={s.btn}>{loading?'⏳ Calculando...':'🔍 Calcular'}</button>
+              </div>
+              {msgBox&&<div style={msgBox.ok?s.successBox:s.warnBox}>{msgBox.txt}</div>}
+              {resumo.length>0&&(
+                <div style={s.card}>
+                  <div style={{...s.cardTitle,justifyContent:'space-between'}}>
+                    <span>📊 Período: {dataIni} → {dataFim}</span>
+                    <span style={{color:C.acc,fontWeight:700}}>{fm(totalGeral)} total</span>
+                  </div>
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Colaborador (RH)</th>
+                      <th style={s.th}>Usuário CRM</th>
+                      <th style={{...s.th,textAlign:'right'}}>Pedidos</th>
+                      <th style={{...s.th,textAlign:'right'}}>Total Vendas</th>
+                      <th style={{...s.th,textAlign:'right'}}>Comissão (1%)</th>
+                      <th style={s.th}></th>
+                    </tr></thead>
+                    <tbody>
+                      {resumo.map((r,i)=>(
+                        <React.Fragment key={r.nome}>
+                          <tr style={s.row(i)}>
+                            <td style={s.td}><strong>{r.nome}</strong></td>
+                            <td style={{...s.td,fontSize:11,color:C.muted}}>{r.crmNome!==r.nome?r.crmNome:'—'}</td>
+                            <td style={{...s.td,textAlign:'right'}}>{r.pedidos}</td>
+                            <td style={{...s.td,textAlign:'right'}}>{fm(r.totalVendas)}</td>
+                            <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>{fm(r.comissao)}</td>
+                            <td style={s.td}>
+                              <button onClick={()=>setExpandido(expandido===r.nome?null:r.nome)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px'}}>
+                                {expandido===r.nome?'▲ Fechar':'▼ Pedidos'}
+                              </button>
+                            </td>
+                          </tr>
+                          {expandido===r.nome&&(
+                            <tr style={{background:C.greenBg}}>
+                              <td colSpan={6} style={{padding:'10px 20px'}}>
+                                <table style={{...s.table,fontSize:12}}>
+                                  <thead><tr>
+                                    <th style={{...s.th,fontSize:10}}>#</th>
+                                    <th style={{...s.th,fontSize:10}}>Cliente</th>
+                                    <th style={{...s.th,fontSize:10}}>Data</th>
+                                    <th style={{...s.th,textAlign:'right',fontSize:10}}>Valor Líq.</th>
+                                    <th style={{...s.th,textAlign:'right',fontSize:10}}>Comissão</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {r.det.slice().sort((a,b)=>a.data_entrega<b.data_entrega?1:-1).map(p=>(
+                                      <tr key={p.num_pedido}>
+                                        <td style={{...s.td,padding:'5px 12px'}}>{p.num_pedido}</td>
+                                        <td style={{...s.td,padding:'5px 12px'}}>{p.cliente}</td>
+                                        <td style={{...s.td,padding:'5px 12px'}}>{p.data_entrega}</td>
+                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right'}}>{fm(p.valor_liquido)}</td>
+                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right',color:C.acc}}>{fm((p.valor_liquido||0)*0.01)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{marginTop:16,display:'flex',justifyContent:'flex-end'}}>
+                    <button onClick={confirmar} disabled={confirmando} style={s.btnAcc}>
+                      {confirmando?'⏳ Confirmando...':'✅ Confirmar e salvar na Folha'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {aba==='vincular'&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>🔗 Vincular usuários do CRM → colaboradores do RH</div>
+              <div style={{...s.infoBox,marginBottom:16}}>Defina qual usuário do App Comercial corresponde a cada colaborador. Isso garante que a comissão seja atribuída corretamente mesmo que os nomes sejam diferentes.</div>
+              {loadingCrm?<div style={{color:C.muted,fontSize:13}}>Carregando...</div>:(
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Usuário CRM</th>
+                    <th style={s.th}>Email</th>
+                    <th style={s.th}>Colaborador RH vinculado</th>
+                    <th style={s.th}></th>
+                  </tr></thead>
+                  <tbody>
+                    {crmUsers.map((u,i)=>(
+                      <VinculoRow key={u.id} u={u} colabAPI={colabAPI} onSalvar={salvarVinculo} vincMsg={vincMsgs[u.id]} rowSt={s.row(i)} tdSt={s.td} selSt={s.select}/>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {aba==='historico'&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>📋 Histórico de comissões confirmadas</div>
+              {loadingHist?<div style={{color:C.muted,fontSize:13}}>Carregando...</div>:historico.length===0?
+                <div style={{color:C.muted,fontSize:13}}>Nenhum período confirmado ainda.</div>:(
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Colaborador</th>
+                    <th style={s.th}>Período</th>
+                    <th style={s.th}>Fonte</th>
+                    <th style={{...s.th,textAlign:'right'}}>Pedidos</th>
+                    <th style={{...s.th,textAlign:'right'}}>Comissão</th>
+                    <th style={s.th}>Confirmado em</th>
+                  </tr></thead>
+                  <tbody>
+                    {historico.map((h,i)=>(
+                      <tr key={h.id} style={s.row(i)}>
+                        <td style={s.td}><strong>{h.colaborador_nome}</strong></td>
+                        <td style={{...s.td,fontSize:12}}>{h.data_inicio} → {h.data_fim}</td>
+                        <td style={s.td}><span style={{background:C.amberBg,color:C.amber,fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:10}}>{h.fonte}</span></td>
+                        <td style={{...s.td,textAlign:'right'}}>{h.pedidos_count}</td>
+                        <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>{fm(h.valor_total)}</td>
+                        <td style={{...s.td,fontSize:11,color:C.muted}}>{h.confirmado_em?new Date(h.confirmado_em).toLocaleString('pt-BR'):'—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function App(){
       const [page,setPage]=useState("dashboard");
       const [empresa,setEmpresa]=useState(()=>localStorage.getItem("rh_empresa")||"Cantina em Casa / Lumar Alimentos");
@@ -6223,7 +6488,7 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','termos','acessos','ajuda','config']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','termos','acessos','ajuda','config','comissoes']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -6238,6 +6503,7 @@
         {k:'compras',l:'🛍️ Compras'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
         {k:'ponto',l:'📋 Banco de Ponto'},
+        {k:'comissoes',l:'💰 Comissões'},
         {k:'termos',l:'📝 Termos'},
         {k:'acessos',l:'🔐 Acessos'},
         {k:'ajuda',l:'❓ Ajuda'},
@@ -6285,6 +6551,7 @@
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
+              {page==="comissoes"&&<ComissoesPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="termos"&&<TermosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
