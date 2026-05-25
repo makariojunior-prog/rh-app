@@ -5483,10 +5483,10 @@
         if(error){setMsgBox({ok:false,txt:'Erro ao buscar pedidos: '+error.message});setLoading(false);return;}
         const {data:users}=await _supa.from('crm_users').select('id,nome,colaborador_id').eq('ativo',true);
         const uMap={};
-        (users||[]).forEach(u=>{uMap[u.nome]=u;});
+        (users||[]).forEach(u=>{uMap[u.nome.toLowerCase()]=u;});
         const grps={};
         (ped||[]).forEach(p=>{
-          const u=uMap[p.atendente];
+          const u=uMap[(p.atendente||'').toLowerCase()];
           const cId=u?.colaborador_id;
           const colab=cId?(colabAPI||[]).find(c=>c.id_supa===cId):null;
           const key=colab?.nome||p.atendente||'(sem vínculo)';
