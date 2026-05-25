@@ -4018,10 +4018,14 @@
         const [folhaTab, setFolhaTab] = useState("contabilidade");
         const [historicoFolha, setHistoricoFolha] = useState([]);
         const [loadingHistFolha, setLoadingHistFolha] = useState(false);
+        const [terminadosMap, setTerminadosMap] = useState({});
+        const [excluidos, setExcluidos] = useState(()=>{ try{return new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]'));}catch(e){return new Set();} });
 
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
         useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
         useEffect(()=>{localStorage.setItem("rh_folha_ajustes",JSON.stringify(ajustes));},[ajustes]);
+        useEffect(()=>{ try{setExcluidos(new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]')));}catch(e){setExcluidos(new Set());} },[mesAno]);
+        useEffect(()=>{ localStorage.setItem('rh_folha_excluidos_'+mesAno,JSON.stringify([...excluidos])); },[excluidos,mesAno]);
 
         useEffect(()=>{
           if(!empresaId) return;
@@ -4041,6 +4045,11 @@
             });
             setAdiantSupa(mapa);
           }).catch(err=>console.error('adiantamentos load error:',err));
+          _supa.from('colaboradores').select('nome,data_encerramento').eq('empresa_id',empresaId).eq('ativo',false).not('data_encerramento','is',null).then(({data})=>{
+            const m={};
+            (data||[]).forEach(c=>{ if(c.nome) m[normalizarNome(c.nome)]=c.data_encerramento; });
+            setTerminadosMap(m);
+          }).catch(()=>{});
           _supa.from('adiantamentos_fixos').select('colaborador_nome,valor').eq('empresa_id',empresaId).eq('ativo',true).then(({data})=>{
             const mapa = {};
             (data||[]).forEach(f=>{
@@ -4397,6 +4406,7 @@
               admissao: c.admissao || "",
               nascimento: c.nascimento || "",
               jornada: c.jornada || "SEG-SAB",
+              encerramento: terminadosMap[nomeKey]||"",
               fonteCadastro: true, fonteCSV: false, dadosCSV: null
             });
           });
@@ -4412,6 +4422,7 @@
                 nomeKey, nome: nomeCSV, funcao:"", setor:"", salario:0,
                 transporte: 0, experiencia30:"", experiencia90:"", admissao:"",
                 jornada: "SEG-SAB",
+                encerramento: terminadosMap[nomeKey]||"",
                 fonteCadastro:false, fonteCSV:true, dadosCSV: folhaData[nomeCSV]
               });
             }
@@ -4419,7 +4430,12 @@
           return Array.from(mapa.values()).sort((a,b)=>a.nome.localeCompare(b.nome));
         })();
 
-        const resultados = colaboradoresUnificados.map(c=>({...c, calc: calcularColab(c.nomeKey, c.dadosCSV, c)}));
+        const excluirDaFolha = (nomeKey) => setExcluidos(prev=>{ const n=new Set(prev); n.add(nomeKey); return n; });
+        const restaurarExcluidos = () => setExcluidos(new Set());
+        const comEncerramento = colaboradoresUnificados.filter(c=>c.encerramento&&!excluidos.has(c.nomeKey));
+        const resultados = colaboradoresUnificados
+          .filter(c=>!excluidos.has(c.nomeKey))
+          .map(c=>({...c, calc: calcularColab(c.nomeKey, c.dadosCSV, c)}));
 
         const totais = resultados.reduce((acc,r)=>{
           acc.diasTrabalhados += r.calc.diasTrabalhados;
@@ -4787,6 +4803,26 @@
                 </div>
 
                 {saveStatus&&<div style={{...(saveStatus.ok===true?s.successBox:saveStatus.ok===false?s.warnBox:s.infoBox),marginTop:0,marginBottom:14}}>{saveStatus.msg}</div>}
+                {(comEncerramento.length>0||excluidos.size>0)&&(
+                  <div style={{...s.warnBox,marginBottom:14,display:'flex',flexWrap:'wrap',alignItems:'center',gap:12}}>
+                    {comEncerramento.length>0&&(
+                      <span>⚠️ <strong>{comEncerramento.length}</strong> colaborador(es) com rescisão nesta folha.{' '}
+                        <button onClick={()=>{const n=new Set(excluidos);comEncerramento.forEach(c=>n.add(c.nomeKey));setExcluidos(n);}}
+                          style={{background:'none',border:'1px solid var(--c-warn-text)',color:'var(--c-warn-text)',borderRadius:5,padding:'2px 9px',cursor:'pointer',fontSize:11,fontWeight:700,marginLeft:4}}>
+                          Remover todos os rescindidos
+                        </button>
+                      </span>
+                    )}
+                    {excluidos.size>0&&(
+                      <span style={{marginLeft:comEncerramento.length>0?8:0}}>
+                        {excluidos.size} removido(s) da folha.{' '}
+                        <button onClick={restaurarExcluidos} style={{background:'none',border:'none',cursor:'pointer',color:'var(--c-warn-text)',fontWeight:700,fontSize:11,textDecoration:'underline',padding:0}}>
+                          Restaurar
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* ===== ABA CONTABILIDADE ===== */}
                 {folhaTab==="contabilidade"&&(
@@ -4814,6 +4850,15 @@
                               <td style={{...s.td,fontWeight:700}}>
                                 {r.nome}
                                 {r.funcao&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{r.funcao}</div>}
+                                {r.encerramento&&(
+                                  <div style={{marginTop:3,display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                                    <span style={{fontSize:9,color:C.danger,fontWeight:700}}>🔴 Rescisão {fmtDate(r.encerramento)}</span>
+                                    <button onClick={e=>{e.stopPropagation();excluirDaFolha(r.nomeKey);}}
+                                      style={{fontSize:10,background:'none',border:'1px solid '+C.danger,color:C.danger,borderRadius:4,padding:'1px 7px',cursor:'pointer',fontWeight:700,lineHeight:1.4}}>
+                                      ✕ Remover
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                               <td style={{...s.tdC,fontWeight:600,color:r.calc.horasExtrasMin>0?C.green:C.muted}}>{r.calc.horasExtras}</td>
                               <td style={{...s.tdC,fontWeight:600,color:r.calc.produtos>0?C.danger:C.muted}}>{r.calc.produtos>0?fmtBRL(r.calc.produtos):"—"}</td>
@@ -4945,9 +4990,18 @@
                                      style={{width:14,height:14,cursor:"pointer"}}/>
                             </td>
                             <td style={s.tdC}>
-                              <button style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:11,color:C.pri,fontWeight:700}}>
-                                Detalhes →
-                              </button>
+                              <div style={{display:'flex',gap:4,justifyContent:'center',alignItems:'center',flexWrap:'wrap'}}>
+                                <button style={{background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:11,color:C.pri,fontWeight:700}}>
+                                  Detalhes →
+                                </button>
+                                {r.encerramento&&(
+                                  <button onClick={e=>{e.stopPropagation();excluirDaFolha(r.nomeKey);}}
+                                    title={"Remover da folha — rescisão "+fmtDate(r.encerramento)}
+                                    style={{background:'none',border:'1px solid '+C.danger,color:C.danger,borderRadius:5,padding:'3px 7px',cursor:'pointer',fontSize:11,fontWeight:700,lineHeight:1.2}}>
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
