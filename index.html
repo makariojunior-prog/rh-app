@@ -3627,6 +3627,12 @@
         const hoje = new Date();
         const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
         const [mes, setMes] = React.useState(mesAtual);
+        const [filtroTipo, setFiltroTipo] = React.useState('mes');
+        const [dataIni, setDataIni] = React.useState(mesAtual+'-01');
+        const [dataFim, setDataFim] = React.useState(()=>{
+          const d=new Date(hoje.getFullYear(),hoje.getMonth()+1,0);
+          return mesAtual+'-'+String(d.getDate()).padStart(2,'0');
+        });
         const [lista, setLista] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
         const [status, setStatus] = React.useState(null);
@@ -3636,19 +3642,27 @@
         const hhmmToMin = str => { if(!str||str==="00:00") return 0; const [h,m]=str.split(":"); return parseInt(h)*60+parseInt(m||0); };
         const horVal = h => h && h !== "" && h !== "00:00";
 
-        const carregar = async () => {
+        const carregar = async (tipo, _mes, _ini, _fim) => {
           if(!empresaId) return;
+          const modo = tipo ?? filtroTipo;
           setLoading(true);
-          const ini = mes + "-01";
-          const [_a, _m] = mes.split('-');
-          const ultimoDia = new Date(parseInt(_a), parseInt(_m), 0).getDate();
-          const fim = `${mes}-${String(ultimoDia).padStart(2,'0')}`;
+          let ini, fim;
+          if(modo==='mes'){
+            const m = _mes ?? mes;
+            ini = m+'-01';
+            const [_a,_mo]=m.split('-');
+            fim = `${m}-${String(new Date(parseInt(_a),parseInt(_mo),0).getDate()).padStart(2,'0')}`;
+          } else {
+            ini = _ini ?? dataIni;
+            fim = _fim ?? dataFim;
+            if(!ini||!fim){ setLoading(false); return; }
+          }
           const {data, error} = await _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',ini).lte('data',fim).order('colaborador_nome').order('data');
           if(!error) setLista(data||[]);
           setLoading(false);
         };
 
-        React.useEffect(()=>{ carregar(); },[empresaId,mes]);
+        React.useEffect(()=>{ if(filtroTipo==='mes') carregar('mes', mes); },[empresaId,mes,filtroTipo]);
 
         const salvarStatus = async (id, novoStatus) => {
           const {error} = await _supa.from('registros_ponto').update({status_manual:novoStatus||null,atualizado_em:new Date().toISOString()}).eq('id',id);
@@ -3713,12 +3727,38 @@
             {csvStatus&&<div style={{...s.card,background:csvStatus.ok===true?'#DCFCE7':csvStatus.ok===false?'#FEE2E2':'#EFF6FF',color:csvStatus.ok===true?'#166534':csvStatus.ok===false?'#991B1B':'#1D4ED8',margin:"12px 0"}}>{csvStatus.msg}</div>}
             {status&&<div style={{...s.card,background:status.ok===true?'#DCFCE7':'#FEE2E2',color:status.ok===true?'#166534':'#991B1B',margin:"12px 0",cursor:'pointer'}} onClick={()=>setStatus(null)}>{status.msg} <span style={{opacity:0.5,fontSize:11}}>✕</span></div>}
 
-            <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",marginBottom:16}}>
-              <div>
-                <label style={s.label}>Mês</label>
-                <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={s.input}/>
+            <div style={{...s.card,marginBottom:16}}>
+              <div style={{display:'flex',gap:0,marginBottom:14,borderBottom:`1px solid ${C.border}`,paddingBottom:10}}>
+                {[{k:'mes',l:'Mês'},{k:'periodo',l:'Período personalizado'}].map(t=>(
+                  <button key={t.k} onClick={()=>setFiltroTipo(t.k)} style={{
+                    background:'none',border:'none',borderBottom:filtroTipo===t.k?`2px solid ${C.acc}`:'2px solid transparent',
+                    marginBottom:-11,padding:'6px 16px',cursor:'pointer',fontWeight:filtroTipo===t.k?700:400,
+                    color:filtroTipo===t.k?C.acc:C.muted,fontSize:13,transition:'all 0.15s'
+                  }}>{t.l}</button>
+                ))}
               </div>
-              <div style={{fontSize:13,color:C.muted}}>{lista.length} registros encontrados</div>
+              {filtroTipo==='mes'?(
+                <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+                  <div>
+                    <label style={s.label}>Mês</label>
+                    <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={{...s.input,width:170}}/>
+                  </div>
+                  <div style={{fontSize:13,color:C.muted,marginTop:16}}>{lista.length} registros encontrados</div>
+                </div>
+              ):(
+                <div style={{display:'flex',gap:12,alignItems:'flex-end',flexWrap:'wrap'}}>
+                  <div>
+                    <label style={s.label}>De</label>
+                    <input type="date" value={dataIni} onChange={e=>setDataIni(e.target.value)} style={{...s.input,width:150}}/>
+                  </div>
+                  <div>
+                    <label style={s.label}>Até</label>
+                    <input type="date" value={dataFim} onChange={e=>setDataFim(e.target.value)} style={{...s.input,width:150}}/>
+                  </div>
+                  <button onClick={()=>carregar('periodo')} style={s.btn}>🔍 Buscar</button>
+                  {lista.length>0&&<div style={{fontSize:13,color:C.muted}}>{lista.length} registros encontrados</div>}
+                </div>
+              )}
             </div>
 
             {loading?(
