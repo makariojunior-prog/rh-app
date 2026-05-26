@@ -3436,21 +3436,43 @@
         const VAZIO = { colaboradorNome:'', produto:'', valor:'', dataCompra: hoje.toISOString().slice(0,10), mesReferencia: mesAtual, obs:'' };
 
         const [mesRef, setMesRef] = React.useState(mesAtual);
+        const [filtroTipo, setFiltroTipo] = React.useState('mes');
+        const [dataIni, setDataIni] = React.useState(mesAtual+'-01');
+        const [dataFim, setDataFim] = React.useState(()=>{
+          const d=new Date(hoje.getFullYear(),hoje.getMonth()+1,0);
+          return mesAtual+'-'+String(d.getDate()).padStart(2,'0');
+        });
+        const [filtroColab, setFiltroColab] = React.useState('');
         const [lista, setLista] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
         const [status, setStatus] = React.useState(null);
         const [mostrarForm, setMostrarForm] = React.useState(false);
         const [form, setForm] = React.useState(VAZIO);
 
-        const carregar = async () => {
+        const carregar = async (tipo, _mes, _ini, _fim) => {
           if(!empresaId) return;
+          const modo = tipo ?? filtroTipo;
           setLoading(true);
-          const {data,error} = await _supa.from('compras').select('*').eq('empresa_id',empresaId).eq('mes_referencia',mesRef).order('data_compra',{ascending:false});
+          let q = _supa.from('compras').select('*').eq('empresa_id',empresaId);
+          if(modo==='mes'){
+            q = q.eq('mes_referencia', _mes ?? mesRef);
+          } else {
+            const ini = _ini ?? dataIni;
+            const fim = _fim ?? dataFim;
+            if(!ini||!fim){ setLoading(false); return; }
+            q = q.gte('data_compra', ini).lte('data_compra', fim);
+          }
+          const {data,error} = await q.order('data_compra',{ascending:false});
           if(!error) setLista(data||[]);
           setLoading(false);
         };
 
         React.useEffect(()=>{ carregar(); },[empresaId,mesRef]);
+
+        const listaFiltrada = React.useMemo(()=>{
+          if(!filtroColab) return lista;
+          return lista.filter(c=>c.colaborador_nome===filtroColab);
+        },[lista,filtroColab]);
 
         const salvar = async () => {
           if(!form.colaboradorNome||!form.produto||!form.valor||!form.dataCompra){
@@ -3481,7 +3503,7 @@
           carregar();
         };
 
-        const resumoPorColab = Object.values(lista.reduce((acc,c)=>{
+        const resumoPorColab = Object.values(listaFiltrada.reduce((acc,c)=>{
           if(c.status!=='pendente') return acc;
           const k = c.colaborador_nome;
           if(!acc[k]) acc[k]={nome:k,total:0,qtd:0};
@@ -3553,10 +3575,40 @@
               </div>
             )}
 
-            <div style={{...s.card,display:"flex",gap:12,alignItems:"flex-end",marginBottom:16}}>
-              <div>
-                <label style={s.label}>Mês de referência</label>
-                <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={s.input}/>
+            <div style={{...s.card,marginBottom:16}}>
+              <div style={{display:"flex",gap:8,marginBottom:12}}>
+                {['mes','periodo'].map(t=>(
+                  <button key={t} onClick={()=>{setFiltroTipo(t); if(t==='mes') carregar('mes');}} style={{...s.btnOutline,fontWeight:filtroTipo===t?700:400,background:filtroTipo===t?C.pri:"transparent",color:filtroTipo===t?"#fff":C.text,borderColor:C.pri,padding:"5px 14px",fontSize:12}}>
+                    {t==='mes'?'📅 Mês de Referência':'📆 Período Personalizado'}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+                {filtroTipo==='mes'?(
+                  <div>
+                    <label style={s.label}>Mês de referência</label>
+                    <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={s.input}/>
+                  </div>
+                ):(
+                  <>
+                    <div>
+                      <label style={s.label}>De</label>
+                      <input type="date" value={dataIni} onChange={e=>setDataIni(e.target.value)} style={s.input}/>
+                    </div>
+                    <div>
+                      <label style={s.label}>Até</label>
+                      <input type="date" value={dataFim} onChange={e=>setDataFim(e.target.value)} style={s.input}/>
+                    </div>
+                    <button onClick={()=>carregar('periodo')} style={{...s.btn,alignSelf:"flex-end"}}>🔍 Buscar</button>
+                  </>
+                )}
+                <div>
+                  <label style={s.label}>Colaborador</label>
+                  <select value={filtroColab} onChange={e=>setFiltroColab(e.target.value)} style={s.input}>
+                    <option value="">Todos</option>
+                    {[...new Set(lista.map(c=>c.colaborador_nome))].sort((a,b)=>(a||'').localeCompare(b||'','pt')).map(n=>(<option key={n} value={n}>{n}</option>))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -3593,9 +3645,9 @@
                 <tbody>
                   {loading?(
                     <tr><td colSpan={8} style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</td></tr>
-                  ):lista.length===0?(
+                  ):listaFiltrada.length===0?(
                     <tr><td colSpan={8} style={{textAlign:"center",padding:"32px",color:C.muted}}>Nenhuma compra registrada no período.</td></tr>
-                  ):lista.map(c=>{
+                  ):listaFiltrada.map(c=>{
                     const dt = c.data_compra?new Date(c.data_compra+'T12:00:00'):null;
                     const isPendente = c.status==='pendente';
                     return (
@@ -3672,6 +3724,14 @@
 
         const hhmmToMin = str => { if(!str||str==="00:00") return 0; const [h,m]=str.split(":"); return parseInt(h)*60+parseInt(m||0); };
         const horVal = h => h && h !== "" && h !== "00:00";
+        const normNome = n => String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+        const jornadasMap = React.useMemo(()=>{
+          const m={};
+          (colabAPI||[]).forEach(c=>{ const k=normNome(c.nome); if(k) m[k]=c.jornada||'SEG-SAB'; });
+          return m;
+        },[colabAPI]);
+        const toMin = s => { if(!s||s==='00:00'||s===''||s==='—') return 0; const [h,mm]=String(s).split(':'); return parseInt(h||0)*60+parseInt(mm||0); };
+        const toHHMM = m => `${String(Math.floor(Math.abs(m)/60)).padStart(2,'0')}:${String(Math.abs(m)%60).padStart(2,'0')}`;
 
         const carregar = async (tipo, _mes, _ini, _fim) => {
           if(!empresaId) return;
@@ -3877,6 +3937,7 @@
                         <th style={s.thC}>E1</th><th style={s.thC}>S1</th><th style={s.thC}>E2</th><th style={s.thC}>S2</th>
                         <th style={s.thC}>B1</th><th style={s.thC}>B2</th><th style={s.thC}>B3</th><th style={s.thC}>B4</th>
                         <th style={s.thC}>H.Extra</th>
+                        <th style={s.thC}>H.Falta</th>
                         <th style={{...s.th,minWidth:120}}>Status</th>
                         <th style={s.th}>Fonte</th>
                       </tr></thead>
@@ -3887,7 +3948,14 @@
                           const temBatida = horVal(r.real_b1)||horVal(r.real_b2)||horVal(r.real_b3)||horVal(r.real_b4);
                           const temPrev = horVal(r.previsto_e1)||horVal(r.previsto_s1);
                           const isFeriado = feriados.includes(r.data);
-                          const isFalta = temPrev && !temBatida && !r.status_manual && !isFeriado;
+                          const jornada = jornadasMap[normNome(nome)] || 'SEG-SAB';
+                          const ehSabado = dt.getDay() === 6;
+                          const isFolga = jornada === 'SEG-SEX' && ehSabado;
+                          const isFalta = temPrev && !temBatida && !r.status_manual && !isFeriado && !isFolga;
+                          const workedMin = Math.max(0, toMin(r.real_b2)-toMin(r.real_b1)) + (horVal(r.real_b3)&&horVal(r.real_b4) ? Math.max(0, toMin(r.real_b4)-toMin(r.real_b3)) : 0);
+                          const scheduledMin = (isFolga||isFeriado) ? 0 : Math.max(0, toMin(r.previsto_s1)-toMin(r.previsto_e1)) + (horVal(r.previsto_e2)&&horVal(r.previsto_s2) ? Math.max(0, toMin(r.previsto_s2)-toMin(r.previsto_e2)) : 0);
+                          const calcExtraMin = temBatida && scheduledMin>0 ? Math.max(0, workedMin - scheduledMin) : 0;
+                          const calcFaltaMin = temPrev && !isFolga && !isFeriado && scheduledMin>0 ? Math.max(0, scheduledMin - workedMin) : 0;
                           const foiEditado = r.fonte==='editado';
                           const editandoEste = (campo) => editando?.id===r.id && editando?.campo===campo;
                           const CelulaBatida = ({campo, valor}) => {
@@ -3914,7 +3982,7 @@
                             );
                           };
                           return (
-                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:foiEditado?"#FFFBEB":isFeriado?C.feriado:isFalta?"#FFF0F0":i%2===0?"var(--c-card)":"var(--c-subtle)"}}>
+                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:foiEditado?"#FFFBEB":isFeriado?C.feriado:isFolga?"var(--c-subtle)":isFalta?"#FFF0F0":i%2===0?"var(--c-card)":"var(--c-subtle)"}}>
                               <td style={{...s.td,fontWeight:600}}>
                                 {dt.toLocaleDateString('pt-BR')} <span style={{fontSize:10,color:C.muted}}>{dow}</span>
                                 {isFeriado&&<div style={{fontSize:9,fontWeight:700,color:"var(--c-feriado-text)",marginTop:1}}>{feriadoNomeMap[r.data]||"Feriado"}</div>}
@@ -3927,7 +3995,8 @@
                               <CelulaBatida campo="real_b2" valor={r.real_b2}/>
                               <CelulaBatida campo="real_b3" valor={r.real_b3}/>
                               <CelulaBatida campo="real_b4" valor={r.real_b4}/>
-                              <td style={{...s.tdC,color:hhmmToMin(r.hora_extra)>0?C.green:C.muted,fontWeight:hhmmToMin(r.hora_extra)>0?700:400}}>{r.hora_extra||"00:00"}</td>
+                              <td style={{...s.tdC,color:calcExtraMin>0?C.green:C.muted,fontWeight:calcExtraMin>0?700:400}}>{calcExtraMin>0?toHHMM(calcExtraMin):"00:00"}</td>
+                              <td style={{...s.tdC,color:calcFaltaMin>0?C.danger:C.muted,fontWeight:calcFaltaMin>0?700:400}}>{calcFaltaMin>0?toHHMM(calcFaltaMin):"00:00"}</td>
                               <td style={s.td}>
                                 <select value={r.status_manual||""} onChange={e=>salvarStatus(r.id,e.target.value)}
                                   style={{fontSize:11,border:`1px solid ${C.border}`,borderRadius:4,padding:"2px 4px",
@@ -3935,6 +4004,7 @@
                                   {STATUS_OPTS.map(o=>(<option key={o.v} value={o.v}>{o.l}</option>))}
                                 </select>
                                 {isFalta&&<span style={{marginLeft:4,fontSize:10,color:C.danger,fontWeight:700}}>FALTA</span>}
+                                {isFolga&&<span style={{marginLeft:4,fontSize:10,color:C.muted,fontWeight:700}}>FOLGA</span>}
                               </td>
                               <td style={{...s.td,fontSize:10,color:foiEditado?'#92400E':C.muted,fontWeight:foiEditado?700:400}}>
                                 {foiEditado?'✏️ editado':'csv'}
