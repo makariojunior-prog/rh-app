@@ -1736,38 +1736,6 @@
             </div>
             {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok===true?"#DCFCE7":status.ok===false?"#FEE2E2":"#FEF9C3",color:status.ok===true?"#166534":status.ok===false?"#991B1B":"#713F12",fontSize:13,whiteSpace:"pre-line"}}>{status.msg}</div>}
             <input style={{...s.input,marginBottom:16}} placeholder="Buscar por nome ou função..." value={busca} onChange={e=>setBusca(e.target.value)}/>
-            {showFeriados&&(
-              <div style={{...s.card,marginBottom:16}}>
-                <div style={{...s.cardTitle,marginBottom:12}}>📅 Feriados do Período</div>
-                <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:14,flexWrap:"wrap"}}>
-                  <div>
-                    <label style={s.label}>Data</label>
-                    <input type="date" value={novoFeriado} onChange={e=>setNovoFeriado(e.target.value)} style={{...s.input,width:160}}/>
-                  </div>
-                  <button onClick={adicionarFeriado} style={s.btn} disabled={!novoFeriado}>+ Adicionar feriado</button>
-                </div>
-                {feriadosPeriodo.length===0?(
-                  <div style={{fontSize:13,color:C.muted,padding:"8px 0"}}>Nenhum feriado cadastrado no período atual.</div>
-                ):(
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                    {feriadosPeriodo.map(d=>{
-                      const dt=new Date(d+"T12:00:00");
-                      const nome=feriadoNomeMap[d];
-                      return(
-                        <div key={d} style={{display:"flex",alignItems:"center",gap:6,background:C.feriado,border:"1px solid var(--c-feriado-border)",borderRadius:7,padding:"5px 10px",fontSize:12}}>
-                          <span style={{fontWeight:700,color:"var(--c-feriado-text)"}}>{dt.toLocaleDateString("pt-BR")}</span>
-                          {nome&&<span style={{color:"var(--c-feriado-text)",fontSize:11}}>— {nome}</span>}
-                          <button onClick={()=>removerFeriado(d)} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontWeight:700,fontSize:12,lineHeight:1,padding:"0 2px"}} title="Remover">✕</button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:11}}>
-                  💡 Feriados nacionais são preenchidos automaticamente. Adicione feriados municipais ou estaduais acima. Alterações aqui refletem também na Folha de Pagamento.
-                </div>
-              </div>
-            )}
 
             {loading?(
               <div style={{textAlign:"center",padding:40,color:C.muted}}>Carregando...</div>
@@ -3854,6 +3822,39 @@
                 </div>
               )}
             </div>
+
+            {showFeriados&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{...s.cardTitle,marginBottom:12}}>📅 Feriados do Período</div>
+                <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:14,flexWrap:"wrap"}}>
+                  <div>
+                    <label style={s.label}>Data</label>
+                    <input type="date" value={novoFeriado} onChange={e=>setNovoFeriado(e.target.value)} style={{...s.input,width:160}}/>
+                  </div>
+                  <button onClick={adicionarFeriado} style={s.btn} disabled={!novoFeriado}>+ Adicionar feriado</button>
+                </div>
+                {feriadosPeriodo.length===0?(
+                  <div style={{fontSize:13,color:C.muted,padding:"8px 0"}}>Nenhum feriado cadastrado no período atual.</div>
+                ):(
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {feriadosPeriodo.map(d=>{
+                      const dt=new Date(d+"T12:00:00");
+                      const nome=feriadoNomeMap[d];
+                      return(
+                        <div key={d} style={{display:"flex",alignItems:"center",gap:6,background:C.feriado,border:"1px solid var(--c-feriado-border)",borderRadius:7,padding:"5px 10px",fontSize:12}}>
+                          <span style={{fontWeight:700,color:"var(--c-feriado-text)"}}>{dt.toLocaleDateString("pt-BR")}</span>
+                          {nome&&<span style={{color:"var(--c-feriado-text)",fontSize:11}}>— {nome}</span>}
+                          <button onClick={()=>removerFeriado(d)} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontWeight:700,fontSize:12,lineHeight:1,padding:"0 2px"}} title="Remover">✕</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:11}}>
+                  💡 Feriados nacionais são preenchidos automaticamente. Adicione feriados municipais ou estaduais acima. Alterações aqui refletem também na Folha de Pagamento.
+                </div>
+              </div>
+            )}
 
             {loading?(
               <div style={{...s.card,textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
