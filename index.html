@@ -4566,8 +4566,9 @@
                 const realMin = ((hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1)) || 0) +
                                 ((hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3)) || 0);
                 if (realMin > 0 && prevMin > 0) {
-                  if (realMin > prevMin) horasExtrasMin += (realMin - prevMin);
-                  else if (prevMin > realMin) horasFaltasMin += (prevMin - realMin);
+                  const diff = realMin - prevMin;
+                  if (diff > 10) horasExtrasMin += diff;
+                  else if (diff < -10) horasFaltasMin += (-diff);
                 }
                 // Atraso injustificado (> 10 min de tolerância)
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
