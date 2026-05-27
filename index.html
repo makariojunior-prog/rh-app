@@ -4561,10 +4561,11 @@
             if (a.status === "trabalhou") {
               diasTrabalhados++;
               if (diaDados) {
-                const prevMin = (hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) +
-                                (hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
-                const realMin = ((hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1)) || 0) +
-                                ((hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3)) || 0);
+                const prevMin = Math.max(0, hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) +
+                                Math.max(0, hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
+                const _s1r = hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1);
+                const _s2r = hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3);
+                const realMin = (_s1r > 0 ? _s1r : 0) + (_s2r > 0 ? _s2r : 0);
                 if (realMin > 0 && prevMin > 0) {
                   const diff = realMin - prevMin;
                   if (diff > 10) horasExtrasMin += diff;
@@ -4612,27 +4613,34 @@
             // abono não gera perda de DSR (já tratado pelo status diferente de "falta")
           });
 
-          // CAJU: só recebe dias trabalhados + atestados + férias que sejam APÓS experiência
+          // CAJU: R$5 por dia trabalhado no período — faltas e atestados completos não contam
           let diasUteisPrevistos = 0;
           let cajuDias = 0;
           let diasEmExperiencia = 0;
           datasPeriodo.forEach(iso=>{
-            const diaDados = dados?.dias?.[iso];
-            const horarioValido = (h)=> h && h !== "" && h !== "00:00";
-            const temPrev = diaDados && (horarioValido(diaDados.previsto.e1) || horarioValido(diaDados.previsto.s1) || horarioValido(diaDados.previsto.e2) || horarioValido(diaDados.previsto.s2));
-            if (temPrev) diasUteisPrevistos++;
-
-            // Está em experiência neste dia?
+            const diaDadosC = dados?.dias?.[iso];
+            const hvC = h => h && h !== "" && h !== "00:00";
+            const temPrevC = diaDadosC && (hvC(diaDadosC.previsto.e1)||hvC(diaDadosC.previsto.s1)||hvC(diaDadosC.previsto.e2)||hvC(diaDadosC.previsto.s2));
+            if (temPrevC) diasUteisPrevistos++;
             const dtDia = new Date(iso+"T12:00:00");
-            const emExperiencia = fimExperiencia && dtDia <= fimExperiencia;
-            if (emExperiencia && temPrev) diasEmExperiencia++;
+            const emExp = fimExperiencia && dtDia <= fimExperiencia;
+            if (emExp && temPrevC) diasEmExperiencia++;
 
-            // Conta caju só se já saiu da experiência E está presente/atestado/férias (não conta falta)
-            if (!emExperiencia && temPrev) {
-              const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
-              if (a.status === "trabalhou" || a.status === "atestado_meio") {
-                cajuDias++;
-              }
+            // Dias que nunca contam para Caju
+            const dow = dtDia.getDay();
+            const jornada = colabInfo?.jornada || "SEG-SAB";
+            if (dow === 0) return; // Domingo
+            if (jornada === "SEG-SEX" && dow === 6) return; // Sábado fora da escala
+            if (feriados.includes(iso)) return; // Feriado
+
+            const aCaju = analisarDia(nomeKey, iso, diaDadosC, colabInfo);
+            // Conta: trabalhou, atestado_meio
+            if (aCaju.status === "trabalhou" || aCaju.status === "atestado_meio") {
+              cajuDias++;
+            }
+            // Sem dados de ponto num dia útil → presume presença (não falta/atestado/férias explícita)
+            else if (aCaju.status === "nao_previsto") {
+              cajuDias++;
             }
           });
           const cajuValor = cajuDias * 5;
@@ -4804,11 +4812,11 @@
         };
 
         const exportarCSVFolha = () => {
-          const header = ["Período","Colaborador","Função","Dias Trab.","Faltas","Atestados","Férias","H.Extras","DSR Perd.","Caju Dias","Caju R$","Produtos R$","Adiant. R$","Total Desc. R$","Banco Horas","Dias Faltas"];
+          const header = ["Período","Colaborador","Função","Dias Trab.","Faltas","Atestados","Férias","H.Extras","H.Faltas Parcial","DSR Perd.","Caju Dias","Caju R$","Produtos R$","Adiant. R$","Total Desc. R$","Banco Horas","Dias Faltas"];
           const rows = resultados.map(r=>[
             periodoLabel, r.nome, r.funcao,
             r.calc.diasTrabalhados, r.calc.faltas, r.calc.atestados, r.calc.ferias,
-            r.calc.horasExtras, r.calc.dsrPerdidos,
+            r.calc.horasExtras, r.calc.horasFaltasMin>0?r.calc.horasFaltas:"", r.calc.dsrPerdidos,
             r.calc.cajuDias, r.calc.cajuValor.toFixed(2).replace(".",","),
             r.calc.produtos.toFixed(2).replace(".",","),
             r.calc.adiantamento.toFixed(2).replace(".",","),
@@ -5121,6 +5129,7 @@
                           <th style={{...s.th,minWidth:200}}>Horas Faltas (Datas)</th>
                           <th style={{...s.thC,minWidth:110}}>Desconto DSR</th>
                           <th style={{...s.thC,minWidth:110}}>H. Faltas Parcial</th>
+                          <th style={{...s.thC,minWidth:90}}>Caju R$</th>
                           <th style={{...s.thC,minWidth:100}}>Antecipação</th>
                           <th style={{...s.thC,minWidth:110}}>Prêmio 5% (Dias)</th>
                           <th style={{...s.thC,minWidth:100}}>Comissão</th>
@@ -5159,6 +5168,7 @@
                                 )}
                               </td>
                               <td style={{...s.tdC,color:r.calc.horasFaltasMin>0?C.amber:C.muted,fontWeight:600}}>{r.calc.horasFaltasMin>0?r.calc.horasFaltas:"—"}</td>
+                              <td style={{...s.tdC,color:r.calc.cajuDias>0?C.green:C.muted,fontWeight:600}}>{r.calc.cajuDias>0?fmtBRL(r.calc.cajuValor):"—"}</td>
                               <td style={{...s.tdC,fontWeight:600,color:r.calc.adiantamento>0?C.danger:C.muted}}>
                                 {r.calc.adiantamento>0?fmtBRL(r.calc.adiantamento):"—"}
                                 {r.calc.adiantFixo>0&&<div style={{fontSize:9,color:"#7C3AED",marginTop:1}}>📌 {fmtBRL(r.calc.adiantFixo)} fixo</div>}
