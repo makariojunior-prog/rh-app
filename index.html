@@ -2574,10 +2574,14 @@
           {k:'banco',     l:'Banco',      bg:'#F3F4F6',c:'#374151'},
         ];
         const STATUS_E=[
-          {k:'agendada', l:'Agendada', bg:'#EDE9FE',c:'#6D28D9'},
-          {k:'realizada',l:'Realizada',bg:'#DCFCE7',c:'#166534'},
-          {k:'cancelada',l:'Cancelada',bg:'#FEE2E2',c:'#991B1B'},
+          {k:'agendada',  l:'Agendada',  bg:'#EDE9FE',c:'#6D28D9'},
+          {k:'aprovado',  l:'Aprovado',  bg:'#DCFCE7',c:'#166534'},
+          {k:'reprovado', l:'Reprovado', bg:'#FEE2E2',c:'#991B1B'},
+          {k:'cancelado', l:'Cancelado', bg:'#F3F4F6',c:'#374151'},
+          {k:'realizada', l:'Realizada', bg:'#D1FAE5',c:'#065F46'},
+          {k:'cancelada', l:'Cancelada', bg:'#FEE2E2',c:'#991B1B'},
         ];
+        const MOTIVOS_E=['Distância','Salário','Benefícios','Horário','Funções','Outros'];
         const corC=(st)=>STATUS_C.find(x=>x.k===st)||STATUS_C[0];
         const corE=(st)=>STATUS_E.find(x=>x.k===st)||STATUS_E[0];
 
@@ -2657,15 +2661,16 @@
         };
 
         const salvarResultado = async () => {
-          if(!resultado) return;
+          if(!resultado||!resultado.status) return;
+          const motivo = (resultado.status==='reprovado'||resultado.status==='cancelado') ? resultado.motivo||null : null;
           await _supa.from('entrevistas').update({
-            status:resultado.status, avaliacao:resultado.avaliacao||null, obs:resultado.obs||null
+            status:resultado.status, motivo, obs:resultado.obs||null
           }).eq('id',resultado.id);
-          if(resultado.status==='realizada'&&resultado.avaliacao){
+          if(resultado.status==='aprovado'||resultado.status==='reprovado'){
             const entrev = entrevistas.find(x=>x.id===resultado.id);
             if(entrev){
               const cand = candidatos.find(c=>c.nome===entrev.candidato_nome);
-              if(cand) atualizarStatusC(cand.id, resultado.avaliacao>=4?'aprovado':'reprovado');
+              if(cand) atualizarStatusC(cand.id, resultado.status);
             }
           }
           setResultado(null); carregarEntrevistas();
@@ -2724,6 +2729,7 @@
                 <button style={tabSt('entrevistas')} onClick={()=>setAba('entrevistas')}>📅 Entrevistas</button>
                 <button style={tabSt('log')} onClick={()=>{setAba('log');carregarLogs();}}>🔍 Log</button>
                 <button style={tabSt('formulario')} onClick={()=>{setAba('formulario');carregarConfig();}}>⚙️ Formulário</button>
+                <button style={tabSt('estatisticas')} onClick={()=>setAba('estatisticas')}>📊 Estatísticas</button>
               </div>
             </div>
 
@@ -2856,26 +2862,30 @@
                     <div style={{fontWeight:700,color:'#6D28D9',marginBottom:14,fontSize:13,textTransform:'uppercase'}}>📝 Registrar Resultado</div>
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
                       <div style={{marginBottom:14}}>
-                        <label style={s.label}>Status</label>
-                        <select value={resultado.status} onChange={e=>setResultado(p=>({...p,status:e.target.value}))} style={s.input}>
-                          {STATUS_E.map(se=>(<option key={se.k} value={se.k}>{se.l}</option>))}
+                        <label style={s.label}>Resultado *</label>
+                        <select value={resultado.status} onChange={e=>setResultado(p=>({...p,status:e.target.value,motivo:''}))} style={s.input}>
+                          <option value="">Selecione...</option>
+                          <option value="aprovado">✅ Aprovado</option>
+                          <option value="reprovado">❌ Reprovado</option>
+                          <option value="cancelado">🚫 Cancelado</option>
                         </select>
                       </div>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Avaliação</label>
-                        <div style={{display:'flex',gap:6,paddingTop:8}}>
-                          {[1,2,3,4,5].map(n=>(
-                            <span key={n} onClick={()=>setResultado(p=>({...p,avaliacao:n}))} style={{fontSize:26,cursor:'pointer',color:n<=(resultado.avaliacao||0)?'#F59E0B':'#D1D5DB',lineHeight:1}}>★</span>
-                          ))}
+                      {(resultado.status==='reprovado'||resultado.status==='cancelado')&&(
+                        <div style={{marginBottom:14}}>
+                          <label style={s.label}>Motivo</label>
+                          <select value={resultado.motivo||''} onChange={e=>setResultado(p=>({...p,motivo:e.target.value}))} style={s.input}>
+                            <option value="">Selecione o motivo...</option>
+                            {MOTIVOS_E.map(m=>(<option key={m} value={m}>{m}</option>))}
+                          </select>
                         </div>
-                      </div>
+                      )}
                       <div style={{marginBottom:14,gridColumn:'1/-1'}}>
-                        <label style={s.label}>Observações do resultado</label>
+                        <label style={s.label}>Observações</label>
                         <input type="text" value={resultado.obs||''} onChange={e=>setResultado(p=>({...p,obs:e.target.value}))} style={s.input}/>
                       </div>
                     </div>
                     <div style={{display:'flex',gap:10}}>
-                      <button onClick={salvarResultado} style={s.btn}>💾 Salvar Resultado</button>
+                      <button onClick={salvarResultado} style={s.btn} disabled={!resultado.status}>💾 Salvar Resultado</button>
                       <button onClick={()=>setResultado(null)} style={s.btnOutline}>Cancelar</button>
                     </div>
                   </div>
@@ -2896,7 +2906,7 @@
                         <th style={s.th}>Data</th><th style={s.th}>Hora</th>
                         <th style={s.th}>Entrevistador</th>
                         <th style={{...s.th,textAlign:'center'}}>Status</th>
-                        <th style={{...s.th,textAlign:'center'}}>Aval.</th>
+                        <th style={{...s.th,textAlign:'center'}}>Motivo</th>
                         <th style={{...s.th,textAlign:'right'}}></th>
                       </tr></thead>
                       <tbody>
@@ -2910,13 +2920,11 @@
                               <td style={{...s.td,fontSize:12}}>{e.hora_entrevista||'—'}</td>
                               <td style={{...s.td,fontSize:12}}>{e.entrevistador||'—'}</td>
                               <td style={{...s.td,textAlign:'center'}}><span style={{background:cor.bg,color:cor.c,padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700}}>{cor.l}</span></td>
-                              <td style={{...s.td,textAlign:'center'}}>
-                                {e.avaliacao?[1,2,3,4,5].map(n=>(<span key={n} style={{color:n<=e.avaliacao?'#F59E0B':'#D1D5DB',fontSize:13}}>★</span>)):'—'}
-                              </td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{e.motivo||'—'}</td>
                               <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
                                 <span style={{display:'flex',gap:4,justifyContent:'flex-end',flexWrap:'nowrap'}}>
                                   <button onClick={()=>{setFormE({candidatoNome:e.candidato_nome,vaga:e.vaga||'',dataEntrevista:e.data_entrevista||'',horaEntrevista:e.hora_entrevista||'',entrevistador:e.entrevistador||'',localEntrevista:e.local_entrevista||'',obs:e.obs||''});setEditandoE(e.id);setMostrarFormE(true);}} style={{background:'none',border:'1px solid '+C.border,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>✏️</button>
-                                  {e.status==='agendada'&&<button onClick={()=>setResultado({id:e.id,status:'realizada',avaliacao:0,obs:''})} style={{background:'none',border:'1px solid #A78BFA',color:'#6D28D9',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>📝 Resultado</button>}
+                                  {e.status==='agendada'&&<button onClick={()=>setResultado({id:e.id,status:'',motivo:'',obs:''})} style={{background:'none',border:'1px solid #A78BFA',color:'#6D28D9',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>📝 Resultado</button>}
                                   <button onClick={()=>excluirEntrevista(e)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>🗑️</button>
                                 </span>
                               </td>
@@ -2989,6 +2997,57 @@
                   <button onClick={salvarConfig} disabled={savingCfg} style={s.btn}>{savingCfg?'⏳ Salvando...':'💾 Salvar Configurações'}</button>
                 </div>
                 )}
+              </div>
+            )}
+
+            {aba==='estatisticas'&&(
+              <div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:16}}>
+                  {[
+                    {l:'Total',v:entrevistas.length,c:C.text,bg:'var(--c-card)'},
+                    {l:'Aprovados',v:entrevistas.filter(e=>e.status==='aprovado').length,c:'#166534',bg:'#DCFCE7'},
+                    {l:'Reprovados',v:entrevistas.filter(e=>e.status==='reprovado').length,c:'#991B1B',bg:'#FEE2E2'},
+                    {l:'Cancelados',v:entrevistas.filter(e=>e.status==='cancelado').length,c:'#374151',bg:'#F3F4F6'},
+                  ].map(({l,v,c,bg})=>(
+                    <div key={l} style={{...s.card,background:bg,textAlign:'center',padding:'20px 16px'}}>
+                      <div style={{fontSize:32,fontWeight:900,color:c}}>{v}</div>
+                      <div style={{fontSize:12,color:c,fontWeight:700,marginTop:4}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+                {(()=>{
+                  const reprovCanc = entrevistas.filter(e=>e.status==='reprovado'||e.status==='cancelado');
+                  const total = reprovCanc.length;
+                  return (
+                    <div style={s.card}>
+                      <div style={{fontWeight:700,fontSize:14,color:C.pri,marginBottom:16}}>❌ Motivos de Reprovação / Cancelamento</div>
+                      {total===0?(
+                        <div style={{textAlign:'center',color:C.muted,padding:'24px'}}>Nenhuma reprovação ou cancelamento registrado ainda.</div>
+                      ):(
+                        <div>
+                          {MOTIVOS_E.map(m=>{
+                            const cnt = reprovCanc.filter(e=>e.motivo===m).length;
+                            const pct = Math.round(cnt/total*100);
+                            return (
+                              <div key={m} style={{marginBottom:14}}>
+                                <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:5}}>
+                                  <span style={{fontWeight:600}}>{m}</span>
+                                  <span style={{color:C.muted,fontWeight:700}}>{cnt} ({pct}%)</span>
+                                </div>
+                                <div style={{height:10,background:'var(--c-subtle)',borderRadius:5,overflow:'hidden'}}>
+                                  <div style={{width:pct+'%',height:'100%',background:C.danger,borderRadius:5}}/>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {reprovCanc.filter(e=>!e.motivo).length>0&&(
+                            <div style={{fontSize:12,color:C.muted,marginTop:8}}>⚠️ {reprovCanc.filter(e=>!e.motivo).length} sem motivo registrado</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -4243,7 +4302,7 @@
             const fim=new Date(a,m-1,25).toISOString().split('T')[0];
             const {data}=await _supa.from('comissoes_mensais').select('colaborador_nome,valor_total').eq('empresa_id',empresaId).eq('data_fim',fim);
             const map={};
-            (data||[]).forEach(c=>{map[c.colaborador_nome]=(c.valor_total||0);});
+            (data||[]).forEach(c=>{map[normalizarNome(c.colaborador_nome)]=(c.valor_total||0);});
             setComissoesMap(map);
           }
           _loadComissoes();
@@ -4501,13 +4560,15 @@
             const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
             if (a.status === "trabalhou") {
               diasTrabalhados++;
-              if (diaDados?.horaExtra) horasExtrasMin += hhmmToMin(diaDados.horaExtra);
               if (diaDados) {
                 const prevMin = (hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) +
                                 (hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
                 const realMin = ((hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1)) || 0) +
                                 ((hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3)) || 0);
-                if (realMin > 0 && prevMin > realMin) horasFaltasMin += (prevMin - realMin);
+                if (realMin > 0 && prevMin > 0) {
+                  if (realMin > prevMin) horasExtrasMin += (realMin - prevMin);
+                  else if (prevMin > realMin) horasFaltasMin += (prevMin - realMin);
+                }
                 // Atraso injustificado (> 10 min de tolerância)
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
                 const realB1 = hhmmToMin(diaDados.real.b1);
@@ -4568,7 +4629,7 @@
             // Conta caju só se já saiu da experiência E está presente/atestado/férias (não conta falta)
             if (!emExperiencia && temPrev) {
               const a = analisarDia(nomeKey, iso, diaDados, colabInfo);
-              if (a.status === "trabalhou" || a.status === "atestado" || a.status === "atestado_meio" || a.status === "ferias") {
+              if (a.status === "trabalhou" || a.status === "atestado_meio") {
                 cajuDias++;
               }
             }
@@ -5108,8 +5169,8 @@
                                 }
                                 {temAtraso&&<div style={{fontSize:9,color:C.danger}}>atraso inject.</div>}
                               </td>
-                              <td style={{...s.tdC,fontWeight:700,color:comissoesMap[r.nome]>0?C.acc:C.muted}}>
-                                {comissoesMap[r.nome]>0?fmtBRL(comissoesMap[r.nome]):'—'}
+                              <td style={{...s.tdC,fontWeight:700,color:comissoesMap[r.nomeKey]>0?C.acc:C.muted}}>
+                                {comissoesMap[r.nomeKey]>0?fmtBRL(comissoesMap[r.nomeKey]):'—'}
                               </td>
                             </tr>
                           );
