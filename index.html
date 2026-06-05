@@ -268,7 +268,7 @@
           const em3dias = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
           Promise.all([
             _supa.from('atestados').select('colaborador_nome,setor,cid,inicio,fim').eq('empresa_id',empresaId).lte('inicio',em3dias).gte('fim',today),
-            _supa.from('ferias').select('colaborador_nome,inicio,fim,status').eq('empresa_id',empresaId).lte('inicio',em3dias).gte('fim',today).in('status',['agendado','em_gozo'])
+            _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status').eq('empresa_id',empresaId).lte('gozo_inicio',em3dias).gte('gozo_fim',today).in('status',['agendado','em_gozo'])
           ]).then(([atRes,fRes])=>{
             const getSetor = nome => (colabAPI.find(c=>c.nome===nome)||{}).setor||'Não informado';
             const atestados = (atRes.data||[]).map(a=>({
@@ -276,8 +276,8 @@
               cid:a.cid||'', inicio:a.inicio||'', fim:a.fim||'', tipo:'atestado'
             }));
             const ferias = (fRes.data||[]).map(f=>({
-              nome:f.colaborador_nome, setor:getSetor(f.colaborador_nome),
-              inicio:f.inicio||'', fim:f.fim||'', tipo:'ferias'
+              nome:f.nome, setor:getSetor(f.nome),
+              inicio:f.gozo_inicio||'', fim:f.gozo_fim||'', tipo:'ferias'
             }));
             const retornandoHoje = [
               ...atestados.filter(a=>a.fim===today),
@@ -1219,7 +1219,7 @@
             setHistoricoAtestados(data||[]);
           } catch(e) { setHistoricoAtestados([]); }
           try {
-            const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('inicio',{ascending:false});
+            const {data} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).ilike('nome','%'+colab.nome+'%').order('gozo_inicio',{ascending:false});
             setHistoricoFerias(data||[]);
           } catch(e) { setHistoricoFerias([]); }
           try {
@@ -1709,8 +1709,8 @@
                             const cores={agendado:{bg:"#EFF6FF",c:"#1D4ED8"},em_gozo:{bg:"#FEF9C3",c:"#92400E"},concluido:{bg:"#DCFCE7",c:"#166534"},cancelado:{bg:"#FEE2E2",c:"#991B1B"}};
                             const cor=cores[f.status]||cores.agendado;
                             return(<tr key={f.id} style={{borderTop:"1px solid "+C.border}}>
-                              <td style={{...s.td,fontSize:12}}>{f.inicio?new Date(f.inicio+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
-                              <td style={{...s.td,fontSize:12}}>{f.fim?new Date(f.fim+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
+                              <td style={{...s.td,fontSize:12}}>{f.gozo_inicio?new Date(f.gozo_inicio+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
+                              <td style={{...s.td,fontSize:12}}>{f.gozo_fim?new Date(f.gozo_fim+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
                               <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.status}</span></td>
                             </tr>);
@@ -2423,7 +2423,7 @@
 
         const carregar = async () => {
           setLoading(true);
-          const {data,error} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).order('inicio',{ascending:false});
+          const {data,error} = await _supa.from('ferias').select('*').eq('empresa_id',empresaId).order('gozo_inicio',{ascending:false});
           if(!error) setLista(data||[]);
           setLoading(false);
         };
@@ -2435,8 +2435,8 @@
           if(form.fim < form.inicio){ setStatus({ok:false,msg:'A data de fim não pode ser anterior ao início.'}); return; }
           setLoading(true);
           const {error} = await _supa.from('ferias').insert({
-            empresa_id:empresaId, colaborador_nome:form.colaboradorNome,
-            inicio:form.inicio, fim:form.fim, dias:calcDias(form.inicio,form.fim),
+            empresa_id:empresaId, nome:form.colaboradorNome,
+            gozo_inicio:form.inicio, gozo_fim:form.fim, dias:calcDias(form.inicio,form.fim),
             status:form.status, observacoes:form.observacoes||null
           });
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
@@ -2531,9 +2531,9 @@
                     const cor=CORES[f.status]||CORES.agendado;
                     return(
                       <tr key={f.id} style={{borderTop:"1px solid "+C.border,background:"#fff"}}>
-                        <td style={{...s.td,fontWeight:600}}>{f.colaborador_nome}</td>
-                        <td style={{...s.td,fontSize:12}}>{f.inicio?new Date(f.inicio+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
-                        <td style={{...s.td,fontSize:12}}>{f.fim?new Date(f.fim+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,fontWeight:600}}>{f.nome}</td>
+                        <td style={{...s.td,fontSize:12}}>{f.gozo_inicio?new Date(f.gozo_inicio+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                        <td style={{...s.td,fontSize:12}}>{f.gozo_fim?new Date(f.gozo_fim+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
                         <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
                         <td style={{...s.td,textAlign:"center"}}>
                           <span style={{background:cor.bg,color:cor.c,padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{cor.l}</span>
