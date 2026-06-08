@@ -2565,6 +2565,17 @@
       function RecrutamentoPage({ empresaId }) {
         function normStr(s){ return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]/g,'').toUpperCase(); }
 
+        function detectarSexo(nome) {
+          if(!nome) return 'Indeterminado';
+          const n = (nome||'').trim().toLowerCase();
+          const nomes_femininos = ['maria','ana','sandra','fernanda','paula','carla','juliana','patricia','teresa','monica','fatima','roseli','cristina','josiane','simone','renata','amanda','gabriela','jessica','natalia','carola','debora','alessandra','andreia','beatriz','leila','vanessa','tamara','vanete'];
+          const nomes_masculinos = ['joão','josé','carlos','luiz','francisco','antonio','paulo','jorge','miguel','marcos','luis','mario','sergio','andre','ricardo','roberto','bruno','andre','thiago','gustavo','rafael','leonardo','anderson','daniel','wagner','fabio','marcelo','cleison','osmar','romario','edson','osvaldo','orlando','rogerio','geraldo'];
+          for(let nf of nomes_femininos) if(n.includes(nf)) return 'Feminino';
+          for(let nm of nomes_masculinos) if(n.includes(nm)) return 'Masculino';
+          if(n.endsWith('a')||n.endsWith('ina')||n.endsWith('ela')||n.endsWith('uda')||n.endsWith('isa')) return 'Feminino';
+          return 'Masculino';
+        }
+
         const STATUS_C=[
           {k:'novo',      l:'Novo',       bg:'#DBEAFE',c:'#1D4ED8'},
           {k:'triagem',   l:'Triagem',    bg:'#FEF9C3',c:'#92400E'},
@@ -2591,6 +2602,9 @@
         const [statusMsg, setStatusMsg]   = React.useState(null);
         const [filtroVaga, setFiltroVaga] = React.useState('');
         const [filtroSt, setFiltroSt]     = React.useState('');
+        const [filtroSexo, setFiltroSexo] = React.useState('');
+        const [filtroExperiencia, setFiltroExperiencia] = React.useState('');
+        const [filterGoiania, setFilterGoiania] = React.useState('');
         const [busca, setBusca]           = React.useState('');
         const [expandido, setExpandido]   = React.useState(null);
         const [entrevistas, setEntrevistas] = React.useState([]);
@@ -2711,6 +2725,10 @@
         const filtrados = candidatos.filter(c=>{
           if(filtroVaga&&c.vaga!==filtroVaga) return false;
           if(filtroSt&&c.status!==filtroSt) return false;
+          if(filtroSexo&&detectarSexo(c.nome)!==filtroSexo) return false;
+          if(filterGoiania&&(c.mora_goiania?'sim':'não')!==filterGoiania) return false;
+          if(filtroExperiencia&&filtroExperiencia==='sim'&&!c.tem_experiencia) return false;
+          if(filtroExperiencia&&filtroExperiencia==='nao'&&c.tem_experiencia) return false;
           if(busca&&!(c.nome||'').toLowerCase().includes(busca.toLowerCase())) return false;
           return true;
         });
@@ -2738,14 +2756,29 @@
             {aba==='curriculos'&&(
               <div>
                 <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
-                  <input style={{...s.input,width:200,marginBottom:0}} placeholder="Buscar por nome..." value={busca} onChange={e=>setBusca(e.target.value)}/>
-                  <select style={{...s.input,width:170,marginBottom:0}} value={filtroVaga} onChange={e=>setFiltroVaga(e.target.value)}>
+                  <input style={{...s.input,width:180,marginBottom:0}} placeholder="Buscar por nome..." value={busca} onChange={e=>setBusca(e.target.value)}/>
+                  <select style={{...s.input,width:150,marginBottom:0}} value={filtroVaga} onChange={e=>setFiltroVaga(e.target.value)}>
                     <option value="">Todas as vagas</option>
                     {vagas.map(v=>(<option key={v} value={v}>{v}</option>))}
                   </select>
-                  <select style={{...s.input,width:140,marginBottom:0}} value={filtroSt} onChange={e=>setFiltroSt(e.target.value)}>
+                  <select style={{...s.input,width:130,marginBottom:0}} value={filtroSt} onChange={e=>setFiltroSt(e.target.value)}>
                     <option value="">Todos os status</option>
                     {STATUS_C.map(sc=>(<option key={sc.k} value={sc.k}>{sc.l}</option>))}
+                  </select>
+                  <select style={{...s.input,width:130,marginBottom:0}} value={filtroSexo} onChange={e=>setFiltroSexo(e.target.value)}>
+                    <option value="">Todos os sexos</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Feminino">Feminino</option>
+                  </select>
+                  <select style={{...s.input,width:130,marginBottom:0}} value={filterGoiania} onChange={e=>setFilterGoiania(e.target.value)}>
+                    <option value="">Mora em Goiânia?</option>
+                    <option value="sim">Sim</option>
+                    <option value="nao">Não</option>
+                  </select>
+                  <select style={{...s.input,width:150,marginBottom:0}} value={filtroExperiencia} onChange={e=>setFiltroExperiencia(e.target.value)}>
+                    <option value="">Experiência na área</option>
+                    <option value="sim">Tem experiência</option>
+                    <option value="nao">Sem experiência</option>
                   </select>
                   <div style={{flex:1}}/>
                 </div>
@@ -2789,6 +2822,7 @@
                               ab&&React.createElement('tr',{style:{background:'var(--c-subtle)'}},
                                 React.createElement('td',{colSpan:6,style:{padding:'16px 20px'}},
                                   React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px 20px',fontSize:13}},
+                                    React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Sexo (detectado)'),React.createElement('br'),React.createElement('strong',null,(detectarSexo(c.nome)==='Feminino'?'♀ ':'♂ ')+detectarSexo(c.nome))),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Mora em Goiânia'),React.createElement('br'),React.createElement('strong',null,c.mora_goiania?'Sim':'Não')),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Disponibilidade turno'),React.createElement('br'),React.createElement('strong',null,c.disponibilidade_turno?'Sim':'Não')),
                                     React.createElement('div',null,React.createElement('span',{style:{color:C.muted,fontSize:11}},'Pode começar'),React.createElement('br'),React.createElement('strong',null,c.pode_comecar||'—')),
@@ -4011,10 +4045,28 @@
                           const ehSabado = dt.getDay() === 6;
                           const isFolga = jornada === 'SEG-SEX' && ehSabado;
                           const isFalta = temPrev && !temBatida && !r.status_manual && !isFeriado && !isFolga;
-                          const workedMin = Math.max(0, toMin(r.real_b2)-toMin(r.real_b1)) + (horVal(r.real_b3)&&horVal(r.real_b4) ? Math.max(0, toMin(r.real_b4)-toMin(r.real_b3)) : 0);
-                          const scheduledMin = (isFolga||isFeriado) ? 0 : Math.max(0, toMin(r.previsto_s1)-toMin(r.previsto_e1)) + (horVal(r.previsto_e2)&&horVal(r.previsto_s2) ? Math.max(0, toMin(r.previsto_s2)-toMin(r.previsto_e2)) : 0);
-                          const calcExtraMin = temBatida && scheduledMin>0 ? Math.max(0, workedMin - scheduledMin) : 0;
-                          const calcFaltaMin = temPrev && !isFolga && !isFeriado && scheduledMin>0 ? Math.max(0, scheduledMin - workedMin) : 0;
+                          // Apuração POR INTERVALO (manhã/tarde) — mesma lógica de calcularColab,
+                          // para que H.Extra/H.Falta da linha batam com os totais do colaborador.
+                          const _p1 = toMin(r.previsto_s1)-toMin(r.previsto_e1);
+                          const _p2 = toMin(r.previsto_s2)-toMin(r.previsto_e2);
+                          const _r1 = toMin(r.real_b2)-toMin(r.real_b1);
+                          const _r2 = toMin(r.real_b4)-toMin(r.real_b3);
+                          const workedMin = Math.max(0,_r1) + Math.max(0,_r2);
+                          const scheduledMin = (isFolga||isFeriado) ? 0 : Math.max(0,_p1) + Math.max(0,_p2);
+                          let calcExtraMin = 0, calcFaltaMin = 0;
+                          if (!isFolga && !isFeriado && temBatida) {
+                            if (_p1>0 && _p2>0 && (_r1<=0 || _r2<=0)) {
+                              // batida incompleta com 2 intervalos previstos: usa vão total
+                              const ini = toMin(r.real_b1);
+                              const fim = Math.max(toMin(r.real_b4), toMin(r.real_b2));
+                              const realTot = (ini>0 && fim>ini) ? (fim-ini) : workedMin;
+                              const diff = realTot - (_p1+_p2);
+                              if (diff>0) calcExtraMin = diff; else if (diff<0) calcFaltaMin = -diff;
+                            } else {
+                              const acc = (prev,real)=>{ if(prev>0&&real>0){const d=real-prev; if(d>0)calcExtraMin+=d; else if(d<0)calcFaltaMin+=-d;} else if(prev>0&&real<=0){calcFaltaMin+=prev;} };
+                              acc(_p1,_r1); acc(_p2,_r2);
+                            }
+                          }
                           const foiEditado = r.fonte==='editado';
                           const editandoEste = (campo) => editando?.id===r.id && editando?.campo===campo;
                           const CelulaBatida = ({campo, valor}) => {
@@ -4561,15 +4613,45 @@
             if (a.status === "trabalhou") {
               diasTrabalhados++;
               if (diaDados) {
-                const prevMin = Math.max(0, hhmmToMin(diaDados.previsto.s1)-hhmmToMin(diaDados.previsto.e1)) +
-                                Math.max(0, hhmmToMin(diaDados.previsto.s2)-hhmmToMin(diaDados.previsto.e2));
-                const _s1r = hhmmToMin(diaDados.real.b2)-hhmmToMin(diaDados.real.b1);
-                const _s2r = hhmmToMin(diaDados.real.b4)-hhmmToMin(diaDados.real.b3);
-                const realMin = (_s1r > 0 ? _s1r : 0) + (_s2r > 0 ? _s2r : 0);
-                if (realMin > 0 && prevMin > 0) {
-                  const diff = realMin - prevMin;
-                  if (diff > 10) horasExtrasMin += diff;
-                  else if (diff < -10) horasFaltasMin += (-diff);
+                // H. Extra / H. Falt. são apuradas POR INTERVALO (manhã e tarde) separadamente,
+                // exatamente como o relógio de ponto externo. NÃO se pode somar a jornada toda
+                // e tirar a diferença líquida do dia: isso cancela extras de um intervalo contra
+                // faltas de outro (ex.: chega cedo de manhã mas sai cedo à tarde), produzindo MENOS
+                // extras e MENOS faltas do que o documento oficial. Sem tolerância de minutos —
+                // o ponto contabiliza minuto a minuto.
+                const prev1 = hhmmToMin(diaDados.previsto.s1) - hhmmToMin(diaDados.previsto.e1);
+                const prev2 = hhmmToMin(diaDados.previsto.s2) - hhmmToMin(diaDados.previsto.e2);
+                const real1 = hhmmToMin(diaDados.real.b2) - hhmmToMin(diaDados.real.b1);
+                const real2 = hhmmToMin(diaDados.real.b4) - hhmmToMin(diaDados.real.b3);
+                const temPar1 = real1 > 0;   // b1 e b2 batidos
+                const temPar2 = real2 > 0;   // b3 e b4 batidos
+                if ((prev1 > 0 && prev2 > 0) && (!temPar1 || !temPar2)) {
+                  // Jornada com 2 intervalos previstos mas batida incompleta (ex.: esqueceu de
+                  // bater o almoço). Não dá para apurar por intervalo sem inflar a falta — usa o
+                  // vão total (1ª batida → última batida) contra a jornada prevista total.
+                  const prevTot = prev1 + prev2;
+                  const ini = hhmmToMin(diaDados.real.b1);
+                  const fim = Math.max(hhmmToMin(diaDados.real.b4), hhmmToMin(diaDados.real.b2));
+                  const realTot = (ini > 0 && fim > ini) ? (fim - ini) : Math.max(real1, 0) + Math.max(real2, 0);
+                  if (realTot > 0) {
+                    const diff = realTot - prevTot;
+                    if (diff > 0) horasExtrasMin += diff;
+                    else if (diff < 0) horasFaltasMin += (-diff);
+                  }
+                } else {
+                  // Caso normal: apura cada intervalo (manhã e tarde) de forma independente.
+                  const acumularIntervalo = (prev, real) => {
+                    if (prev > 0 && real > 0) {
+                      const diff = real - prev;
+                      if (diff > 0) horasExtrasMin += diff;
+                      else if (diff < 0) horasFaltasMin += (-diff);
+                    } else if (prev > 0 && real <= 0) {
+                      // Intervalo previsto e sem o par de batidas: falta o intervalo inteiro.
+                      horasFaltasMin += prev;
+                    }
+                  };
+                  acumularIntervalo(prev1, real1); // manhã: previsto e1→s1, real b1→b2
+                  acumularIntervalo(prev2, real2); // tarde: previsto e2→s2, real b3→b4
                 }
                 // Atraso injustificado (> 10 min de tolerância)
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
