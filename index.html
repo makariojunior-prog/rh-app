@@ -3794,6 +3794,16 @@
         const [colabSetor, setColabSetor] = React.useState('');
         const [colabFuncao, setColabFuncao] = React.useState('');
         const [colabStatus, setColabStatus] = React.useState('ativo');
+        const [colabAdmissaoIni, setColabAdmissaoIni] = React.useState('');
+        const [colabAdmissaoFim, setColabAdmissaoFim] = React.useState('');
+        const [colabPericulosidade, setColabPericulosidade] = React.useState('');
+        const [colabComSalario, setColabComSalario] = React.useState(false);
+        const [colabComEmail, setColabComEmail] = React.useState(false);
+        const [colabComTelefone, setColabComTelefone] = React.useState(false);
+        const [colabCamposRelatorio, setColabCamposRelatorio] = React.useState({
+          nome:true, funcao:true, setor:true, salario:true, telefone:true, email:true,
+          admissao:true, encerramento:true, jornada:false, transporte:false, periculosidade:false
+        });
 
         // ── Filtros Férias ──
         const [feriasDataIni, setFeriasDataIni] = React.useState(mesAtual+'-01');
@@ -3827,15 +3837,30 @@
               let colabs = colabAPI;
               if(colabSetor) colabs = colabs.filter(c=>c.setor===colabSetor);
               if(colabFuncao) colabs = colabs.filter(c=>c.funcao===colabFuncao);
-              const dados = colabs.map(c=>({
-                Nome:c.nome,
-                Função:c.funcao||'—',
-                Setor:c.setor||'—',
-                Salário:fmtBRL(c.salario||0),
-                Telefone:c.telefone||'—',
-                Email:c.email||'—',
-                'Data Admissão':c.admissao||'—'
-              }));
+              if(colabStatus==='ativo') colabs = colabs.filter(c=>!c.encerramento);
+              if(colabStatus==='desligado') colabs = colabs.filter(c=>c.encerramento);
+              if(colabAdmissaoIni) colabs = colabs.filter(c=>c.admissao>=colabAdmissaoIni);
+              if(colabAdmissaoFim) colabs = colabs.filter(c=>c.admissao<=colabAdmissaoFim);
+              if(colabPericulosidade==='sim') colabs = colabs.filter(c=>c.periculosidade);
+              if(colabPericulosidade==='nao') colabs = colabs.filter(c=>!c.periculosidade);
+              if(colabComSalario) colabs = colabs.filter(c=>c.salario>0);
+              if(colabComEmail) colabs = colabs.filter(c=>c.email);
+              if(colabComTelefone) colabs = colabs.filter(c=>c.telefone);
+              const dados = colabs.map(c=>{
+                const row = {};
+                if(colabCamposRelatorio.nome) row['Nome'] = c.nome;
+                if(colabCamposRelatorio.funcao) row['Função'] = c.funcao||'—';
+                if(colabCamposRelatorio.setor) row['Setor'] = c.setor||'—';
+                if(colabCamposRelatorio.salario) row['Salário'] = fmtBRL(c.salario||0);
+                if(colabCamposRelatorio.telefone) row['Telefone'] = c.telefone||'—';
+                if(colabCamposRelatorio.email) row['Email'] = c.email||'—';
+                if(colabCamposRelatorio.admissao) row['Data Admissão'] = c.admissao||'—';
+                if(colabCamposRelatorio.encerramento) row['Encerramento'] = c.encerramento||'Ativo';
+                if(colabCamposRelatorio.jornada) row['Jornada'] = c.jornada||'SEG-SAB';
+                if(colabCamposRelatorio.transporte) row['VT (R$)'] = fmtBRL(c.transporte||0);
+                if(colabCamposRelatorio.periculosidade) row['Periculosidade'] = c.periculosidade?'Sim':'Não';
+                return row;
+              });
               setRelDados(dados);
             } else if(tipoRel==='ferias'){
               let query = _supa.from('ferias').select('*').eq('empresa_id',empresaId);
@@ -3937,13 +3962,54 @@
             {tipoRel==='colaboradores'&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:700,marginBottom:12,fontSize:13,color:C.pri,textTransform:"uppercase"}}>Filtros de Colaboradores</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
+
+                {/* Filtros principais */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:14}}>
                   <div><label style={s.label}>Setor</label><select value={colabSetor} onChange={e=>setColabSetor(e.target.value)} style={s.input}><option value="">Todos</option>{setoresUnicos.map(s=>(<option key={s} value={s}>{s}</option>))}</select></div>
                   <div><label style={s.label}>Função</label><select value={colabFuncao} onChange={e=>setColabFuncao(e.target.value)} style={s.input}><option value="">Todas</option>{funcoesUnicas.map(f=>(<option key={f} value={f}>{f}</option>))}</select></div>
-                  <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
-                    <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
-                    <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
+                  <div><label style={s.label}>Status</label><select value={colabStatus} onChange={e=>setColabStatus(e.target.value)} style={s.input}><option value="">Todos</option><option value="ativo">Ativo</option><option value="desligado">Desligado</option></select></div>
+                  <div><label style={s.label}>Periculosidade</label><select value={colabPericulosidade} onChange={e=>setColabPericulosidade(e.target.value)} style={s.input}><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+                </div>
+
+                {/* Período de admissão */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                  <div><label style={s.label}>Admissão a partir de</label><input type="date" value={colabAdmissaoIni} onChange={e=>setColabAdmissaoIni(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Admissão até</label><input type="date" value={colabAdmissaoFim} onChange={e=>setColabAdmissaoFim(e.target.value)} style={s.input}/></div>
+                </div>
+
+                {/* Filtros de dados preenchidos */}
+                <div style={{display:"flex",gap:16,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+                    <input type="checkbox" checked={colabComSalario} onChange={e=>setColabComSalario(e.target.checked)} style={{width:16,height:16}}/>
+                    <span>Apenas com Salário</span>
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+                    <input type="checkbox" checked={colabComEmail} onChange={e=>setColabComEmail(e.target.checked)} style={{width:16,height:16}}/>
+                    <span>Apenas com Email</span>
+                  </label>
+                  <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+                    <input type="checkbox" checked={colabComTelefone} onChange={e=>setColabComTelefone(e.target.checked)} style={{width:16,height:16}}/>
+                    <span>Apenas com Telefone</span>
+                  </label>
+                </div>
+
+                {/* Seleção de colunas */}
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginBottom:12}}>
+                  <div style={{fontWeight:600,fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>Colunas do Relatório</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8}}>
+                    {['nome','funcao','setor','salario','telefone','email','admissao','encerramento','jornada','transporte','periculosidade'].map(c=>(
+                      <label key={c} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,cursor:"pointer"}}>
+                        <input type="checkbox" checked={colabCamposRelatorio[c]} onChange={e=>setColabCamposRelatorio(p=>({...p,[c]:e.target.checked}))} style={{width:14,height:14}}/>
+                        <span>{c==='nome'?'Nome':c==='funcao'?'Função':c==='setor'?'Setor':c==='salario'?'Salário':c==='telefone'?'Telefone':c==='email'?'Email':c==='admissao'?'Data Admissão':c==='encerramento'?'Encerramento':c==='jornada'?'Jornada':c==='transporte'?'VT':c==='periculosidade'?'Periculosidade':c}</span>
+                      </label>
+                    ))}
                   </div>
+                </div>
+
+                {/* Botões */}
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar Relatório'}</button>
+                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 Baixar CSV</button>
                 </div>
               </div>
             )}
