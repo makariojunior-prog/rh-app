@@ -14,6 +14,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     :root {
       --c-bg:#F4F1EC; --c-card:#FFF; --c-text:#1A1A1A; --c-muted:#888;
@@ -3207,18 +3208,6 @@
         // ── Tabs ──
         const [aba, setAba] = React.useState('avulsos');
 
-        // ── Relatórios ──
-        const [relFiltroDataIni, setRelFiltroDataIni] = React.useState(()=>{
-          const d = new Date(); d.setMonth(d.getMonth()-3);
-          return d.toISOString().slice(0,10);
-        });
-        const [relFiltroDataFim, setRelFiltroDataFim] = React.useState(hoje);
-        const [relFiltroColab, setRelFiltroColab] = React.useState('');
-        const [relFiltroStatus, setRelFiltroStatus] = React.useState('');
-        const [relFiltroTipo, setRelFiltroTipo] = React.useState('ambos');
-        const [relDados, setRelDados] = React.useState([]);
-        const [relCarregando, setRelCarregando] = React.useState(false);
-
         // ── Avulsos ──
         const [mesRef, setMesRef] = React.useState(mesAtual);
         const [lista, setLista] = React.useState([]);
@@ -3347,51 +3336,6 @@
         const fixosAtivos = fixos.filter(f=>f.ativo);
         const totalFixosAtivos = fixosAtivos.reduce((s,f)=>s+Number(f.valor),0);
 
-        const gerarRelatorio = async () => {
-          if(!empresaId) return;
-          setRelCarregando(true);
-          try {
-            let query = _supa.from('adiantamentos').select('*').eq('empresa_id',empresaId);
-            query = query.gte('data_concessao',relFiltroDataIni).lte('data_concessao',relFiltroDataFim);
-            if(relFiltroColab) query = query.eq('colaborador_nome',relFiltroColab);
-            if(relFiltroStatus) query = query.eq('status',relFiltroStatus);
-
-            const {data:avulsos} = await query;
-            let fixosFiltrados = fixos;
-            if(relFiltroColab) fixosFiltrados = fixos.filter(f=>f.colaborador_nome===relFiltroColab);
-
-            const dados = [];
-            if(relFiltroTipo==='avulsos'||relFiltroTipo==='ambos'){
-              (avulsos||[]).forEach(a=>dados.push({tipo:'Avulso',nome:a.colaborador_nome,valor:a.valor,data:a.data_concessao,status:a.status,descricao:a.obs}));
-            }
-            if(relFiltroTipo==='fixos'||relFiltroTipo==='ambos'){
-              fixosFiltrados.forEach(f=>dados.push({tipo:'Fixo',nome:f.colaborador_nome,valor:f.valor,data:f.created_at?.slice(0,10)||'',status:f.ativo?'Ativo':'Inativo',descricao:f.descricao}));
-            }
-            setRelDados(dados);
-          } catch(e){
-            console.error('Erro ao gerar relatório:',e);
-          }
-          setRelCarregando(false);
-        };
-
-        const baixarRelatorioCSV = () => {
-          if(relDados.length===0){ alert('Nenhum dado para baixar. Execute a busca primeiro.'); return; }
-          const headers = ['Tipo','Colaborador','Valor','Data','Status','Descrição'];
-          const linhas = [headers.join(';')];
-          relDados.forEach(d=>{
-            linhas.push([d.tipo,d.nome,'R$ '+fmtBRL(d.valor).replace('R$ ',''),d.data||'',d.status,d.descricao||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';'));
-          });
-          const csv = linhas.join('\n');
-          const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-          const link = document.createElement('a');
-          link.setAttribute('href',URL.createObjectURL(blob));
-          link.setAttribute('download',`relatorio_adiantamentos_${relFiltroDataIni}_${relFiltroDataFim}.csv`);
-          link.style.visibility='hidden';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        };
-
         return (
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
@@ -3405,8 +3349,7 @@
             <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
               {[
                 {k:'avulsos', l:'💵 Avulsos', badge: lista.filter(a=>a.status==='pendente').length||null},
-                {k:'fixos',   l:'📌 Fixos Mensais', badge: fixosAtivos.length||null},
-                {k:'relatorios', l:'📊 Relatórios', badge: null}
+                {k:'fixos',   l:'📌 Fixos Mensais', badge: fixosAtivos.length||null}
               ].map(t=>(
                 <button key={t.k} onClick={()=>setAba(t.k)} style={{
                   background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
@@ -3667,107 +3610,6 @@
                 )}
               </div>
             )}
-
-            {/* ───── ABA RELATÓRIOS ───── */}
-            {aba==='relatorios'&&(
-              <div>
-                <div style={{...s.card,marginBottom:16}}>
-                  <div style={{fontWeight:700,fontSize:14,color:C.pri,marginBottom:14}}>📊 Filtros de Relatório</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:14}}>
-                    <div>
-                      <label style={s.label}>Data Inicial</label>
-                      <input type="date" value={relFiltroDataIni} onChange={e=>setRelFiltroDataIni(e.target.value)} style={s.input}/>
-                    </div>
-                    <div>
-                      <label style={s.label}>Data Final</label>
-                      <input type="date" value={relFiltroDataFim} onChange={e=>setRelFiltroDataFim(e.target.value)} style={s.input}/>
-                    </div>
-                    <div>
-                      <label style={s.label}>Colaborador (opcional)</label>
-                      <select value={relFiltroColab} onChange={e=>setRelFiltroColab(e.target.value)} style={s.input}>
-                        <option value="">Todos</option>
-                        {[...new Set([...lista.map(a=>a.colaborador_nome), ...fixos.map(f=>f.colaborador_nome)])].sort().map(nome=>(
-                          <option key={nome} value={nome}>{nome}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={s.label}>Status (opcional)</label>
-                      <select value={relFiltroStatus} onChange={e=>setRelFiltroStatus(e.target.value)} style={s.input}>
-                        <option value="">Todos</option>
-                        <option value="pendente">Pendente</option>
-                        <option value="descontado">Descontado</option>
-                        <option value="cancelado">Cancelado</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
-                    <div>
-                      <label style={s.label}>Tipo de Adiantamento</label>
-                      <select value={relFiltroTipo} onChange={e=>setRelFiltroTipo(e.target.value)} style={s.input}>
-                        <option value="ambos">Ambos (Avulsos + Fixos)</option>
-                        <option value="avulsos">Apenas Avulsos</option>
-                        <option value="fixos">Apenas Fixos</option>
-                      </select>
-                    </div>
-                    <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
-                      <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>
-                        {relCarregando?'Gerando...':'🔍 Gerar Relatório'}
-                      </button>
-                      <button onClick={baixarRelatorioCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>
-                        📥 Baixar CSV
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {relDados.length>0?(
-                  <div style={s.card}>
-                    <div style={{fontWeight:700,fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.04em"}}>
-                      {relDados.length} registro{relDados.length!==1?'s':''} encontrado{relDados.length!==1?'s':''}
-                    </div>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                      <thead>
-                        <tr style={{background:"var(--c-subtle)"}}>
-                          <th style={s.th}>Tipo</th><th style={s.th}>Colaborador</th><th style={s.th}>Valor</th>
-                          <th style={s.th}>Data</th><th style={s.th}>Status</th><th style={s.th}>Descrição</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {relDados.map((d,i)=>(
-                          <tr key={i} style={{borderTop:"1px solid "+C.border}}>
-                            <td style={{...s.td,fontWeight:600,fontSize:12}}>
-                              <span style={{background:d.tipo==='Avulso'?'#FEF9C3':'#EDE9FE',color:d.tipo==='Avulso'?'#92400E':'#5B21B6',padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>
-                                {d.tipo}
-                              </span>
-                            </td>
-                            <td style={{...s.td,fontWeight:600}}>{d.nome}</td>
-                            <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(d.valor)}</td>
-                            <td style={{...s.td,fontSize:12}}>{d.data?new Date(d.data+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
-                            <td style={{...s.td,fontSize:12}}>
-                              <span style={{background:d.status==='Pendente'?'#FEF9C3':d.status==='Descontado'?'#DCFCE7':d.status==='Ativo'?'#EDE9FE':'#F3F4F6',color:d.status==='Pendente'?'#92400E':d.status==='Descontado'?'#166534':d.status==='Ativo'?'#5B21B6':'#6B7280',padding:'2px 8px',borderRadius:6,fontSize:11,fontWeight:700}}>
-                                {d.status}
-                              </span>
-                            </td>
-                            <td style={{...s.td,fontSize:12,color:C.muted}}>{d.descricao||'—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <div style={{marginTop:14,padding:"12px 14px",background:"#F3F4F6",borderRadius:8,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:600}}>
-                      <span>Total geral:</span>
-                      <span style={{color:C.pri}}>{fmtBRL(relDados.reduce((s,d)=>s+Number(d.valor),0))}</span>
-                    </div>
-                  </div>
-                ):(
-                  <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
-                    <div style={{fontSize:32,marginBottom:8}}>📊</div>
-                    <div style={{fontWeight:700,marginBottom:4}}>Nenhum resultado</div>
-                    <div style={{fontSize:12}}>Clique em "Gerar Relatório" para buscar dados com os filtros selecionados.</div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         );
       }
@@ -3913,6 +3755,59 @@
           document.body.removeChild(link);
         };
 
+        const gerarPDF = () => {
+          if(relDados.length===0){alert('Nenhum dado para gerar PDF. Execute a busca primeiro.');return;}
+          try {
+            const {jsPDF} = window.jspdf;
+            const doc = new jsPDF();
+            const campos = Object.keys(relDados[0]||{});
+            const tituloRel = tipoRel==='adiantamentos'?'Relatório de Adiantamentos':tipoRel==='colaboradores'?'Relatório de Colaboradores':tipoRel==='ferias'?'Relatório de Férias':'Relatório de Atestados';
+            doc.setFontSize(16);
+            doc.text(tituloRel, 14, 15);
+            doc.setFontSize(10);
+            doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} - Total de registros: ${relDados.length}`, 14, 23);
+
+            let yPos = 30;
+            const pageHeight = doc.internal.pageSize.height;
+            const tableStartY = yPos;
+
+            // Cabeçalho da tabela
+            doc.setFillColor(200, 200, 200);
+            doc.setFontSize(9);
+            const colWidth = 180 / campos.length;
+            campos.forEach((campo, i) => {
+              doc.text(campo, 14 + i * colWidth, yPos, { maxWidth: colWidth - 1 });
+            });
+            yPos += 8;
+
+            // Dados
+            doc.setFontSize(8);
+            relDados.forEach((row, rowIdx) => {
+              if(yPos > pageHeight - 20) {
+                doc.addPage();
+                yPos = 15;
+                // Repetir cabeçalho
+                doc.setFillColor(200, 200, 200);
+                doc.setFontSize(9);
+                campos.forEach((campo, i) => {
+                  doc.text(campo, 14 + i * colWidth, yPos, { maxWidth: colWidth - 1 });
+                });
+                yPos += 8;
+                doc.setFontSize(8);
+              }
+              campos.forEach((campo, i) => {
+                const valor = String(row[campo]||'').substring(0, 20);
+                doc.text(valor, 14 + i * colWidth, yPos, { maxWidth: colWidth - 1 });
+              });
+              yPos += 5;
+            });
+
+            doc.save(`relatorio_${tipoRel}_${new Date().toISOString().slice(0,10)}.pdf`);
+          } catch(e) {
+            alert('Erro ao gerar PDF: '+e.message);
+          }
+        };
+
         const setoresUnicos = [...new Set(colabAPI.map(c=>c.setor).filter(Boolean))].sort();
         const funcoesUnicas = [...new Set(colabAPI.map(c=>c.funcao).filter(Boolean))].sort();
         const colabsUnicos = [...new Set(colabAPI.map(c=>c.nome))].sort();
@@ -3954,7 +3849,8 @@
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar Relatório'}</button>
-                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 Baixar CSV</button>
+                  <button onClick={gerarPDF} style={{...s.btn,background:'#D97706',color:'#fff',flex:1}} disabled={relDados.length===0}>📄 PDF</button>
+                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
                 </div>
               </div>
             )}
@@ -4009,7 +3905,8 @@
                 {/* Botões */}
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar Relatório'}</button>
-                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 Baixar CSV</button>
+                  <button onClick={gerarPDF} style={{...s.btn,background:'#D97706',color:'#fff',flex:1}} disabled={relDados.length===0}>📄 PDF</button>
+                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
                 </div>
               </div>
             )}
@@ -4023,6 +3920,7 @@
                   <div><label style={s.label}>Colaborador</label><select value={feriasColaborador} onChange={e=>setFeriasColaborador(e.target.value)} style={s.input}><option value="">Todos</option>{colabsUnicos.map(c=>(<option key={c} value={c}>{c}</option>))}</select></div>
                   <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
                     <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
+                    <button onClick={gerarPDF} style={{...s.btn,background:'#D97706',color:'#fff',flex:1}} disabled={relDados.length===0}>📄 PDF</button>
                     <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
                   </div>
                 </div>
@@ -4038,6 +3936,7 @@
                   <div><label style={s.label}>Colaborador</label><select value={atestColaborador} onChange={e=>setAtestColaborador(e.target.value)} style={s.input}><option value="">Todos</option>{colabsUnicos.map(c=>(<option key={c} value={c}>{c}</option>))}</select></div>
                   <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
                     <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
+                    <button onClick={gerarPDF} style={{...s.btn,background:'#D97706',color:'#fff',flex:1}} disabled={relDados.length===0}>📄 PDF</button>
                     <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
                   </div>
                 </div>

@@ -1,0 +1,159 @@
+================================================================================
+ÍNDICE DE DOCUMENTAÇÃO - SISTEMA DE BACKUP SUPABASE
+================================================================================
+
+📚 ARQUIVO-CHAVE PARA COMEÇAR:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   ▶ BACKUP_PROMPT_PARA_COLAR.txt
+   
+   O que é: Prompt pronto para colar em nova conversa com Claude
+   Quando usar: Sempre que começar em NOVO projeto
+   Tamanho: 1 KB
+   Tempo: 2 minutos para colar + 10 min para responder perguntas
+   
+   Resultado: Claude vai gerar 4 arquivos adaptados para seu projeto
+
+================================================================================
+
+📖 DOCUMENTAÇÃO (5 ARQUIVOS):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣ BACKUP_REPLICATION_README.md
+   ├─ Visão geral do sistema
+   ├─ Fluxo rápido em 5 passos
+   ├─ Guias detalhados por fase
+   ├─ Tempo estimado (24 min total)
+   ├─ Erros comuns e soluções
+   └─ Quando usar outros arquivos
+   
+   Tamanho: 5 KB | Tipo: Índice | Primeiro a ler
+
+2️⃣ BACKUP_SETUP_GUIDE.md
+   ├─ Guia em 7 fases completo
+   ├─ FASE 1: Entender o projeto
+   ├─ FASE 2: Explorar estrutura atual
+   ├─ FASE 3: Adaptar para novo projeto
+   ├─ FASE 4: Validar com testes
+   ├─ FASE 5: Deploy no NAS
+   ├─ FASE 6: Monitoramento
+   ├─ FASE 7: Troubleshooting
+   └─ Checklist final
+   
+   Tamanho: 25 KB | Tipo: Guia completo | Consulta durante implementação
+
+3️⃣ BACKUP_FILES_TEMPLATE.md
+   ├─ Template de backup.js (com [PLACEHOLDERS])
+   ├─ Template de scheduler.js
+   ├─ Template de Dockerfile
+   ├─ Template de docker-compose.yml
+   └─ Instruções de uso
+   
+   Tamanho: 15 KB | Tipo: Code template | Se não quiser usar Claude
+
+4️⃣ BACKUP_QUICK_CHECKLIST.md
+   ├─ Checklist visual de 6 fases
+   ├─ FASE 1: Preparação
+   ├─ FASE 2: Claude cria arquivos
+   ├─ FASE 3: Teste local
+   ├─ FASE 4: Deploy no NAS
+   ├─ FASE 5: Monitorar primeira execução
+   ├─ FASE 6: Acompanhamento mensal
+   └─ Troubleshooting rápido
+   
+   Tamanho: 8 KB | Tipo: Checklist | Referência rápida
+
+5️⃣ BACKUP_PROMPT_PARA_COLAR.txt
+   ├─ Prompt estruturado com 4 seções
+   ├─ Seção 1: Contexto do problema
+   ├─ Seção 2: Perguntas de diagnóstico
+   ├─ Seção 3: O que Claude deve fazer
+   └─ Referência dos arquivos existentes
+   
+   Tamanho: 1 KB | Tipo: Prompt | Cole em nova conversa
+
+================================================================================
+
+🔧 ARQUIVOS REAIS (REFERÊNCIA):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   backup/
+   ├─ backup.js           (400 linhas - motor do backup)
+   ├─ scheduler.js        (40 linhas - agendador)
+   ├─ Dockerfile          (6 linhas - containerização)
+   └─ docker-compose.yml  (15 linhas - configuração Docker)
+
+   Uso: Comparação/ajustes finos se Claude não gerar algo certo
+
+================================================================================
+
+📊 FLUXO DE USO RECOMENDADO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PRIMEIRA VEZ (novo projeto):
+   1. Leia: BACKUP_REPLICATION_README.md (5 min)
+   2. Copie: BACKUP_PROMPT_PARA_COLAR.txt
+   3. Cole em nova conversa com Claude
+   4. Responda as 4 perguntas
+   5. Claude gera 4 arquivos adaptados
+   6. Siga: BACKUP_QUICK_CHECKLIST.md (6 fases)
+
+SE QUEBROU ALGO:
+   1. Leia: BACKUP_QUICK_CHECKLIST.md FASE 7 (Troubleshooting)
+   2. Consulte: BACKUP_SETUP_GUIDE.md FASE 7 (mais detalhes)
+   3. Compare: backup/ (arquivos originais)
+
+SE QUER ENTENDER TUDO:
+   1. Leia: BACKUP_SETUP_GUIDE.md (guia completo)
+   2. Consulte: BACKUP_FILES_TEMPLATE.md (templates)
+   3. Veja: backup/ (código real)
+
+SE NÃO QUER USAR CLAUDE:
+   1. Abra: BACKUP_FILES_TEMPLATE.md
+   2. Procure: [PLACEHOLDER]
+   3. Substitua: pelos seus valores
+   4. Teste: node backup.js
+   5. Deploy: docker-compose up -d
+
+================================================================================
+
+⏱️ TEMPO POR TAREFA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Entender o sistema:          5 min (BACKUP_REPLICATION_README.md)
+Colar prompt + responder:   15 min (BACKUP_PROMPT_PARA_COLAR.txt)
+Testar localmente:          10 min (BACKUP_QUICK_CHECKLIST.md FASE 3)
+Deploy no NAS:              10 min (BACKUP_QUICK_CHECKLIST.md FASE 4)
+Validar:                     5 min (BACKUP_QUICK_CHECKLIST.md FASE 5)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL:                      45 min (com espaço para leitura)
+
+================================================================================
+
+🎯 OBJETIVO DE CADA ARQUIVO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BACKUP_REPLICATION_README.md     → Entender o que fazer (ÍNDICE)
+BACKUP_SETUP_GUIDE.md            → Como fazer (DETALHADO)
+BACKUP_FILES_TEMPLATE.md         → Com qual código (TEMPLATES)
+BACKUP_QUICK_CHECKLIST.md        → Validar se funcionou (CHECKLIST)
+BACKUP_PROMPT_PARA_COLAR.txt     → Pedir Claude fazer (PROMPT)
+
+================================================================================
+
+⚠️ LEMBRETE IMPORTANTE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Quando for REPLICAR em OUTRO PROJETO:
+
+   1. Copie BACKUP_PROMPT_PARA_COLAR.txt
+   2. Abra NOVA conversa com Claude (claude.com ou Claude Code)
+   3. Cole TODO o conteúdo do arquivo
+   4. Siga as instruções da conversa
+
+Este é o fluxo mais rápido e com menor chance de erro!
+
+================================================================================
+
+Última atualização: 2026-06-06
+Sistema de referência: RH-App (taicaxtjtikdajmhtsxc.supabase.co)

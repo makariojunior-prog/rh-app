@@ -1,0 +1,52 @@
+================================================================================
+COLA ESTE TEXTO INTEIRO EM UMA CONVERSA COM CLAUDE PARA OUTRO PROJETO
+================================================================================
+
+CONTEXTO:
+Tenho um projeto Supabase que precisa de backup automático diário (JSON) rodando
+em Docker no NAS Ugreen, com retenção de 60 dias. Já existe um sistema de backup
+funcionando em outro projeto (RH-App) que vou usar como referência.
+
+RESPONDA PRIMEIRO ESTAS PERGUNTAS:
+
+1. SUPABASE
+   - URL do projeto: https://seu-projeto.supabase.co
+   - Chave anónima (anon_key): [copiar de Project Settings → API]
+   - Nome ou ID da empresa: [qual valor filtra os dados?]
+
+2. BANCO DE DADOS
+   - Listar TODAS as tabelas (nomes exatos):
+     [Responder]
+   - Todas têm coluna "empresa_id"? (SIM/NÃO)
+   - Qual tabela tem mais registros e quantos aproximadamente?
+
+3. NAS UGREEN
+   - Docker já está instalado no NAS? (SIM/NÃO)
+   - Caminho para backup: /volume1/[QUAL_PASTA]/dados
+   - Espaço disponível no NAS: quantos GB?
+   - Timezone do NAS: (ex: America/Sao_Paulo)
+
+4. HORÁRIO
+   - Que horário quer fazer o backup? (ex: 02:00 AM)
+   - Quantos dias de histórico manter? (padrão: 60 dias)
+
+================================================================================
+
+DEPOIS DE RESPONDER:
+
+Quero que você (Claude):
+
+1. ENTENDA a estrutura do meu Supabase
+2. ADAPTE os 4 arquivos (backup.js, scheduler.js, Dockerfile, docker-compose.yml)
+   que estão em outro projeto (RH-App)
+3. CRIE a pasta /backup com os 4 arquivos adaptados
+4. GERE comandos de teste para eu executar localmente
+5. GERE comandos de deploy para o NAS
+
+Referência do sistema existente está em:
+- C:\Users\Makário Orozimbo\OneDrive\Github\rh-app\backup\
+
+Documentação completa em:
+- C:\Users\Makário Orozimbo\OneDrive\Github\rh-app\BACKUP_SETUP_GUIDE.md
+
+================================================================================
