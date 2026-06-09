@@ -3148,6 +3148,7 @@
         const [mostrarForm, setMostrarForm] = React.useState(false);
         const VAZIO = {colaboradorNome:'',valor:'',dataConcessao:hoje,obs:''};
         const [form, setForm] = React.useState(VAZIO);
+        const [editandoId, setEditandoId] = React.useState(null);
 
         const carregar = async () => {
           if(!empresaId) return;
@@ -3175,18 +3176,22 @@
           else mesR=form.dataConcessao.slice(0,7);
           setLoading(true);
           const colab = colabAPI.find(c=>c.nome===form.colaboradorNome);
-          const {error} = await _supa.from('adiantamentos').insert({
-            empresa_id:empresaId,
+          const dadosAdt = {
             colaborador_id:colab?.id||null,
             colaborador_nome:form.colaboradorNome.trim(),
             valor:val,
             data_concessao:form.dataConcessao,
             mes_referencia:mesR,
-            status:'pendente',
             obs:form.obs||null
-          });
+          };
+          let error;
+          if(editandoId){
+            ({error} = await _supa.from('adiantamentos').update(dadosAdt).eq('id',editandoId));
+          } else {
+            ({error} = await _supa.from('adiantamentos').insert({empresa_id:empresaId, ...dadosAdt, status:'pendente'}));
+          }
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
-          else{ setStatus({ok:true,msg:'✅ Adiantamento registrado!'}); setMostrarForm(false); setForm(VAZIO); carregar(); }
+          else{ setStatus({ok:true,msg:editandoId?'✅ Adiantamento atualizado!':'✅ Adiantamento registrado!'}); setMostrarForm(false); setEditandoId(null); setForm(VAZIO); carregar(); }
           setLoading(false);
         };
 
@@ -3212,6 +3217,7 @@
         const [mostrarFormFixo, setMostrarFormFixo] = React.useState(false);
         const VAZIO_FIXO = {colaboradorNome:'',valor:'',descricao:'Adiantamento Fixo'};
         const [formFixo, setFormFixo] = React.useState(VAZIO_FIXO);
+        const [editandoIdFixo, setEditandoIdFixo] = React.useState(null);
 
         const carregarFixos = async () => {
           if(!empresaId) return;
@@ -3230,15 +3236,19 @@
           const val = parseFloat(String(formFixo.valor).replace(',','.'));
           if(isNaN(val)||val<=0){ setStatusFixo({ok:false,msg:'Valor inválido.'}); return; }
           setLoadingFixos(true);
-          const {error} = await _supa.from('adiantamentos_fixos').insert({
-            empresa_id:empresaId,
+          const dadosFixo = {
             colaborador_nome:formFixo.colaboradorNome.trim(),
             valor:val,
-            descricao:formFixo.descricao.trim()||'Adiantamento Fixo',
-            ativo:true
-          });
+            descricao:formFixo.descricao.trim()||'Adiantamento Fixo'
+          };
+          let error;
+          if(editandoIdFixo){
+            ({error} = await _supa.from('adiantamentos_fixos').update(dadosFixo).eq('id',editandoIdFixo));
+          } else {
+            ({error} = await _supa.from('adiantamentos_fixos').insert({empresa_id:empresaId, ...dadosFixo, ativo:true}));
+          }
           if(error){ setStatusFixo({ok:false,msg:'❌ '+error.message}); }
-          else{ setStatusFixo({ok:true,msg:'✅ Adiantamento fixo criado! Será incluído automaticamente na Folha de Pagamento todos os meses.'}); setMostrarFormFixo(false); setFormFixo(VAZIO_FIXO); carregarFixos(); }
+          else{ setStatusFixo({ok:true,msg:editandoIdFixo?'✅ Adiantamento fixo atualizado!':'✅ Adiantamento fixo criado! Será incluído automaticamente na Folha de Pagamento todos os meses.'}); setMostrarFormFixo(false); setEditandoIdFixo(null); setFormFixo(VAZIO_FIXO); carregarFixos(); }
           setLoadingFixos(false);
         };
 
@@ -3287,19 +3297,22 @@
             {/* ───── ABA AVULSOS ───── */}
             {aba==='avulsos'&&(
               <div>
+                <div style={{...s.card,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:14,padding:"10px 14px",fontSize:12,color:"#1D4ED8"}}>
+                  ℹ️ <strong>Avulsos + Fixos somados:</strong> Quando um colaborador tem tanto adiantamento avulso quanto fixo, ambos são somados e descontados juntos na Folha de Pagamento.
+                </div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                   <div style={{display:"flex",gap:8,alignItems:"center"}}>
                     <label style={{...s.label,marginBottom:0}}>Mês ref.:</label>
                     <input type="month" value={mesRef} onChange={e=>setMesRef(e.target.value)} style={{...s.input,width:150,marginBottom:0}}/>
                   </div>
-                  <button onClick={()=>{setMostrarForm(true);setStatus(null);setForm(VAZIO);}} style={s.btn}>+ Novo Avulso</button>
+                  <button onClick={()=>{setEditandoId(null);setMostrarForm(true);setStatus(null);setForm(VAZIO);}} style={s.btn}>+ Novo Avulso</button>
                 </div>
 
                 {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
 
                 {mostrarForm&&(
                   <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
-                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Adiantamento Avulso</div>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>{editandoId?'Editar Adiantamento Avulso':'Registrar Adiantamento Avulso'}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Colaborador *</label>
@@ -3383,7 +3396,10 @@
                               <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
                               <td style={{...s.td,textAlign:"right"}}>
                                 {a.status==='pendente'&&(
-                                  <button onClick={()=>cancelarAdt(a.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>Cancelar</button>
+                                  <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                                    <button onClick={()=>{setForm({colaboradorNome:a.colaborador_nome,valor:String(a.valor),dataConcessao:a.data_concessao,obs:a.obs||''});setEditandoId(a.id);setMostrarForm(true);setStatus(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
+                                    <button onClick={()=>cancelarAdt(a.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
+                                  </div>
                                 )}
                               </td>
                             </tr>
@@ -3427,7 +3443,7 @@
 
                 {mostrarFormFixo&&(
                   <div style={{...s.card,marginBottom:16,border:"2px solid #7C3AED"}}>
-                    <div style={{fontWeight:700,color:"#5B21B6",marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📌 Cadastrar Adiantamento Fixo Mensal</div>
+                    <div style={{fontWeight:700,color:"#5B21B6",marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📌 {editandoIdFixo?'Editar Adiantamento Fixo':'Cadastrar Adiantamento Fixo Mensal'}</div>
                     <div style={{...s.card,background:"#FFFBEB",border:"1px solid #FCD34D",marginBottom:14,padding:"10px 14px"}}>
                       <div style={{fontSize:12,color:"#92400E"}}>⚠️ Este valor será descontado automaticamente na folha <strong>todos os meses</strong>, enquanto estiver ativo. Use apenas para benefícios recorrentes (ex: antecipação de salário fixa, desconto de convênio, etc).</div>
                     </div>
@@ -3489,20 +3505,27 @@
                               </span>
                             </td>
                             <td style={{...s.td,textAlign:"right"}}>
-                              <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                              <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
                                 <button
-                                  onClick={()=>toggleAtivoFixo(f.id,f.ativo)}
-                                  style={{background:"none",border:`1px solid ${f.ativo?"#FCD34D":"#A78BFA"}`,color:f.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}
+                                  onClick={()=>{setFormFixo({colaboradorNome:f.colaborador_nome,valor:String(f.valor),descricao:f.descricao||'Adiantamento Fixo'});setEditandoIdFixo(f.id);setMostrarFormFixo(true);setStatusFixo(null);}}
+                                  style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}
                                   disabled={loadingFixos}
                                 >
-                                  {f.ativo?'⏸ Pausar':'▶ Ativar'}
+                                  ✏️
+                                </button>
+                                <button
+                                  onClick={()=>toggleAtivoFixo(f.id,f.ativo)}
+                                  style={{background:"none",border:`1px solid ${f.ativo?"#FCD34D":"#A78BFA"}`,color:f.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}
+                                  disabled={loadingFixos}
+                                >
+                                  {f.ativo?'⏸':'▶'}
                                 </button>
                                 <button
                                   onClick={()=>excluirFixo(f.id,f.colaborador_nome)}
-                                  style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}
+                                  style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}
                                   disabled={loadingFixos}
                                 >
-                                  🗑 Excluir
+                                  🗑
                                 </button>
                               </div>
                             </td>
