@@ -1178,6 +1178,19 @@
         const [form, setForm] = useState({});
         const [busca, setBusca] = useState("");
 
+        // ── Relatórios ──
+        const [relFiltroSetor, setRelFiltroSetor] = useState('');
+        const [relFiltroFuncao, setRelFiltroFuncao] = useState('');
+        const [relFiltroStatus, setRelFiltroStatus] = useState('ativo');
+        const [relCampos, setRelCampos] = useState({
+          nome:true, funcao:true, setor:true, telefone:true, email:true, cpf:false,
+          salario:true, transporte:false, jornada:true, periculosidade:false,
+          admissao:true, encerramento:false, cnh:false, banco:false,
+          contaSalario:false, aditivoContrato:false, lgpd:false
+        });
+        const [relDados, setRelDados] = useState([]);
+        const [relCarregando, setRelCarregando] = useState(false);
+
         const FORM_VAZIO = {
           nome:"", funcao:"", setor:"", cpf:"", telefone:"", chavePix:"", email:"",
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
@@ -1281,6 +1294,59 @@
           }
           if(str.includes('-')) return str; // já está em ISO
           return null;
+        };
+
+        const gerarRelatorioColaboradores = async () => {
+          setRelCarregando(true);
+          try {
+            let filtrados = [...lista];
+            if(relFiltroSetor) filtrados = filtrados.filter(c=>c.setor===relFiltroSetor);
+            if(relFiltroFuncao) filtrados = filtrados.filter(c=>c.funcao===relFiltroFuncao);
+
+            const dados = filtrados.map(c=>{
+              const row = {};
+              if(relCampos.nome) row['Nome'] = c.nome;
+              if(relCampos.funcao) row['Função'] = c.funcao||'—';
+              if(relCampos.setor) row['Setor'] = c.setor||'—';
+              if(relCampos.telefone) row['Telefone'] = c.telefone||'—';
+              if(relCampos.email) row['Email'] = c.email||'—';
+              if(relCampos.cpf) row['CPF'] = c.cpf||'—';
+              if(relCampos.salario) row['Salário'] = fmtBRL(c.salario||0);
+              if(relCampos.transporte) row['Vale Transporte'] = fmtBRL(c.transporte||0);
+              if(relCampos.jornada) row['Jornada'] = c.jornada||'SEG-SAB';
+              if(relCampos.periculosidade) row['Periculosidade'] = c.periculosidade?'Sim':'Não';
+              if(relCampos.admissao) row['Data Admissão'] = c.admissao||'—';
+              if(relCampos.encerramento) row['Data Encerramento'] = c.data_encerramento||'—';
+              if(relCampos.cnh) row['CNH'] = '—';
+              if(relCampos.banco) row['Banco'] = c.banco_nome||'—';
+              if(relCampos.contaSalario) row['Conta Salário'] = c.conta_salario?'Sim':'Não';
+              if(relCampos.aditivoContrato) row['Aditivo Contrato'] = c.aditivo_contrato?'Sim':'Não';
+              if(relCampos.lgpd) row['LGPD'] = c.lgpd?'Sim':'Não';
+              return row;
+            });
+            setRelDados(dados);
+          } catch(e){
+            console.error('Erro ao gerar relatório:',e);
+          }
+          setRelCarregando(false);
+        };
+
+        const baixarRelatorioColaboresCSV = () => {
+          if(relDados.length===0){ alert('Nenhum dado para baixar. Execute a busca primeiro.'); return; }
+          const campos = Object.keys(relDados[0]||{});
+          const linhas = [campos.join(';')];
+          relDados.forEach(d=>{
+            linhas.push(campos.map(f=>'"'+String(d[f]||'').replace(/"/g,'""')+'"').join(';'));
+          });
+          const csv = linhas.join('\n');
+          const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+          const link = document.createElement('a');
+          link.setAttribute('href',URL.createObjectURL(blob));
+          link.setAttribute('download',`relatorio_colaboradores_${new Date().toISOString().slice(0,10)}.csv`);
+          link.style.visibility='hidden';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
         };
 
         const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); };
@@ -1845,6 +1911,7 @@
           {k:'compras',      l:'🛍️ Compras'},
           {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
           {k:'orcamento',    l:'📊 Orçamento Folha'},
+          {k:'relatorios',   l:'📈 Relatórios'},
           {k:'comissoes',    l:'💰 Comissões'},
           {k:'termos',       l:'📝 Termos de Assinatura'},
         ];
@@ -3699,6 +3766,250 @@
                     <div style={{fontSize:12}}>Clique em "Gerar Relatório" para buscar dados com os filtros selecionados.</div>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MÓDULO RELATÓRIOS CENTRALIZADOS
+      // ============================================================
+      function RelatoriosPage({ colabAPI, empresaId }) {
+        const hoje = new Date().toISOString().slice(0,10);
+        const mesAtual = hoje.slice(0,7);
+
+        const [tipoRel, setTipoRel] = React.useState('adiantamentos');
+        const [relDados, setRelDados] = React.useState([]);
+        const [relCarregando, setRelCarregando] = React.useState(false);
+
+        // ── Filtros Adiantamentos ──
+        const [adtDataIni, setAdtDataIni] = React.useState(()=>{const d=new Date();d.setMonth(d.getMonth()-3);return d.toISOString().slice(0,10);});
+        const [adtDataFim, setAdtDataFim] = React.useState(hoje);
+        const [adtColaborador, setAdtColaborador] = React.useState('');
+        const [adtStatus, setAdtStatus] = React.useState('');
+        const [adtTipo, setAdtTipo] = React.useState('ambos');
+
+        // ── Filtros Colaboradores ──
+        const [colabSetor, setColabSetor] = React.useState('');
+        const [colabFuncao, setColabFuncao] = React.useState('');
+        const [colabStatus, setColabStatus] = React.useState('ativo');
+
+        // ── Filtros Férias ──
+        const [feriasDataIni, setFeriasDataIni] = React.useState(mesAtual+'-01');
+        const [feriasDataFim, setFeriasDataFim] = React.useState(hoje);
+        const [feriasColaborador, setFeriasColaborador] = React.useState('');
+
+        // ── Filtros Atestados ──
+        const [atestDataIni, setAtestDataIni] = React.useState(mesAtual+'-01');
+        const [atestDataFim, setAtestDataFim] = React.useState(hoje);
+        const [atestColaborador, setAtestColaborador] = React.useState('');
+
+        const gerarRelatorio = async () => {
+          setRelCarregando(true);
+          try {
+            if(tipoRel==='adiantamentos'){
+              let query = _supa.from('adiantamentos').select('*').eq('empresa_id',empresaId);
+              query = query.gte('data_concessao',adtDataIni).lte('data_concessao',adtDataFim);
+              if(adtColaborador) query = query.eq('colaborador_nome',adtColaborador);
+              if(adtStatus) query = query.eq('status',adtStatus);
+              const {data} = await query;
+              const dados = (data||[]).map(a=>({
+                Tipo:a.tipo||'Avulso',
+                Colaborador:a.colaborador_nome,
+                Valor:fmtBRL(a.valor),
+                Data:new Date(a.data_concessao+'T12:00:00').toLocaleDateString('pt-BR'),
+                Status:a.status||'—',
+                'Mês Ref.':a.mes_referencia?.split('-').reverse().join('/')||'—'
+              }));
+              setRelDados(dados);
+            } else if(tipoRel==='colaboradores'){
+              let colabs = colabAPI;
+              if(colabSetor) colabs = colabs.filter(c=>c.setor===colabSetor);
+              if(colabFuncao) colabs = colabs.filter(c=>c.funcao===colabFuncao);
+              const dados = colabs.map(c=>({
+                Nome:c.nome,
+                Função:c.funcao||'—',
+                Setor:c.setor||'—',
+                Salário:fmtBRL(c.salario||0),
+                Telefone:c.telefone||'—',
+                Email:c.email||'—',
+                'Data Admissão':c.admissao||'—'
+              }));
+              setRelDados(dados);
+            } else if(tipoRel==='ferias'){
+              let query = _supa.from('ferias').select('*').eq('empresa_id',empresaId);
+              query = query.gte('gozo_inicio',feriasDataIni).lte('gozo_inicio',feriasDataFim);
+              if(feriasColaborador) query = query.eq('nome',feriasColaborador);
+              const {data} = await query;
+              const dados = (data||[]).map(f=>({
+                Colaborador:f.nome,
+                'Gozo Início':new Date(f.gozo_inicio+'T12:00:00').toLocaleDateString('pt-BR'),
+                'Gozo Fim':new Date(f.gozo_fim+'T12:00:00').toLocaleDateString('pt-BR'),
+                Dias:f.quantidade_dias||'—',
+                Status:f.status||'—'
+              }));
+              setRelDados(dados);
+            } else if(tipoRel==='atestados'){
+              let query = _supa.from('atestados').select('*').eq('empresa_id',empresaId);
+              query = query.gte('inicio',atestDataIni).lte('inicio',atestDataFim);
+              if(atestColaborador) query = query.eq('colaborador_nome',atestColaborador);
+              const {data} = await query;
+              const dados = (data||[]).map(a=>({
+                Colaborador:a.colaborador_nome,
+                'Data Início':new Date(a.inicio+'T12:00:00').toLocaleDateString('pt-BR'),
+                'Data Fim':new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR'),
+                Dias:a.quantidade_dias||'—',
+                Tipo:a.tipo||'—'
+              }));
+              setRelDados(dados);
+            }
+          } catch(e){
+            console.error('Erro ao gerar relatório:',e);
+          }
+          setRelCarregando(false);
+        };
+
+        const baixarCSV = () => {
+          if(relDados.length===0){alert('Nenhum dado para baixar. Execute a busca primeiro.');return;}
+          const campos = Object.keys(relDados[0]||{});
+          const linhas = [campos.join(';')];
+          relDados.forEach(d=>{
+            linhas.push(campos.map(f=>'"'+String(d[f]||'').replace(/"/g,'""')+'"').join(';'));
+          });
+          const csv = linhas.join('\n');
+          const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+          const link = document.createElement('a');
+          link.setAttribute('href',URL.createObjectURL(blob));
+          link.setAttribute('download',`relatorio_${tipoRel}_${new Date().toISOString().slice(0,10)}.csv`);
+          link.style.visibility='hidden';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+
+        const setoresUnicos = [...new Set(colabAPI.map(c=>c.setor).filter(Boolean))].sort();
+        const funcoesUnicas = [...new Set(colabAPI.map(c=>c.funcao).filter(Boolean))].sort();
+        const colabsUnicos = [...new Set(colabAPI.map(c=>c.nome))].sort();
+
+        return (
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📈 Relatórios Centralizados</div>
+                <div style={{fontSize:13,color:C.muted}}>Gere relatórios filtrando dados de todos os módulos</div>
+              </div>
+            </div>
+
+            {/* Seletor de Tipo */}
+            <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              {[
+                {k:'adiantamentos',l:'💵 Adiantamentos'},
+                {k:'colaboradores',l:'👥 Colaboradores'},
+                {k:'ferias',l:'🏖️ Férias'},
+                {k:'atestados',l:'🏥 Atestados'}
+              ].map(t=>(
+                <button key={t.k} onClick={()=>{setTipoRel(t.k);setRelDados([]);}} style={{
+                  padding:"8px 16px",borderRadius:8,border:tipoRel===t.k?'2px solid '+C.pri:'1px solid '+C.border,
+                  background:tipoRel===t.k?C.pri:'transparent',color:tipoRel===t.k?'#fff':C.text,
+                  cursor:"pointer",fontWeight:tipoRel===t.k?700:500,fontSize:13
+                }}>{t.l}</button>
+              ))}
+            </div>
+
+            {/* Filtros dinâmicos */}
+            {tipoRel==='adiantamentos'&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:700,marginBottom:12,fontSize:13,color:C.pri,textTransform:"uppercase"}}>Filtros de Adiantamentos</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                  <div><label style={s.label}>Data Inicial</label><input type="date" value={adtDataIni} onChange={e=>setAdtDataIni(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Data Final</label><input type="date" value={adtDataFim} onChange={e=>setAdtDataFim(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Colaborador</label><select value={adtColaborador} onChange={e=>setAdtColaborador(e.target.value)} style={s.input}><option value="">Todos</option>{colabsUnicos.map(c=>(<option key={c} value={c}>{c}</option>))}</select></div>
+                  <div><label style={s.label}>Status</label><select value={adtStatus} onChange={e=>setAdtStatus(e.target.value)} style={s.input}><option value="">Todos</option><option value="pendente">Pendente</option><option value="descontado">Descontado</option><option value="cancelado">Cancelado</option></select></div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar Relatório'}</button>
+                  <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 Baixar CSV</button>
+                </div>
+              </div>
+            )}
+
+            {tipoRel==='colaboradores'&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:700,marginBottom:12,fontSize:13,color:C.pri,textTransform:"uppercase"}}>Filtros de Colaboradores</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                  <div><label style={s.label}>Setor</label><select value={colabSetor} onChange={e=>setColabSetor(e.target.value)} style={s.input}><option value="">Todos</option>{setoresUnicos.map(s=>(<option key={s} value={s}>{s}</option>))}</select></div>
+                  <div><label style={s.label}>Função</label><select value={colabFuncao} onChange={e=>setColabFuncao(e.target.value)} style={s.input}><option value="">Todas</option>{funcoesUnicas.map(f=>(<option key={f} value={f}>{f}</option>))}</select></div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
+                    <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
+                    <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tipoRel==='ferias'&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:700,marginBottom:12,fontSize:13,color:C.pri,textTransform:"uppercase"}}>Filtros de Férias</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                  <div><label style={s.label}>Data Inicial</label><input type="date" value={feriasDataIni} onChange={e=>setFeriasDataIni(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Data Final</label><input type="date" value={feriasDataFim} onChange={e=>setFeriasDataFim(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Colaborador</label><select value={feriasColaborador} onChange={e=>setFeriasColaborador(e.target.value)} style={s.input}><option value="">Todos</option>{colabsUnicos.map(c=>(<option key={c} value={c}>{c}</option>))}</select></div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
+                    <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
+                    <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tipoRel==='atestados'&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:700,marginBottom:12,fontSize:13,color:C.pri,textTransform:"uppercase"}}>Filtros de Atestados</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                  <div><label style={s.label}>Data Inicial</label><input type="date" value={atestDataIni} onChange={e=>setAtestDataIni(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Data Final</label><input type="date" value={atestDataFim} onChange={e=>setAtestDataFim(e.target.value)} style={s.input}/></div>
+                  <div><label style={s.label}>Colaborador</label><select value={atestColaborador} onChange={e=>setAtestColaborador(e.target.value)} style={s.input}><option value="">Todos</option>{colabsUnicos.map(c=>(<option key={c} value={c}>{c}</option>))}</select></div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
+                    <button onClick={gerarRelatorio} style={{...s.btn,flex:1}} disabled={relCarregando}>{relCarregando?'Gerando...':'🔍 Gerar'}</button>
+                    <button onClick={baixarCSV} style={{...s.btnOutline,flex:1}} disabled={relDados.length===0}>📥 CSV</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Resultados */}
+            {relDados.length>0?(
+              <div style={s.card}>
+                <div style={{fontWeight:700,fontSize:12,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>
+                  {relDados.length} registro{relDados.length!==1?'s':''} encontrado{relDados.length!==1?'s':''}
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{background:"var(--c-subtle)"}}>
+                        {Object.keys(relDados[0]||{}).map(k=>(
+                          <th key={k} style={{...s.th,textAlign:"left"}}>{k}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {relDados.map((d,i)=>(
+                        <tr key={i} style={{borderTop:"1px solid "+C.border}}>
+                          {Object.values(d).map((v,j)=>(
+                            <td key={j} style={{...s.td,fontSize:12}}>{v}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ):(
+              <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
+                <div style={{fontSize:32,marginBottom:8}}>📊</div>
+                <div style={{fontWeight:700,marginBottom:4}}>Nenhum resultado</div>
+                <div style={{fontSize:12}}>Selecione um tipo de relatório e clique em "Gerar" para buscar dados.</div>
               </div>
             )}
           </div>
@@ -7151,6 +7462,7 @@
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
+              {page==="relatorios"&&<RelatoriosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
               {page==="comissoes"&&<ComissoesPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="termos"&&<TermosPage colabAPI={colabAPI} empresaId={empresaId}/>}
