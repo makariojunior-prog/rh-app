@@ -6607,6 +6607,10 @@
       const [csvStatus,setCsvStatus]=useState(null);
       const [drag,setDrag]=useState(false);
       const [vtTab,setVtTab]=useState("import");
+      // ── Histórico de VTs salvos ──
+      const [vtHistorico, setVtHistorico] = useState([]);
+      const [vtCarregandoHistorico, setVtCarregandoHistorico] = useState(false);
+      const [vtStatusSalvar, setVtStatusSalvar] = useState(null);
       // Novos estados
       const [feriadosDia,setFeriadosDia]=useState({});
       const [valorDSR,setValorDSR]=useState(()=>localStorage.getItem("rh_valor_dsr")||"7,20");
@@ -6628,6 +6632,7 @@
       useEffect(()=>{ localStorage.setItem("rh_valor_dsr",valorDSR); },[valorDSR]);
       useEffect(()=>{ localStorage.setItem("rh_colab_api",JSON.stringify(colabAPI)); },[colabAPI]);
       useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
+      useEffect(()=>{ carregarHistoricoVT(); },[empresaId]);
       useEffect(()=>{
         async function _carregarColab(){
           const {data,error}=await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
@@ -6724,6 +6729,76 @@
       const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
       const removeEmp=(id)=>setEmployees(p=>p.filter(e=>e.id!==id));
       const addEmp=()=>{ if(!novoNome.trim()) return; setEmployees(p=>[...p,{id:Date.now(),nome:novoNome.trim(),escala:novaEscala,presente:{},afastado:false,valorPago:""}]); setNovoNome(""); };
+
+      // ── Funções para salvar/carregar VT do banco ──
+      const carregarHistoricoVT = async () => {
+        setVtCarregandoHistorico(true);
+        try {
+          const {data} = await _supa.from('vales_transporte').select('*').eq('empresa_id',empresaId).order('data_periodo_inicio',{ascending:false}).limit(100);
+          setVtHistorico(data||[]);
+        } catch(e) {
+          console.error('Erro ao carregar histórico VT:',e);
+        }
+        setVtCarregandoHistorico(false);
+      };
+
+      const salvarVT = async () => {
+        if(!semanaIni || !semanaFim || employees.length===0) {
+          setVtStatusSalvar({ok:false,msg:'Defina a semana e adicione colaboradores antes de salvar.'});
+          return;
+        }
+        setVtStatusSalvar({ok:null,msg:'⏳ Salvando Vale Transporte...'});
+        try {
+          const dadosVT = {
+            empresa_id:empresaId,
+            data_periodo_inicio:semanaIni,
+            data_periodo_fim:semanaFim,
+            periodo_label:semanaLabel,
+            empresa_nome:empresa,
+            responsavel:responsavel,
+            valor_passagem:valorPassagem,
+            feriados:feriadosDia,
+            colaboradores:employees.map(e=>({
+              id:e.id,
+              nome:e.nome,
+              escala:e.escala,
+              presente:e.presente||{},
+              afastado:e.afastado||false,
+              valorPago:e.valorPago||'',
+              dias:getDias(e),
+              valor_final:getValorFinal(e)
+            })),
+            total_valor:total,
+            data_salvo:new Date().toISOString(),
+            usuario:usuario?.email||'Desconhecido'
+          };
+          const {error} = await _supa.from('vales_transporte').insert(dadosVT);
+          if(error) throw error;
+          setVtStatusSalvar({ok:true,msg:'✅ Vale Transporte salvo com sucesso! Você pode reimprimir a qualquer momento.'});
+          setTimeout(()=>setVtStatusSalvar(null),3000);
+          await carregarHistoricoVT();
+        } catch(e) {
+          setVtStatusSalvar({ok:false,msg:'❌ Erro ao salvar: '+e.message});
+        }
+      };
+
+      const carregarVTdoHistorico = (vtSalvo) => {
+        setSemanaIni(vtSalvo.data_periodo_inicio);
+        setSemanaFim(vtSalvo.data_periodo_fim);
+        setEmpresa(vtSalvo.empresa_nome||empresa);
+        setResponsavel(vtSalvo.responsavel||'');
+        setPassagemStr(String(vtSalvo.valor_passagem||valorPassagem));
+        setFeriadosDia(vtSalvo.feriados||{});
+        setEmployees((vtSalvo.colaboradores||[]).map(c=>({
+          id:c.id,
+          nome:c.nome,
+          escala:c.escala,
+          presente:c.presente||{},
+          afastado:c.afastado||false,
+          valorPago:c.valorPago||''
+        })));
+        setVtTab('recibo');
+      };
 
       const carregarVTdoBancoPonto = useCallback(async () => {
         if(!semanaIni||!semanaFim){ setCsvStatus({ok:false,msg:"Defina a semana (início e fim) antes de carregar."}); return; }
@@ -7219,10 +7294,14 @@
           {/* ── TAB RECIBO ── */}
           {vtTab==="recibo"&&(
             <div>
+              {vtStatusSalvar&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,fontSize:13,background:vtStatusSalvar.ok===true?"#DCFCE7":vtStatusSalvar.ok===false?"#FEE2E2":"#FEF9C3",color:vtStatusSalvar.ok===true?"#166534":vtStatusSalvar.ok===false?"#991B1B":"#92400E"}}>{vtStatusSalvar.msg}</div>}
               <div style={s.card}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
                   <div style={s.cardTitle}>🖨️ Recibo para impressão</div>
-                  <button style={s.btnAcc} onClick={printRecibo}>🖨️ Gerar PDF / Imprimir</button>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <button style={{...s.btn,background:"#7C3AED",color:"#fff"}} onClick={salvarVT}>💾 Salvar VT</button>
+                    <button style={s.btnAcc} onClick={printRecibo}>🖨️ Imprimir</button>
+                  </div>
                 </div>
                 <div>
                   <div style={{borderBottom:`3px solid ${C.pri}`,paddingBottom:12,marginBottom:14}}>
@@ -7319,9 +7398,48 @@
 
           {/* ── TAB HISTÓRICO ── */}
           {vtTab==="hist"&&(
-            <div style={s.card}>
-              <div style={s.cardTitle}>📚 Histórico de Semanas</div>
-              <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
+            <div>
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={s.cardTitle}>💾 VTs Salvos no Banco de Dados</div>
+                  {vtHistorico.length>0&&<button style={{...s.btnSm,fontSize:11}} onClick={carregarHistoricoVT}>🔄 Atualizar</button>}
+                </div>
+                <div style={s.infoBox}>VTs salvos aqui podem ser acessados e reimpressos por qualquer usuário da empresa.</div>
+                {vtCarregandoHistorico?(
+                  <div style={{textAlign:"center",color:C.muted,padding:"20px"}}>Carregando...</div>
+                ):vtHistorico.length===0?(
+                  <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhum VT salvo ainda. Complete um VT e clique em "Salvar VT" na aba Recibo.</div>
+                ):(
+                  <table style={s.table}>
+                    <thead><tr>
+                      <th style={s.th}>Período</th>
+                      <th style={s.thC}>Colaboradores</th>
+                      <th style={{...s.thC,color:C.green}}>Total</th>
+                      <th style={s.th}>Salvo em</th>
+                      <th style={{...s.th,textAlign:"center"}}>Por</th>
+                      <th style={s.thC}></th>
+                    </tr></thead>
+                    <tbody>
+                      {vtHistorico.map((vt,i)=>(
+                        <tr key={vt.id} style={s.row(i)}>
+                          <td style={{...s.td,fontWeight:600}}>{vt.periodo_label}</td>
+                          <td style={s.tdC}>{vt.colaboradores?.length||0}</td>
+                          <td style={{...s.tdC,fontWeight:700,color:C.green}}>{fmtBRL(vt.total_valor||0)}</td>
+                          <td style={{...s.td,fontSize:11,color:C.muted}}>{vt.data_salvo?new Date(vt.data_salvo).toLocaleDateString('pt-BR'):''}</td>
+                          <td style={{...s.td,fontSize:11,color:C.muted}}>{vt.usuario||'—'}</td>
+                          <td style={s.tdC}>
+                            <button style={{...s.btn,fontSize:11,padding:"4px 10px"}} onClick={()=>carregarVTdoHistorico(vt)}>Reimprimir</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div style={s.card}>
+                <div style={s.cardTitle}>📚 Histórico de Semanas (Local)</div>
+                <div style={s.infoBox}>As últimas 12 semanas importadas ficam salvas neste dispositivo. Clique em "Carregar" para reabrir qualquer semana.</div>
               {historico.length===0?(
                 <div style={{textAlign:"center",color:C.muted,padding:"28px 0",fontSize:13}}>Nenhuma semana no histórico ainda. Importe um CSV para começar.</div>
               ):(
@@ -7363,6 +7481,7 @@
                   <button style={{...s.btnSm,color:C.muted,borderColor:C.muted}} onClick={async()=>{ if(await confirmar("Apagar todo o histórico salvo de folhas?",'Limpar Histórico')) setHistorico([]); }}>🗑️ Limpar histórico</button>
                 </div>
               )}
+              </div>
             </div>
           )}
 
