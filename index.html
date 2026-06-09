@@ -7519,7 +7519,7 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','orcamento','termos','acessos','ajuda','config','comissoes']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -7533,6 +7533,7 @@
         {k:'adiantamentos',l:'💵 Antecipações'},
         {k:'compras',l:'🛍️ Compras'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
+        {k:'relatorios',l:'📈 Relatórios'},
         {k:'ponto',l:'📋 Banco de Ponto'},
         {k:'comissoes',l:'💰 Comissões'},
         {k:'termos',l:'📝 Termos'},
