@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -333,6 +333,7 @@
         // nascimento vem como DD/MM/AAAA do GAS (coluna N)
         const getNasc = c => (c.nascimento || "").trim();
         const temCampoNasc = colabAPI.some(c => getNasc(c));
+        const mesAtual = hoje.getMonth() + 1;
 
         const aniversariantes = colabAPI.map(c => {
           const nasc = getNasc(c);
@@ -344,7 +345,7 @@
           if (!dia || !mes || mes > 12 || dia > 31) return null;
           let anivRef = new Date(hoje.getFullYear(), mes-1, dia, 12, 0, 0);
           let diff = diffDias(anivRef);
-          if (diff < -1) { anivRef = new Date(hoje.getFullYear()+1, mes-1, dia, 12, 0, 0); diff = diffDias(anivRef); }
+          if (diff < -1 && mes !== mesAtual) { anivRef = new Date(hoje.getFullYear()+1, mes-1, dia, 12, 0, 0); diff = diffDias(anivRef); }
           return { nome: c.nome || c.NOME || "", funcao: c.funcao || "", dia, mes, diff };
         }).filter(Boolean).sort((a,b) => a.diff - b.diff);
 
@@ -352,14 +353,13 @@
         const dow = hoje.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
         const diasAteSunday = dow === 0 ? 0 : 7 - dow;       // dias até o domingo desta semana
         const fimProxSemana = diasAteSunday + 7;              // domingo da próxima semana
-        const mesAtual = hoje.getMonth() + 1;
         const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 12, 0, 0);
         const diasAteFimMes = Math.round((ultimoDiaMes - hoje) / 86400000);
 
         const anivHoje       = aniversariantes.filter(a => a.diff === 0);
         const anivEstaSemana = aniversariantes.filter(a => a.diff > 0 && a.diff <= diasAteSunday);
         const anivProxSemana = aniversariantes.filter(a => a.diff > diasAteSunday && a.diff <= fimProxSemana);
-        const anivDoMes      = aniversariantes.filter(a => a.mes === mesAtual && a.diff > fimProxSemana && a.diff <= diasAteFimMes);
+        const anivDoMes      = aniversariantes.filter(a => a.mes === mesAtual && (a.diff < 0 || (a.diff > fimProxSemana && a.diff <= diasAteFimMes))).sort((a,b) => a.dia - b.dia);
 
         // ====== EXPERIÊNCIAS ======
         const experiencias = colabAPI.flatMap(c => {
@@ -620,7 +620,7 @@
 
                 {anivDoMes.length > 0 && (
                   <div>
-                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>Resto do mês</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>Outros deste mês</div>
                     {anivDoMes.map((a,i) => (
                       <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.border}`,opacity:0.75}}>
                         <div style={{width:34,height:34,borderRadius:6,background:"#F3F4F6",border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
