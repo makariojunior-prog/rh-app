@@ -5097,19 +5097,18 @@
                     else if (diff < 0) horasFaltasMin += (-diff);
                   }
                 } else {
-                  // Caso normal: apura cada intervalo (manhã e tarde) de forma independente.
-                  const acumularIntervalo = (prev, real) => {
-                    if (prev > 0 && real > 0) {
-                      const diff = real - prev;
-                      if (diff > 0) horasExtrasMin += diff;
-                      else if (diff < 0) horasFaltasMin += (-diff);
-                    } else if (prev > 0 && real <= 0) {
-                      // Intervalo previsto e sem o par de batidas: falta o intervalo inteiro.
-                      horasFaltasMin += prev;
-                    }
-                  };
-                  acumularIntervalo(prev1, real1); // manhã: previsto e1→s1, real b1→b2
-                  acumularIntervalo(prev2, real2); // tarde: previsto e2→s2, real b3→b4
+                  // Cálculo LÍQUIDO diário — igual ao iPonto: compara total trabalhado
+                  // vs total previsto do dia. Diferença de horário do almoço não gera
+                  // phantom extra num intervalo e falta no outro; o saldo é único e diário.
+                  const prevTot = Math.max(0, prev1) + Math.max(0, prev2);
+                  const realTot = Math.max(0, real1) + Math.max(0, real2);
+                  if (prevTot > 0 && realTot > 0) {
+                    const diff = realTot - prevTot;
+                    if (diff > 0) horasExtrasMin += diff;
+                    else if (diff < 0) horasFaltasMin += (-diff);
+                  } else if (prevTot > 0 && realTot <= 0) {
+                    horasFaltasMin += prevTot;
+                  }
                 }
                 // Atraso injustificado (> 10 min de tolerância)
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
