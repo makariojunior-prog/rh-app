@@ -650,7 +650,7 @@
                           <code style={{fontSize:11}}>{colabAPI.length > 0 ? Object.keys(colabAPI[0]).join(", ") : "—"}</code>
                         </div>
                         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                          <button onClick={atualizar} style={{...s.btn,fontSize:12,padding:"6px 14px"}}>🔄 Atualizar dados</button>
+                          <button onClick={()=>window.location.reload()} style={{...s.btn,fontSize:12,padding:"6px 14px"}}>🔄 Atualizar dados</button>
                           {onNavegar && <button onClick={()=>onNavegar("folha")} style={{...s.btnOutline,fontSize:12,padding:"6px 14px"}}>Ir para Folha e recarregar →</button>}
                         </div>
                       </div>
@@ -2005,7 +2005,7 @@
               empresa_id: empresaId, role: form.role, paginas: pagsFinal
             }, {onConflict:'id'});
             if(perfilErr) throw new Error('Conta validada, mas erro ao salvar permissões: ' + perfilErr.message);
-            setStatus({ok:true, msg:`✅ Acesso criado/vinculado!\n📧 Email: ${emailLimpo}\n🔑 Senha: ${form.senha}`});
+            setStatus({ok:true, msg:`✅ Acesso criado/vinculado!\n📧 Email: ${emailLimpo}\n🔑 Repasse a senha ao usuário por um canal seguro. Por segurança, ela não é exibida aqui.`});
             setCriando(false); setForm(FORM_VAZIO); carregar();
           } catch(e) {
             setStatus({ok:false, msg:'❌ ' + e.message});
@@ -3713,7 +3713,7 @@
                 Colaborador:f.nome,
                 'Gozo Início':new Date(f.gozo_inicio+'T12:00:00').toLocaleDateString('pt-BR'),
                 'Gozo Fim':new Date(f.gozo_fim+'T12:00:00').toLocaleDateString('pt-BR'),
-                Dias:f.quantidade_dias||'—',
+                Dias:f.dias||'—',
                 Status:f.status||'—'
               }));
               setRelDados(dados);
@@ -3726,8 +3726,8 @@
                 Colaborador:a.colaborador_nome,
                 'Data Início':new Date(a.inicio+'T12:00:00').toLocaleDateString('pt-BR'),
                 'Data Fim':new Date(a.fim+'T12:00:00').toLocaleDateString('pt-BR'),
-                Dias:a.quantidade_dias||'—',
-                Tipo:a.tipo||'—'
+                Dias:(a.periodo&&a.periodo!=='dia_todo')?'½':(a.dias||'—'),
+                CID:a.cid||'—'
               }));
               setRelDados(dados);
             }
@@ -6599,6 +6599,7 @@
       useEffect(()=>{ localStorage.setItem("rh_empresa_id",empresaId); },[empresaId]);
       useEffect(()=>{ carregarHistoricoVT(); },[empresaId]);
       useEffect(()=>{
+        if(!usuario) return; // só busca após login (com RLS, requer sessão autenticada)
         async function _carregarColab(){
           const {data,error}=await _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome');
           if(!error && data && data.length>0){
@@ -6622,7 +6623,7 @@
           }
         }
         _carregarColab();
-      },[empresaId]);
+      },[empresaId, usuario]);
 
       const carregarPerfil = useCallback(async (uid) => {
         try {
@@ -6890,6 +6891,7 @@
       },[employees,semanaIni,semanaFim,valorPassagem]);
 
       const printRecibo=useCallback(()=>{
+        const esc=(x)=>String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         const vp=parseFloat(passagemStr.replace(",","."))||0;
         const fd=feriadosDia;
         const getD=(emp)=>{
@@ -6913,7 +6915,7 @@
           const afastadoStyle=emp.afastado?"opacity:0.5;text-decoration:line-through;":"";
           return `<tr style="background:${i%2===0?"#fff":"#f9f9f9"};${afastadoStyle}">
             <td style="text-align:center;color:#888;width:20px">${i+1}</td>
-            <td style="font-weight:600;font-size:7.5pt">${emp.nome}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}</td>
+            <td style="font-weight:600;font-size:7.5pt">${esc(emp.nome)}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}</td>
             <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
             <td style="text-align:center;font-weight:700;width:36px">${d}</td>
             <td style="text-align:center;color:#666;width:36px">${d*2}</td>
@@ -6951,13 +6953,13 @@
         <div style="border-bottom:3px solid #1B3A2B;padding-bottom:8px;margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:flex-end">
             <div>
-              <div style="font-size:15pt;font-weight:800;color:#1B3A2B">${empresa}</div>
+              <div style="font-size:15pt;font-weight:800;color:#1B3A2B">${esc(empresa)}</div>
               <div style="font-size:8pt;color:#888;margin-top:2px">R. 11, 2-114 — Jardim Santo Antônio, Goiânia - GO</div>
             </div>
             <div style="text-align:right">
               <div style="font-size:8pt;color:#888">Período de referência</div>
               <div style="font-size:11pt;font-weight:700;color:#1B3A2B">${periodo}</div>
-              ${responsavel?`<div style="font-size:8pt;color:#888">Resp.: ${responsavel}</div>`:""}
+              ${responsavel?`<div style="font-size:8pt;color:#888">Resp.: ${esc(responsavel)}</div>`:""}
             </div>
           </div>
           <div style="margin-top:8px;font-size:11pt;font-weight:800;text-align:center;text-transform:uppercase;letter-spacing:.07em">Recibo de Vale Transporte</div>

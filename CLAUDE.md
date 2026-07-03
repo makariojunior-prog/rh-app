@@ -4,41 +4,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Single-file React SPA for HR management at **Cantina em Casa / Lumar Alimentos** (Brazilian food company). Handles Vale Transporte (transportation vouchers), Folha de Pagamento (payroll), and employee attendance tracking. All UI and logic is in Portuguese (Brazilian).
+Single-file React SPA for HR management at **Cantina em Casa / Lumar Alimentos** (Brazilian food company). Modules: Dashboard, Colaboradores, Vale Transporte (VT), Folha de Pagamento (payroll), Banco de Ponto, Férias, Atestados, Adiantamentos/Antecipações, Compras, Recrutamento, Relatórios, Orçamento, Comissões, Termos de Assinatura, Acessos e Configurações. All UI and logic is in Portuguese (Brazilian).
 
 ## Running the App
 
-No build step — open `index.html` directly in a browser (`file://` protocol works). React 18, ReactDOM, and Babel are loaded from CDN. No package.json or dependencies to install.
+No build step — open `index.html` directly in a browser (`file://` works) or serve statically. React 18, ReactDOM, Babel (in-browser transpile), jsPDF and the Supabase JS client are loaded from CDN. `package.json` exists but only pins helper deps; the app runs without `npm install`.
 
 ## Architecture
 
-Everything lives in `index.html` (~1,800 lines). Structure:
+The whole app is one large file: `index.html` (~7,100 lines). Structure inside the `<script type="text/babel">`:
 
-- **Utility functions** (top of `<script>`) — `parseCSV()`, `parseCSVFolha()`, `calcularColab()`, `analisarDia()`, `fmtBRL()`, `fmtDate()`
-- **`App()`** — root component, holds all state, renders sidebar + active page
-- **`FolhaPage()`** — payroll module (collaborator list, day marking, adjustments)
-- **`PainelColaborador()`** — employee detail panel (day-by-day attendance, totals)
-- **`PlaceholderPage()`** — stub for unimplemented pages (Férias, Atestados, Histórico)
+- **Utility functions** (top) — `parseCSV()`, `parsePontoDetalhado()`, `upsertRegistrosPonto()`, `calcINSS()`, `calcFGTS()`, `calcPericulosidade()`, `calcularFeriadosBR()`, `fmtBRL()`, `fmtDate()`, `maskCPF()`, `validateCPF()`.
+- **`App()`** — root component: auth gate, sidebar, per-page routing, VT module, and most shared state.
+- **Page components** — `DashboardPage`, `ColaboradoresPage`, `FolhaPage` (+ `PainelColaborador`), `PontoPage`, `FeriasPage`, `AtestadosPage`, `AdiantamentosPage`, `ComprasPage`, `RecrutamentoPage`, `RelatoriosPage`, `OrcamentoPage`, `ComissoesPage`, `TermosPage`, `AcessosPage`, `ConfiguracoesPage`, `AjudaPage`, `LoginPage`, `NovaSenhaPage`.
+- A separate public jobs form lives in `vagas/index.html` (candidates insert into `candidatos` + upload résumés to the `curriculos` storage bucket, as anon).
+
+## Backend — Supabase
+
+The app uses **Supabase** (Postgres + Auth + Storage) as its backend, not Google Sheets. Client is created at the top of `index.html` with `SUPA_URL` + the public `anon` key. Auth is email/password via `_supa.auth`. After login, `perfis` holds the user's `role` (admin/usuario), `empresa_id`, allowed `paginas`, and `dark_mode`.
+
+- **Multi-tenant** via `empresa_id` (values `cantina` / `lumar`). The same Supabase project also hosts a separate CRM app (`crm_*`, `varejo_*`, `atacado_*`, `deals`, `visits`, …) — do not change those tables/policies when working on RH.
+- **Security note:** page-level permissions (admin vs usuario, `paginas`) are enforced only in the React client. Real isolation must come from Row Level Security. RH tables are restricted to the `authenticated` role; per-`empresa_id` isolation is a recommended follow-up.
 
 ## State & Persistence
 
-All data is persisted to `localStorage` with `rh_` prefixed keys. React `useEffect` hooks sync state to/from localStorage on mount and on change. No backend — the app is fully offline-capable.
+Primary data lives in Supabase. `localStorage` (`rh_` prefixed keys) is used for UI/session cache and for a few client-only settings — notably feriados (`rh_feriados`), folha marcações/ajustes (`rh_folha_marc`, `rh_folha_ajustes`), and a colaborador cache (`rh_colab_api`).
 
-## Data Flow
+## Data Flow (Folha / Ponto)
 
-1. User uploads CSV from electronic punch clock (columns: Cracha, Nome, Data, Entrada1, Saída1, etc.)
-2. `parseCSV()` / `parseCSVFolha()` normalize names and map attendance per employee per day
-3. User manually adjusts statuses: worked / absent / sick / vacation / holiday
-4. Brazilian public holidays auto-calculated via Meeus/Jones/Butcher Easter algorithm
-5. `calcularColab()` computes payroll metrics: DSR loss, CAJU days, extra hours, absences
-6. Export: CSV (semicolon-delimited for Excel), PDF via browser print, or POST to Google Sheets via Google Apps Script Web App
+1. User imports the punch-clock CSV (columns: Cracha, Nome, Data, Entrada/Saída, batidas, Hora Extra) in **Banco de Ponto** or VT.
+2. `parsePontoDetalhado()` maps batidas per employee/day; `upsertRegistrosPonto()` persists to `registros_ponto`.
+3. **Folha de Pagamento** reads `registros_ponto` for the period (26th of prev month → 25th of ref month). Statuses can be adjusted: trabalhou / falta / atestado / atestado_meio / férias / folga / abono.
+4. Brazilian public holidays auto-calculated via Meeus/Jones/Butcher Easter algorithm (`calcularFeriadosBR`).
+5. `calcularColab()` computes payroll metrics: DSR loss, CAJU days, extra hours, assiduidade, descontos.
+6. Export: CSV (semicolon-delimited for Excel) and PDF (jsPDF / browser print). Folha can be saved to `folha_mensal`.
 
-## Key Constants (hardcoded in `App` state)
+## Key Constants
 
-- Company name: `"Cantina em Casa / Lumar Alimentos"`
-- VT value per passage: `R$ 4,30`
-- GAS endpoint and Google Sheet ID are stored in component state and can be changed via the UI settings tab
-
-## Google Sheets Integration
-
-Uses a Google Apps Script Web App (GAS) deployed as a POST endpoint. The URL is stored in `gasUrl` state. The `GAS_SCRIPT` constant (near top of file) contains the Apps Script source that should be deployed on the Google side.
+- Company name / VT passage value / DSR value are stored in `App` state and editable in ⚙️ Configurações (VT default `R$ 4,30`, DSR default `R$ 7,20`).
