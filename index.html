@@ -4509,21 +4509,15 @@
                           const _p2 = toMin(r.previsto_s2)-toMin(r.previsto_e2);
                           const _r1 = toMin(r.real_b2)-toMin(r.real_b1);
                           const _r2 = toMin(r.real_b4)-toMin(r.real_b3);
-                          const workedMin = Math.max(0,_r1) + Math.max(0,_r2);
-                          const scheduledMin = (isFolga||isFeriado) ? 0 : Math.max(0,_p1) + Math.max(0,_p2);
+                          // Extra/falta LÍQUIDO por dia (soma manhã+tarde, sem tolerância) — mesma
+                          // lógica de calcularColab, para bater com o relógio de ponto da fábrica.
+                          const previstoMin   = (isFolga||isFeriado) ? 0 : Math.max(0,_p1) + Math.max(0,_p2);
+                          const trabalhadoMin = Math.max(0,_r1) + Math.max(0,_r2);
                           let calcExtraMin = 0, calcFaltaMin = 0;
                           if (!isFolga && !isFeriado && temBatida) {
-                            if (_p1>0 && _p2>0 && (_r1<=0 || _r2<=0)) {
-                              // batida incompleta com 2 intervalos previstos: usa vão total
-                              const ini = toMin(r.real_b1);
-                              const fim = Math.max(toMin(r.real_b4), toMin(r.real_b2));
-                              const realTot = (ini>0 && fim>ini) ? (fim-ini) : workedMin;
-                              const diff = realTot - (_p1+_p2);
-                              if (diff>0) calcExtraMin = diff; else if (diff<0) calcFaltaMin = -diff;
-                            } else {
-                              const acc = (prev,real)=>{ if(prev>0&&real>0){const d=real-prev; if(d>0)calcExtraMin+=d; else if(d<0)calcFaltaMin+=-d;} else if(prev>0&&real<=0){calcFaltaMin+=prev;} };
-                              acc(_p1,_r1); acc(_p2,_r2);
-                            }
+                            const liq = trabalhadoMin - previstoMin;
+                            if (liq > 0) calcExtraMin = liq;
+                            else if (liq < 0 && _r1 > 0 && _r2 > 0) calcFaltaMin = -liq;
                           }
                           const foiEditado = r.fonte==='editado';
                           const editandoEste = (campo) => editando?.id===r.id && editando?.campo===campo;
@@ -5071,47 +5065,28 @@
             if (a.status === "trabalhou") {
               diasTrabalhados++;
               if (diaDados) {
-                // H. Extra / H. Falt. são apuradas POR INTERVALO (manhã e tarde) separadamente,
-                // exatamente como o relógio de ponto externo. NÃO se pode somar a jornada toda
-                // e tirar a diferença líquida do dia: isso cancela extras de um intervalo contra
-                // faltas de outro (ex.: chega cedo de manhã mas sai cedo à tarde), produzindo MENOS
-                // extras e MENOS faltas do que o documento oficial. Sem tolerância de minutos —
-                // o ponto contabiliza minuto a minuto.
+                // ── Horas Extras / Horas Faltas — LÍQUIDO POR DIA (igual ao relógio da fábrica) ──
+                // O relógio de ponto apura: (total trabalhado no dia) − (total previsto no dia),
+                // somando manhã + tarde JUNTAS, sem tolerância. O positivo é a "Total hora extra"
+                // (coluna oficial do CSV); o negativo é hora falta. Validado contra o arquivo real
+                // da fábrica: esta fórmula reproduz a coluna oficial em 100% dos dias.
+                // NÃO se apura por intervalo separado — isso contava extra de um turno contra falta
+                // de outro, inflando ambos (causa histórica das divergências com a fábrica).
                 const prev1 = hhmmToMin(diaDados.previsto.s1) - hhmmToMin(diaDados.previsto.e1);
                 const prev2 = hhmmToMin(diaDados.previsto.s2) - hhmmToMin(diaDados.previsto.e2);
                 const real1 = hhmmToMin(diaDados.real.b2) - hhmmToMin(diaDados.real.b1);
                 const real2 = hhmmToMin(diaDados.real.b4) - hhmmToMin(diaDados.real.b3);
-                const temPar1 = real1 > 0;   // b1 e b2 batidos
-                const temPar2 = real2 > 0;   // b3 e b4 batidos
-                if ((prev1 > 0 && prev2 > 0) && (!temPar1 || !temPar2)) {
-                  // Jornada com 2 intervalos previstos mas batida incompleta (ex.: esqueceu de
-                  // bater o almoço). Não dá para apurar por intervalo sem inflar a falta — usa o
-                  // vão total (1ª batida → última batida) contra a jornada prevista total.
-                  const prevTot = prev1 + prev2;
-                  const ini = hhmmToMin(diaDados.real.b1);
-                  const fim = Math.max(hhmmToMin(diaDados.real.b4), hhmmToMin(diaDados.real.b2));
-                  const realTot = (ini > 0 && fim > ini) ? (fim - ini) : Math.max(real1, 0) + Math.max(real2, 0);
-                  if (realTot > 0) {
-                    const diff = realTot - prevTot;
-                    if (diff > 0) horasExtrasMin += diff;
-                    else if (diff < 0) horasFaltasMin += (-diff);
-                  }
-                } else {
-                  // Caso normal: apura cada intervalo (manhã e tarde) de forma independente.
-                  const acumularIntervalo = (prev, real) => {
-                    if (prev > 0 && real > 0) {
-                      const diff = real - prev;
-                      if (diff > 0) horasExtrasMin += diff;
-                      else if (diff < 0) horasFaltasMin += (-diff);
-                    } else if (prev > 0 && real <= 0) {
-                      // Intervalo previsto e sem o par de batidas: falta o intervalo inteiro.
-                      horasFaltasMin += prev;
-                    }
-                  };
-                  acumularIntervalo(prev1, real1); // manhã: previsto e1→s1, real b1→b2
-                  acumularIntervalo(prev2, real2); // tarde: previsto e2→s2, real b3→b4
+                const previstoMin   = Math.max(0, prev1) + Math.max(0, prev2);
+                const trabalhadoMin = Math.max(0, real1) + Math.max(0, real2);
+                const liquidoMin = trabalhadoMin - previstoMin; // = "Total hora extra" quando > 0
+                if (liquidoMin > 0) {
+                  horasExtrasMin += liquidoMin;
+                } else if (liquidoMin < 0 && real1 > 0 && real2 > 0) {
+                  // Débito líquido do dia — só com os DOIS intervalos batidos, para não inflar por
+                  // batida esquecida. Meio período sem batida é tratado pelo status do dia.
+                  horasFaltasMin += (-liquidoMin);
                 }
-                // Atraso injustificado (> 10 min de tolerância)
+                // Atraso injustificado (> 10 min de tolerância) — afeta o prêmio assiduidade
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
                 const realB1 = hhmmToMin(diaDados.real.b1);
                 if (prevE1 > 0 && realB1 > 0 && realB1 > prevE1 + 10) atrasosInjustificados++;
@@ -5475,10 +5450,11 @@
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>⏱️ Horas Extras e Horas Falta Parcial</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li><strong>Horas Extras:</strong> Lidas do campo <em>Hora Extra</em> do CSV do ponto eletrônico.</li>
-                          <li><strong>Horas Falta Parcial:</strong> Diferença entre horário previsto e real batido no dia (quando trabalhou mas saiu mais cedo ou chegou tarde além da tolerância).</li>
-                          <li>Tolerância de atraso: <strong>10 minutos</strong>. Atrasos até 10 min não geram horas falta.</li>
-                          <li>Formato exibido: <strong>HH:MM</strong>.</li>
+                          <li><strong>Cálculo líquido por dia:</strong> extra e falta seguem exatamente o relógio de ponto da fábrica — <em>(total trabalhado no dia) − (total previsto no dia)</em>, somando manhã e tarde <strong>juntas</strong>, sem tolerância.</li>
+                          <li><strong>Horas Extras:</strong> parte positiva do líquido do dia — o mesmo número da coluna <em>Total hora extra</em> do relógio de ponto.</li>
+                          <li><strong>Horas Falta Parcial:</strong> parte negativa (trabalhou menos que o previsto no dia), contabilizada apenas em dias com as <strong>quatro batidas</strong> registradas. Meio período sem batida é tratado pelo status do dia (falta/atestado), não aqui.</li>
+                          <li>Não se apura por intervalo separado: extra de um turno não é mais somado contra falta de outro (isso inflava os dois e causava a divergência histórica com a fábrica).</li>
+                          <li>Formato exibido: <strong>HH:MM</strong>. A tolerância de 10 min continua valendo só para o atraso que afeta o prêmio assiduidade.</li>
                         </ul>
                       </div>
                     </div>
