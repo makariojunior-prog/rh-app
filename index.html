@@ -1869,7 +1869,7 @@
                   {mostrarDesligados?"▲ Ocultar":"▶ Ver"} desligados ({listaDesligados.length})
                 </button>
                 {mostrarDesligados&&(
-                  <div style={{marginTop:8,border:"1px solid "+C.border,borderRadius:8,overflow:"hidden",opacity:0.85}}>
+                  <div style={{marginTop:8,border:"1px solid "+C.border,borderRadius:8,overflow:"hidden"}}>
                     <table style={{width:"100%",borderCollapse:"collapse"}}>
                       <thead><tr style={{background:"var(--c-subtle)"}}>
                         <th style={s.th}>Nome</th><th style={s.th}>Função</th><th style={s.th}>Setor</th><th style={s.th}>Encerramento</th><th style={{...s.th,textAlign:"right"}}></th>
@@ -1877,11 +1877,12 @@
                       <tbody>
                         {listaDesligados.map(c=>(
                           <tr key={c.id} style={{background:"#fff",borderTop:"1px solid "+C.border}}>
-                            <td style={{...s.td,fontWeight:600,color:C.muted}}>{c.nome}</td>
+                            <td style={{...s.td,fontWeight:600}}>{c.nome}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{c.funcao||"—"}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{c.setor||"—"}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{c.data_encerramento?fmtDate(c.data_encerramento):"—"}</td>
-                            <td style={{...s.td,textAlign:"right"}}>
+                            <td style={{...s.td,textAlign:"right",whiteSpace:"nowrap"}}>
+                              <button onClick={()=>abrirEdicao(c)} style={{...s.btnOutline,fontSize:11,padding:"4px 10px",marginRight:6}}>👁 Ver / Editar</button>
                               <button onClick={()=>reativar(c)} style={{background:"none",border:"1px solid #86EFAC",color:"#16A34A",borderRadius:5,fontSize:11,padding:"4px 10px",cursor:"pointer"}}>↩ Reativar</button>
                             </td>
                           </tr>
@@ -4794,6 +4795,7 @@
         const [terminadosMap, setTerminadosMap] = useState({});
         const [excluidos, setExcluidos] = useState(()=>{ try{return new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]'));}catch(e){return new Set();} });
         const [comissoesMap, setComissoesMap] = useState({});
+        const [ausenciasAuto, setAusenciasAuto] = useState({}); // atestados/férias dos módulos → status automático por dia
 
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
         useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
@@ -4818,6 +4820,7 @@
           setAdiantSupa({});
           setAdiantFixosSupa({});
           setComprasSupa({});
+          setAusenciasAuto({});
           const mesR = mesAno.split('/').reverse().join('-');
           const norm = (n)=>String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
           _supa.from('adiantamentos').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').then(({data})=>{
@@ -4880,6 +4883,39 @@
               return merged;
             });
           }).catch(err=>console.error('registros_ponto load error:',err));
+          // ── Atestados e Férias registrados nos módulos → marcam automaticamente os dias na folha ──
+          // Ausência justificada (atestado/férias) NÃO pode virar falta nem perder DSR (CLT). Antes,
+          // se não fosse remarcada manualmente na folha, caía como falta. Agora é puxada da fonte.
+          const _diPer = new Date(ano2, mes2-2, 26); // início do período (26 do mês anterior)
+          const _dfPer = new Date(ano2, mes2-1, 25); // fim do período (25 do mês de referência)
+          const iniPer = toISO(_diPer), fimPer = toISO(_dfPer);
+          const eachDay = (ini, fim, cb) => {
+            if(!ini || !fim) return;
+            let dd = new Date(ini+'T12:00:00'); const end = new Date(fim+'T12:00:00');
+            while(dd <= end){ cb(toISO(new Date(dd))); dd.setDate(dd.getDate()+1); }
+          };
+          Promise.all([
+            _supa.from('atestados').select('colaborador_nome,inicio,fim,periodo').eq('empresa_id',empresaId).lte('inicio',fimPer).gte('fim',iniPer),
+            _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status').eq('empresa_id',empresaId).neq('status','cancelado').lte('gozo_inicio',fimPer).gte('gozo_fim',iniPer),
+          ]).then(([atRes,feRes])=>{
+            const mapa = {};
+            const marcar = (nome, iso, st) => {
+              const k = norm(nome); if(!k) return;
+              if(!mapa[k]) mapa[k] = {};
+              const atual = mapa[k][iso];
+              // Atestado tem prioridade sobre férias no mesmo dia (não sobrescreve atestado por férias).
+              if((atual==='atestado'||atual==='atestado_meio') && st==='ferias') return;
+              mapa[k][iso] = st;
+            };
+            (atRes.data||[]).forEach(a=>{
+              const st = (a.periodo && a.periodo!=='dia_todo') ? 'atestado_meio' : 'atestado';
+              eachDay(a.inicio, a.fim, iso => marcar(a.colaborador_nome, iso, st));
+            });
+            (feRes.data||[]).forEach(f=>{
+              eachDay(f.gozo_inicio, f.gozo_fim, iso => marcar(f.nome, iso, 'ferias'));
+            });
+            setAusenciasAuto(mapa);
+          }).catch(err=>console.error('ausencias (atestados/ferias) load error:',err));
         },[empresaId,mesAno]);
 
         const [mes, ano] = mesAno.split("/").map(n=>parseInt(n));
@@ -5045,6 +5081,12 @@
           if (smDb === "abono") return {status:"abono", diaUtilPrevisto: !!temPrevisao};
           if (smDb === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (smDb === "folga") return {status:"folga", diaUtilPrevisto: !!temPrevisao};
+          // Ausências automáticas dos módulos Atestados/Férias (ausência justificada — nunca é falta).
+          // Marcação manual (folha/ponto) acima tem prioridade, permitindo ajuste caso a caso.
+          const auto = ausenciasAuto[nomeKey]?.[iso];
+          if (auto === "atestado") return {status:"atestado", diaUtilPrevisto: !!temPrevisao};
+          if (auto === "atestado_meio") return {status:"atestado_meio", diaUtilPrevisto: !!temPrevisao};
+          if (auto === "ferias") return {status:"ferias", diaUtilPrevisto: !!temPrevisao};
           if (isFeriado) return {status:"feriado", diaUtilPrevisto: !!temPrevisao};
           if (!temPrevisao) return {status:"nao_previsto", diaUtilPrevisto: false};
           if (temBatida) return {status:"trabalhou", diaUtilPrevisto: true};
@@ -5191,7 +5233,7 @@
             emExperiencia: diasEmExperiencia > 0,
             valorTransporte: colabInfo?.transporte || 0
           };
-        }, [datasPeriodo, marcacoes, feriados, ajustes]);
+        }, [datasPeriodo, marcacoes, feriados, ajustes, ausenciasAuto]);
 
         const colaboradoresUnificados = (() => {
           const mapa = new Map();
