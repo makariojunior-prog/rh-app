@@ -1173,6 +1173,8 @@
         const [loadingHistorico, setLoadingHistorico] = useState(false);
         const [termosGlobais, setTermosGlobais] = useState([]);
         const [termosExtras, setTermosExtras] = useState({});
+        const [termosValores, setTermosValores] = useState({}); // termo_id -> texto livre (nº aditivo, nº armário, etc.)
+        const [historicoTermos, setHistoricoTermos] = useState([]);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
         const [editando, setEditando] = useState(null);
@@ -1350,7 +1352,7 @@
           document.body.removeChild(link);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
@@ -1371,15 +1373,21 @@
             termoAssiduidade:!!c.termo_assiduidade,
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
-          setTermosExtras({});
+          setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]);
           setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]);
-          // Load non-legacy terms from colaborador_termos
+          // Carrega assinatura (SIM/NÃO) e valor livre (nº aditivo, nº armário, etc.) de todos os termos
           _supa.from('colaborador_termos').select('*').eq('colaborador_id',c.id)
             .then(({data})=>{
-              const extras = {};
-              (data||[]).forEach(ct=>{ extras[ct.termo_id]=ct.assinado; });
-              setTermosExtras(extras);
+              const extras = {}, valores = {};
+              (data||[]).forEach(ct=>{ extras[ct.termo_id]=ct.assinado; valores[ct.termo_id]=ct.valor||''; });
+              setTermosExtras(extras); setTermosValores(valores);
             }).catch(()=>{});
+        };
+        const carregarHistoricoTermos = async (colabId) => {
+          try {
+            const {data} = await _supa.from('colaborador_termos_historico').select('*').eq('colaborador_id',colabId).order('alterado_em',{ascending:false});
+            setHistoricoTermos(data||[]);
+          } catch(e) { setHistoricoTermos([]); }
         };
 
         const salvar = async () => {
@@ -1441,26 +1449,62 @@
                 });
               }
             }
-            // Sync all terms to colaborador_termos
+            // Sync all terms to colaborador_termos (assinado + valor livre), com histórico de alterações.
+            // Try/catch próprio: uma falha aqui NUNCA deve impedir a gravação dos dados principais do
+            // colaborador (nome, salário, etc.) já concluída acima — mas também nunca deve falhar em
+            // silêncio. Se der erro, o colaborador é salvo normalmente e um aviso claro é mostrado.
+            let avisoTermos = null;
             if(termosGlobais.length > 0 && data?.id) {
-              const CAMPO_DB_TO_APP = {
-                'conta_salario':'contaSalario','aditivo_contrato':'aditivoContrato',
-                'uso_armario':'usoArmario','lgpd':'lgpd','imagem':'imagem','camera':'camera',
-                'epi_uniforme':'epiUniforme','acompanhamento_producao':'acompanhamentoProducao',
-                'uso_celular':'usoCelular','uso_veiculo':'usoVeiculo',
-                'termo_confidencialidade':'termoConfidencialidade',
-                'termo_assiduidade':'termoAssiduidade','termo_mudanca_horario':'termoMudancaHorario',
-              };
-              const rows = termosGlobais.map(t=>({
-                empresa_id: empresaId,
-                colaborador_id: data.id,
-                termo_id: t.id,
-                assinado: t.campo_legado
-                  ? !!(form[CAMPO_DB_TO_APP[t.campo_legado]])
-                  : !!(termosExtras[t.id]),
-                updated_at: new Date().toISOString(),
-              }));
-              await _supa.from('colaborador_termos').upsert(rows,{onConflict:'colaborador_id,termo_id'});
+              try {
+                const CAMPO_DB_TO_APP = {
+                  'conta_salario':'contaSalario','aditivo_contrato':'aditivoContrato',
+                  'uso_armario':'usoArmario','lgpd':'lgpd','imagem':'imagem','camera':'camera',
+                  'epi_uniforme':'epiUniforme','acompanhamento_producao':'acompanhamentoProducao',
+                  'uso_celular':'usoCelular','uso_veiculo':'usoVeiculo',
+                  'termo_confidencialidade':'termoConfidencialidade',
+                  'termo_assiduidade':'termoAssiduidade','termo_mudanca_horario':'termoMudancaHorario',
+                };
+                // Estado ANTES da gravação (para diff do histórico) — lido do banco, não do estado local,
+                // para refletir a verdade mesmo se outro admin tiver editado em paralelo.
+                const { data: antesData, error: antesErr } = await _supa.from('colaborador_termos').select('termo_id,assinado,valor').eq('colaborador_id',data.id);
+                if(antesErr) throw antesErr;
+                const antesMap = {};
+                (antesData||[]).forEach(r=>{ antesMap[r.termo_id]={assinado:!!r.assinado, valor:r.valor||''}; });
+                const rows = termosGlobais.map(t=>({
+                  empresa_id: empresaId,
+                  colaborador_id: data.id,
+                  termo_id: t.id,
+                  assinado: t.campo_legado
+                    ? !!(form[CAMPO_DB_TO_APP[t.campo_legado]])
+                    : !!(termosExtras[t.id]),
+                  valor: (termosValores[t.id]||'').trim() || null,
+                  updated_at: new Date().toISOString(),
+                }));
+                const { error: upsertErr } = await _supa.from('colaborador_termos').upsert(rows,{onConflict:'colaborador_id,termo_id'});
+                if(upsertErr) throw upsertErr;
+                const { data: { session } } = await _supa.auth.getSession();
+                const quem = session?.user?.email || 'Desconhecido';
+                const logRows = rows.filter(r=>{
+                  const antes = antesMap[r.termo_id] || {assinado:false, valor:''};
+                  return antes.assinado !== r.assinado || (antes.valor||'') !== (r.valor||'');
+                }).map(r=>{
+                  const antes = antesMap[r.termo_id] || {assinado:false, valor:''};
+                  const termo = termosGlobais.find(t=>t.id===r.termo_id);
+                  return {
+                    empresa_id: empresaId, colaborador_id: data.id, termo_id: r.termo_id,
+                    colaborador_nome: form.nome.trim(), termo_nome: termo?.nome||'',
+                    assinado_anterior: antes.assinado, assinado_novo: r.assinado,
+                    valor_anterior: antes.valor||null, valor_novo: r.valor,
+                    alterado_por: quem,
+                  };
+                });
+                if(logRows.length){
+                  const { error: histErr } = await _supa.from('colaborador_termos_historico').insert(logRows);
+                  if(histErr) throw histErr;
+                }
+              } catch(errTermos) {
+                avisoTermos = '⚠️ Colaborador salvo, mas houve erro ao gravar termos/histórico: ' + errTermos.message;
+              }
             }
             const ficouAtivo = !form.encerramento;
             if(editando.novo){
@@ -1480,7 +1524,8 @@
                 });
               }
             }
-            setStatus({ok:true, msg:editando.novo?"✅ Colaborador adicionado.":(ficouAtivo?"✅ Alterações salvas.":"✅ Colaborador encerrado e movido para inativos.")});
+            const msgBase = editando.novo?"✅ Colaborador adicionado.":(ficouAtivo?"✅ Alterações salvas.":"✅ Colaborador encerrado e movido para inativos.");
+            setStatus(avisoTermos ? {ok:null, msg:avisoTermos} : {ok:true, msg:msgBase});
             setEditando(null);
           } catch(err){ setStatus({ok:false,msg:"❌ Erro: "+err.message}); }
           setLoading(false);
@@ -1546,7 +1591,7 @@
               <button onClick={()=>setEditando(null)} style={s.btnOutline}>← Voltar</button>
               <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{editando.novo?"➕ Novo Colaborador":"✏️ Editar: "+editando.nome}</div>
             </div>
-            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok?"#DCFCE7":"#FEE2E2",color:status.ok?"#166534":"#991B1B",fontSize:13}}>{status.msg}</div>}
+            {status&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:status.ok===true?"#DCFCE7":status.ok===false?"#FEE2E2":"#FEF9C3",color:status.ok===true?"#166534":status.ok===false?"#991B1B":"#713F12",fontSize:13,whiteSpace:"pre-line"}}>{status.msg}</div>}
 
             <div style={s.card}>
               <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Dados Pessoais</div>
@@ -1651,17 +1696,26 @@
                     else setTermosExtras(p=>({...p,[t.id]:!p[t.id]}));
                   };
                   return (
-                    <div key={t.id||t.campo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderRadius:7,background:checked?"#F0FDF4":"var(--c-subtle)",border:"1px solid "+(checked?C.green:C.border)}}>
-                      <span style={{fontSize:13,color:"#374151",fontWeight:500}}>{t.nome||t.label}</span>
-                      <button type="button" onClick={toggle}
-                        style={{padding:"3px 16px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",minWidth:52,
-                          background:checked?C.green:"#E5E7EB",color:checked?"#fff":"#6B7280"}}>
-                        {checked?"✓ SIM":"NÃO"}
-                      </button>
+                    <div key={t.id||t.campo} style={{padding:"9px 12px",borderRadius:7,background:checked?"#F0FDF4":"var(--c-subtle)",border:"1px solid "+(checked?C.green:C.border)}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{fontSize:13,color:"#374151",fontWeight:500}}>{t.nome||t.label}</span>
+                        <button type="button" onClick={toggle}
+                          style={{padding:"3px 16px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",minWidth:52,
+                            background:checked?C.green:"#E5E7EB",color:checked?"#fff":"#6B7280"}}>
+                          {checked?"✓ SIM":"NÃO"}
+                        </button>
+                      </div>
+                      {checked && t.id && (
+                        <input type="text" value={termosValores[t.id]||''}
+                          onChange={e=>setTermosValores(p=>({...p,[t.id]:e.target.value}))}
+                          placeholder="Detalhe (opcional): nº do aditivo, nº do armário, etc."
+                          style={{...s.inputSm,width:"100%",marginTop:7,background:"#fff"}}/>
+                      )}
                     </div>
                   );
                 })}
               </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:8}}>💡 O detalhe de cada termo (nº do aditivo, nº do armário...) fica registrado com histórico de alterações — veja em "🗂️ Histórico do Colaborador" abaixo.</div>
             </div>
 
             <div style={{display:"flex",gap:10,marginTop:4,marginBottom:12}}>
@@ -1671,7 +1725,7 @@
 
             <div style={s.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
-                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0) carregarHistorico(editando); setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0){ carregarHistorico(editando); if(!editando.novo&&editando.id) carregarHistoricoTermos(editando.id); } setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
                 <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
                 <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
               </div>
@@ -1782,6 +1836,34 @@
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.status}</span></td>
                             </tr>);
                           })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>📝 Histórico de Termos (alterações)</div>
+                      {historicoTermos.length===0?(
+                        <div style={{color:C.muted,fontSize:13}}>Nenhuma alteração de termos registrada ainda.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <thead><tr style={{background:"var(--c-subtle)"}}>
+                            <th style={s.th}>Termo</th><th style={s.th}>Assinado</th><th style={s.th}>Valor</th>
+                            <th style={s.th}>Quando</th><th style={s.th}>Por</th>
+                          </tr></thead>
+                          <tbody>{historicoTermos.map(h=>(
+                            <tr key={h.id} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12,fontWeight:600}}>{h.termo_nome||"—"}</td>
+                              <td style={{...s.td,fontSize:12}}>
+                                {h.assinado_anterior===h.assinado_novo?(h.assinado_novo?"SIM":"NÃO"):(
+                                  <span>{h.assinado_anterior?"SIM":"NÃO"} → <strong>{h.assinado_novo?"SIM":"NÃO"}</strong></span>
+                                )}
+                              </td>
+                              <td style={{...s.td,fontSize:12}}>
+                                {(h.valor_anterior||"—")===(h.valor_novo||"—")?(h.valor_novo||"—"):(
+                                  <span>{h.valor_anterior||"—"} → <strong>{h.valor_novo||"—"}</strong></span>
+                                )}
+                              </td>
+                              <td style={{...s.td,fontSize:11,color:C.muted}}>{h.alterado_em?new Date(h.alterado_em).toLocaleString('pt-BR'):"—"}</td>
+                              <td style={{...s.td,fontSize:11,color:C.muted}}>{h.alterado_por||"—"}</td>
+                            </tr>
+                          ))}</tbody>
                         </table>
                       )}
                     </div>
@@ -5190,6 +5272,9 @@
             if (jornada === "SEG-SEX" && dow === 6) return; // Sábado fora da escala
             if (feriados.includes(iso)) return; // Feriado
 
+            // Período de experiência (até experiencia90): CAJU cortado, mesmo em dia trabalhado.
+            if (emExp) return;
+
             const aCaju = analisarDia(nomeKey, iso, diaDadosC, colabInfo);
             // Conta: trabalhou, atestado_meio
             if (aCaju.status === "trabalhou" || aCaju.status === "atestado_meio") {
@@ -5481,9 +5566,10 @@
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🍱 CAJU — Vale Alimentação</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado, atestado (dia todo ou meio período) ou em férias.</li>
-                          <li>Falta, folga, feriado e abono <strong>não</strong> geram crédito CAJU.</li>
-                          <li>Colaboradores em <strong>período de experiência (90 dias)</strong> não recebem CAJU durante esse período.</li>
+                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado ou com <strong>atestado de meio período</strong>.</li>
+                          <li><strong>Descontado</strong> (não gera crédito) em: falta, atestado de <strong>dia todo</strong>, férias, folga, feriado e abono.</li>
+                          <li>Atestado de meio período é a <strong>exceção</strong>: como o colaborador trabalha a outra metade do dia, o CAJU não é descontado.</li>
+                          <li>Colaboradores em <strong>período de experiência</strong> (até a data de Experiência 90 dias) <strong>não recebem CAJU</strong> nesse período, mesmo em dia trabalhado.</li>
                         </ul>
                       </div>
                     </div>
