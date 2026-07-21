@@ -1170,6 +1170,7 @@
         const [historicoSalario, setHistoricoSalario] = useState([]);
         const [historicoAdiantamentos, setHistoricoAdiantamentos] = useState([]);
         const [historicoAdiantamentosFixos, setHistoricoAdiantamentosFixos] = useState([]);
+        const [historicoExames, setHistoricoExames] = useState([]);
         const [loadingHistorico, setLoadingHistorico] = useState(false);
         const [termosGlobais, setTermosGlobais] = useState([]);
         const [termosExtras, setTermosExtras] = useState({});
@@ -1250,6 +1251,10 @@
             const {data:dataAdtF} = await _supa.from('adiantamentos_fixos').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('created_at',{ascending:false});
             setHistoricoAdiantamentosFixos(dataAdtF||[]);
           } catch(e) { setHistoricoAdiantamentosFixos([]); }
+          try {
+            const {data:dataExames} = await _supa.from('colaborador_exames').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('data_realizacao',{ascending:false});
+            setHistoricoExames(dataExames||[]);
+          } catch(e) { setHistoricoExames([]); }
           setLoadingHistorico(false);
         };
 
@@ -1352,7 +1357,7 @@
           document.body.removeChild(link);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoExames([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
@@ -1374,7 +1379,7 @@
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
           setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]);
-          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]);
+          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoExames([]);
           // Carrega assinatura (SIM/NÃO) e valor livre (nº aditivo, nº armário, etc.) de todos os termos
           _supa.from('colaborador_termos').select('*').eq('colaborador_id',c.id)
             .then(({data})=>{
@@ -1705,17 +1710,20 @@
                           {checked?"✓ SIM":"NÃO"}
                         </button>
                       </div>
-                      {checked && t.id && (
-                        <input type="text" value={termosValores[t.id]||''}
-                          onChange={e=>setTermosValores(p=>({...p,[t.id]:e.target.value}))}
-                          placeholder="Detalhe (opcional): nº do aditivo, nº do armário, etc."
-                          style={{...s.inputSm,width:"100%",marginTop:7,background:"#fff"}}/>
+                      {t.id && (
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:7}}>
+                          <label style={{fontSize:11,color:C.muted,fontWeight:600,whiteSpace:"nowrap"}}>📝 Detalhe:</label>
+                          <input type="text" value={termosValores[t.id]||''}
+                            onChange={e=>setTermosValores(p=>({...p,[t.id]:e.target.value}))}
+                            placeholder="Ex: nº do aditivo, nº do armário..."
+                            style={{...s.inputSm,flex:1,background:"#fff"}}/>
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-              <div style={{fontSize:11,color:C.muted,marginTop:8}}>💡 O detalhe de cada termo (nº do aditivo, nº do armário...) fica registrado com histórico de alterações — veja em "🗂️ Histórico do Colaborador" abaixo.</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:8}}>💡 O campo "Detalhe" de cada termo (nº do aditivo, nº do armário...) é opcional e fica registrado com histórico de alterações — veja em "🗂️ Histórico do Colaborador" abaixo.</div>
             </div>
 
             <div style={{display:"flex",gap:10,marginTop:4,marginBottom:12}}>
@@ -1725,7 +1733,7 @@
 
             <div style={s.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
-                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0){ carregarHistorico(editando); if(!editando.novo&&editando.id) carregarHistoricoTermos(editando.id); } setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0&&historicoExames.length===0){ carregarHistorico(editando); if(!editando.novo&&editando.id) carregarHistoricoTermos(editando.id); } setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
                 <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
                 <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
               </div>
@@ -1834,6 +1842,28 @@
                               <td style={{...s.td,fontSize:12}}>{f.gozo_fim?new Date(f.gozo_fim+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
                               <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.status}</span></td>
+                            </tr>);
+                          })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>🩺 Exames</div>
+                      {historicoExames.length===0?(
+                        <div style={{color:C.muted,fontSize:13}}>Nenhum exame registrado. Cadastre na aba Exames.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <thead><tr style={{background:"var(--c-subtle)"}}>
+                            <th style={s.th}>Exame</th><th style={s.th}>Realizado em</th><th style={s.th}>Vencimento</th>
+                            <th style={{...s.th,textAlign:"right"}}>Valor</th><th style={s.th}>Obs.</th>
+                          </tr></thead>
+                          <tbody>{historicoExames.map(e=>{
+                            const hojeISO = new Date().toISOString().slice(0,10);
+                            const venceu = e.data_vencimento && e.data_vencimento < hojeISO;
+                            return(<tr key={e.id} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12,fontWeight:600}}>{e.tipo_exame_nome}</td>
+                              <td style={{...s.td,fontSize:12}}>{e.data_realizacao?fmtDate(e.data_realizacao):"—"}</td>
+                              <td style={{...s.td,fontSize:12,color:venceu?C.danger:C.text,fontWeight:venceu?700:400}}>{e.data_vencimento?fmtDate(e.data_vencimento)+(venceu?" (vencido)":""):"Não vence"}</td>
+                              <td style={{...s.td,textAlign:"right",fontSize:12}}>{e.valor?fmtBRL(e.valor):"—"}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{e.obs||"—"}</td>
                             </tr>);
                           })}</tbody>
                         </table>
@@ -1993,6 +2023,7 @@
           {k:'atestados',    l:'🏥 Atestados'},
           {k:'adiantamentos',l:'💵 Antecipações'},
           {k:'compras',      l:'🛍️ Compras'},
+          {k:'exames',       l:'🩺 Exames'},
           {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
           {k:'orcamento',    l:'📊 Orçamento Folha'},
           {k:'relatorios',   l:'📈 Relatórios'},
@@ -4083,6 +4114,33 @@
         const [mostrarForm, setMostrarForm] = React.useState(false);
         const [form, setForm] = React.useState(VAZIO);
 
+        // ── Alerta de limite (valor e/ou quantidade de compras no mês) ──
+        const [alertaCfg, setAlertaCfg] = React.useState({valor_limite:null, quantidade_limite:null});
+        const [mostrarAlerta, setMostrarAlerta] = React.useState(false);
+        const [alertaForm, setAlertaForm] = React.useState({valor:'', qtd:''});
+        const [salvandoAlerta, setSalvandoAlerta] = React.useState(false);
+
+        const carregarAlerta = async () => {
+          if(!empresaId) return;
+          const {data} = await _supa.from('compras_alertas').select('*').eq('empresa_id',empresaId).single();
+          const cfg = data || {valor_limite:null, quantidade_limite:null};
+          setAlertaCfg(cfg);
+          setAlertaForm({valor: cfg.valor_limite!=null?String(cfg.valor_limite).replace('.',','):'', qtd: cfg.quantidade_limite!=null?String(cfg.quantidade_limite):''});
+        };
+        React.useEffect(()=>{ carregarAlerta(); },[empresaId]);
+
+        const salvarAlerta = async () => {
+          const valor_limite = alertaForm.valor.trim() ? (parseFloat(alertaForm.valor.replace(',','.'))||null) : null;
+          const quantidade_limite = alertaForm.qtd.trim() ? (parseInt(alertaForm.qtd)||null) : null;
+          setSalvandoAlerta(true);
+          const {error} = await _supa.from('compras_alertas').upsert({
+            empresa_id: empresaId, valor_limite, quantidade_limite, atualizado_em: new Date().toISOString()
+          }, {onConflict:'empresa_id'});
+          setSalvandoAlerta(false);
+          if(!error){ setAlertaCfg({valor_limite, quantidade_limite}); setMostrarAlerta(false); }
+          else alert('Erro ao salvar alerta: '+error.message);
+        };
+
         const carregar = async (tipo, _mes, _ini, _fim) => {
           if(!empresaId) return;
           const modo = tipo ?? filtroTipo;
@@ -4144,9 +4202,15 @@
           acc[k].total += Number(c.valor)||0;
           acc[k].qtd++;
           return acc;
-        },{})).sort((a,b)=>b.total-a.total);
+        },{})).map(c=>{
+          const emAlerta =
+            (alertaCfg.valor_limite!=null && c.total>=alertaCfg.valor_limite) ||
+            (alertaCfg.quantidade_limite!=null && c.qtd>=alertaCfg.quantidade_limite);
+          return {...c, emAlerta};
+        }).sort((a,b)=>(b.emAlerta-a.emAlerta)||(b.total-a.total));
 
         const totalPendente = resumoPorColab.reduce((s,c)=>s+c.total,0);
+        const alertaAtivo = alertaCfg.valor_limite!=null || alertaCfg.quantidade_limite!=null;
 
         return (
           <div>
@@ -4155,8 +4219,33 @@
                 <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🛍️ Compras de Funcionários</div>
                 <div style={{fontSize:13,color:C.muted}}>Compras de produtos descontadas em folha</div>
               </div>
-              <button onClick={()=>{setMostrarForm(true);setForm({...VAZIO,mesReferencia:mesRef});setStatus(null);}} style={s.btn}>➕ Nova Compra</button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setMostrarAlerta(p=>!p)} style={{...s.btnOutline,borderColor:alertaAtivo?C.danger:C.border,color:alertaAtivo?C.danger:C.text}}>🚨 {alertaAtivo?"Alerta ativo":"Configurar Alerta"}</button>
+                <button onClick={()=>{setMostrarForm(true);setForm({...VAZIO,mesReferencia:mesRef});setStatus(null);}} style={s.btn}>➕ Nova Compra</button>
+              </div>
             </div>
+
+            {mostrarAlerta&&(
+              <div style={{...s.card,marginBottom:16,border:"1.5px solid "+C.danger}}>
+                <div style={{fontWeight:700,color:C.danger,marginBottom:6,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>🚨 Alerta de Limite de Compras</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:14}}>Colaboradores que atingirem o valor e/ou a quantidade de compras pendentes no mês ficam destacados em vermelho abaixo. Preencha um dos dois campos, ou os dois — nenhum é obrigatório.</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Valor limite (R$)</label>
+                    <input type="text" value={alertaForm.valor} onChange={e=>setAlertaForm(p=>({...p,valor:e.target.value}))} placeholder="Ex: 200,00 (opcional)" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Quantidade de compras no mês</label>
+                    <input type="number" min="1" step="1" value={alertaForm.qtd} onChange={e=>setAlertaForm(p=>({...p,qtd:e.target.value}))} placeholder="Ex: 5 (opcional)" style={s.input}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={salvarAlerta} style={{...s.btn,background:C.danger}} disabled={salvandoAlerta}>{salvandoAlerta?'Salvando...':'💾 Salvar Alerta'}</button>
+                  {alertaAtivo&&<button onClick={()=>{setAlertaForm({valor:'',qtd:''});setAlertaCfg({valor_limite:null,quantidade_limite:null});_supa.from('compras_alertas').delete().eq('empresa_id',empresaId);}} style={s.btnOutline}>🗑 Remover Alerta</button>}
+                  <button onClick={()=>setMostrarAlerta(false)} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
 
             {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',margin:"12px 0"}}>{status.msg}</div>}
 
@@ -4254,10 +4343,11 @@
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
                   {resumoPorColab.map((c,i)=>(
-                    <div key={i} style={{background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:8,padding:"12px 14px"}}>
-                      <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:2}}>{c.nome}</div>
+                    <div key={i} style={{background:c.emAlerta?"#FEF2F2":"#FFFBEB",border:"1.5px solid "+(c.emAlerta?C.danger:"#FDE68A"),borderRadius:8,padding:"12px 14px",position:"relative"}}>
+                      {c.emAlerta&&<div style={{position:"absolute",top:8,right:10,fontSize:14}} title="Atingiu o limite configurado">🚨</div>}
+                      <div style={{fontWeight:700,fontSize:13,color:c.emAlerta?C.danger:C.pri,marginBottom:2}}>{c.nome}</div>
                       <div style={{fontSize:11,color:C.muted}}>{c.qtd} compra{c.qtd!==1?"s":""}</div>
-                      <div style={{fontSize:16,fontWeight:800,color:C.amber,marginTop:4}}>{fmtBRL(c.total)}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:c.emAlerta?C.danger:C.amber,marginTop:4}}>{fmtBRL(c.total)}</div>
                     </div>
                   ))}
                 </div>
@@ -4306,6 +4396,524 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MÓDULO EXAMES OCUPACIONAIS
+      // ============================================================
+      function ExamesPage({ colabAPI, empresaId }) {
+        const hoje = new Date().toISOString().slice(0,10);
+        const [aba, setAba] = React.useState('vencidos');
+
+        // ── Tipos de exame ──
+        const [tipos, setTipos] = React.useState([]);
+        const [loadingTipos, setLoadingTipos] = React.useState(true);
+        const VAZIO_TIPO = {nome:'', tem_vencimento:false, recorrencia_valor:'', recorrencia_unidade:'meses', valor_estimado:'', obs:''};
+        const [formTipo, setFormTipo] = React.useState(VAZIO_TIPO);
+        const [mostrarFormTipo, setMostrarFormTipo] = React.useState(false);
+        const [editandoTipoId, setEditandoTipoId] = React.useState(null);
+        const [statusTipo, setStatusTipo] = React.useState(null);
+
+        const carregarTipos = async () => {
+          setLoadingTipos(true);
+          const {data} = await _supa.from('tipos_exame').select('*').eq('empresa_id',empresaId).order('ordem');
+          setTipos(data||[]);
+          setLoadingTipos(false);
+        };
+        React.useEffect(()=>{ if(empresaId) carregarTipos(); },[empresaId]);
+
+        const abrirNovoTipo = () => { setFormTipo(VAZIO_TIPO); setEditandoTipoId(null); setMostrarFormTipo(true); setStatusTipo(null); };
+        const abrirEdicaoTipo = (t) => {
+          setFormTipo({
+            nome: t.nome||'', tem_vencimento: !!t.tem_vencimento,
+            recorrencia_valor: t.recorrencia_valor!=null?String(t.recorrencia_valor):'',
+            recorrencia_unidade: t.recorrencia_unidade||'meses',
+            valor_estimado: t.valor_estimado!=null?String(t.valor_estimado).replace('.',','):'',
+            obs: t.obs||''
+          });
+          setEditandoTipoId(t.id); setMostrarFormTipo(true); setStatusTipo(null);
+        };
+
+        const salvarTipo = async () => {
+          if(!formTipo.nome.trim()){ setStatusTipo({ok:false,msg:'Nome é obrigatório.'}); return; }
+          const payload = {
+            empresa_id: empresaId,
+            nome: formTipo.nome.trim(),
+            tem_vencimento: !!formTipo.tem_vencimento,
+            recorrencia_valor: formTipo.tem_vencimento ? (parseInt(formTipo.recorrencia_valor)||null) : null,
+            recorrencia_unidade: formTipo.tem_vencimento ? formTipo.recorrencia_unidade : null,
+            valor_estimado: String(formTipo.valor_estimado||'').trim() ? (parseFloat(String(formTipo.valor_estimado).replace(',','.'))||null) : null,
+            obs: formTipo.obs?.trim()||null,
+          };
+          let error;
+          if(editandoTipoId){
+            ({error} = await _supa.from('tipos_exame').update(payload).eq('id',editandoTipoId));
+          } else {
+            ({error} = await _supa.from('tipos_exame').insert({...payload, ativo:true, ordem:(tipos.length+1)}));
+          }
+          if(error){ setStatusTipo({ok:false,msg:'❌ '+error.message}); }
+          else { setStatusTipo({ok:true,msg:'✅ Tipo de exame salvo!'}); setMostrarFormTipo(false); setFormTipo(VAZIO_TIPO); setEditandoTipoId(null); carregarTipos(); }
+        };
+
+        const toggleAtivoTipo = async (t) => { await _supa.from('tipos_exame').update({ativo:!t.ativo}).eq('id',t.id); carregarTipos(); };
+        const excluirTipo = async (t) => {
+          if(!await confirmar(`Excluir o tipo de exame "${t.nome}"? Os registros já lançados deste exame NÃO serão apagados, mas perderão o vínculo com o tipo.`,'Excluir Tipo de Exame')) return;
+          await _supa.from('tipos_exame').delete().eq('id',t.id);
+          carregarTipos();
+        };
+
+        // ── Registros de exames realizados ──
+        const [registros, setRegistros] = React.useState([]);
+        const [loadingReg, setLoadingReg] = React.useState(true);
+        const VAZIO_REG = {colaboradorNome:'', tipoExameId:'', dataRealizacao: hoje, dataVencimento:'', valor:'', obs:''};
+        const [formReg, setFormReg] = React.useState(VAZIO_REG);
+        const [mostrarFormReg, setMostrarFormReg] = React.useState(false);
+        const [statusReg, setStatusReg] = React.useState(null);
+        const [filtroColabReg, setFiltroColabReg] = React.useState('');
+        const [filtroTipoReg, setFiltroTipoReg] = React.useState('');
+
+        const carregarRegistros = async () => {
+          setLoadingReg(true);
+          const {data} = await _supa.from('colaborador_exames').select('*').eq('empresa_id',empresaId).order('data_realizacao',{ascending:false});
+          setRegistros(data||[]);
+          setLoadingReg(false);
+        };
+        React.useEffect(()=>{ if(empresaId) carregarRegistros(); },[empresaId]);
+
+        const calcVencimento = (dataISO, tipo) => {
+          if(!dataISO || !tipo || !tipo.tem_vencimento || !tipo.recorrencia_valor) return '';
+          const d = new Date(dataISO+'T12:00:00');
+          const n = tipo.recorrencia_valor;
+          if(tipo.recorrencia_unidade==='dias') d.setDate(d.getDate()+n);
+          else if(tipo.recorrencia_unidade==='anos') d.setFullYear(d.getFullYear()+n);
+          else d.setMonth(d.getMonth()+n); // meses (padrão)
+          return toISO(d);
+        };
+        const onChangeTipoReg = (tipoId) => {
+          const tipo = tipos.find(t=>t.id===tipoId);
+          setFormReg(p=>({...p, tipoExameId:tipoId, dataVencimento: calcVencimento(p.dataRealizacao, tipo)}));
+        };
+        const onChangeDataReg = (dataISO) => {
+          const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
+          setFormReg(p=>({...p, dataRealizacao:dataISO, dataVencimento: calcVencimento(dataISO, tipo)}));
+        };
+
+        const salvarRegistro = async () => {
+          if(!formReg.colaboradorNome||!formReg.tipoExameId||!formReg.dataRealizacao){
+            setStatusReg({ok:false,msg:'Preencha colaborador, tipo de exame e data.'}); return;
+          }
+          const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
+          const colab = colabAPI.find(c=>c.nome===formReg.colaboradorNome);
+          const {error} = await _supa.from('colaborador_exames').insert({
+            id: crypto.randomUUID(),
+            empresa_id: empresaId,
+            colaborador_id: colab?.id_supa || null,
+            colaborador_nome: formReg.colaboradorNome.trim(),
+            tipo_exame_id: formReg.tipoExameId,
+            tipo_exame_nome: tipo?.nome || '',
+            data_realizacao: formReg.dataRealizacao,
+            data_vencimento: formReg.dataVencimento || null,
+            valor: String(formReg.valor||'').trim() ? (parseFloat(String(formReg.valor).replace(',','.'))||null) : null,
+            obs: formReg.obs?.trim()||null,
+          });
+          if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); }
+          else { setStatusReg({ok:true,msg:'✅ Exame registrado!'}); setMostrarFormReg(false); setFormReg(VAZIO_REG); carregarRegistros(); }
+        };
+
+        const excluirRegistro = async (r) => {
+          if(!await confirmar(`Excluir o registro de "${r.tipo_exame_nome}" de ${r.colaborador_nome}?`,'Excluir Registro')) return;
+          await _supa.from('colaborador_exames').delete().eq('id',r.id);
+          carregarRegistros();
+        };
+
+        // ── Último registro por (colaborador, tipo) — base para vencidos e "por tipo" ──
+        const ultimosPorColabTipo = React.useMemo(()=>{
+          const m = {};
+          registros.forEach(r=>{
+            const k = r.colaborador_nome+'|'+r.tipo_exame_id;
+            if(!m[k] || r.data_realizacao > m[k].data_realizacao) m[k]=r;
+          });
+          return Object.values(m);
+        },[registros]);
+
+        const vencidos = React.useMemo(()=>
+          ultimosPorColabTipo.filter(r=>r.data_vencimento && r.data_vencimento < hoje)
+            .sort((a,b)=>a.data_vencimento.localeCompare(b.data_vencimento))
+        ,[ultimosPorColabTipo,hoje]);
+
+        const vencendoEm30 = React.useMemo(()=>{
+          const lim = new Date(); lim.setDate(lim.getDate()+30);
+          const limISO = toISO(lim);
+          return ultimosPorColabTipo.filter(r=>r.data_vencimento && r.data_vencimento>=hoje && r.data_vencimento<=limISO)
+            .sort((a,b)=>a.data_vencimento.localeCompare(b.data_vencimento));
+        },[ultimosPorColabTipo,hoje]);
+
+        const custoPorTipo = React.useMemo(()=>{
+          const m = {};
+          vencidos.forEach(r=>{
+            const tipo = tipos.find(t=>t.id===r.tipo_exame_id);
+            const est = Number(tipo?.valor_estimado)||0;
+            if(!m[r.tipo_exame_id]) m[r.tipo_exame_id]={nome:r.tipo_exame_nome, qtd:0, total:0};
+            m[r.tipo_exame_id].qtd++;
+            m[r.tipo_exame_id].total += est;
+          });
+          return Object.values(m).sort((a,b)=>b.total-a.total);
+        },[vencidos,tipos]);
+        const custoTotalVencidos = custoPorTipo.reduce((s,c)=>s+c.total,0);
+
+        // ── Por tipo: quem já fez / quem nunca fez ──
+        const [tipoSelecionado, setTipoSelecionado] = React.useState(null);
+        const statusPorColabParaTipo = React.useMemo(()=>{
+          if(!tipoSelecionado) return [];
+          return [...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>{
+            const reg = ultimosPorColabTipo.find(r=>r.colaborador_nome===c.nome && r.tipo_exame_id===tipoSelecionado.id);
+            return { nome: c.nome, funcao: c.funcao, registro: reg||null };
+          });
+        },[tipoSelecionado, colabAPI, ultimosPorColabTipo]);
+
+        const registrosFiltrados = registros.filter(r=>
+          (!filtroColabReg||r.colaborador_nome===filtroColabReg) &&
+          (!filtroTipoReg||r.tipo_exame_id===filtroTipoReg)
+        );
+
+        const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
+        const tabSt = (k) => ({padding:'8px 18px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted});
+
+        return (
+          <div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🩺 Exames Ocupacionais</div>
+                <div style={{fontSize:13,color:C.muted}}>Admissional, demissional, periódicos, NRs e demais exames obrigatórios</div>
+              </div>
+              <div style={{display:'flex',gap:4,background:'#F3F4F6',borderRadius:8,padding:4}}>
+                <button style={tabSt('vencidos')} onClick={()=>setAba('vencidos')}>🚨 Vencidos</button>
+                <button style={tabSt('registros')} onClick={()=>setAba('registros')}>📋 Registros</button>
+                <button style={tabSt('porTipo')} onClick={()=>setAba('porTipo')}>🔍 Por Tipo</button>
+                <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos de Exame</button>
+              </div>
+            </div>
+
+            {/* ───── ABA VENCIDOS ───── */}
+            {aba==='vencidos'&&(
+              <div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
+                  <div style={{...s.card,textAlign:'center',padding:16}}><div style={{fontSize:26,fontWeight:800,color:C.danger}}>{vencidos.length}</div><div style={{fontSize:12,color:C.muted}}>Exames vencidos</div></div>
+                  <div style={{...s.card,textAlign:'center',padding:16}}><div style={{fontSize:26,fontWeight:800,color:C.amber}}>{vencendoEm30.length}</div><div style={{fontSize:12,color:C.muted}}>Vencendo em 30 dias</div></div>
+                  <div style={{...s.card,textAlign:'center',padding:16,background:'#FEF2F2'}}><div style={{fontSize:26,fontWeight:800,color:C.danger}}>{fmtBRL(custoTotalVencidos)}</div><div style={{fontSize:12,color:C.muted}}>Custo estimado (renovar vencidos)</div></div>
+                </div>
+
+                {custoPorTipo.length>0&&(
+                  <div style={{...s.card,marginBottom:16}}>
+                    <div style={s.cardTitle}>💰 Previsão de gasto por tipo de exame</div>
+                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead><tr style={{background:'var(--c-subtle)'}}><th style={s.th}>Exame</th><th style={{...s.th,textAlign:'center'}}>Vencidos</th><th style={{...s.th,textAlign:'right'}}>Custo estimado</th></tr></thead>
+                      <tbody>{custoPorTipo.map((c,i)=>(
+                        <tr key={i} style={{borderTop:'1px solid '+C.border}}>
+                          <td style={{...s.td,fontWeight:600}}>{c.nome}</td>
+                          <td style={{...s.td,textAlign:'center',fontWeight:700,color:C.danger}}>{c.qtd}</td>
+                          <td style={{...s.td,textAlign:'right',fontWeight:700}}>{fmtBRL(c.total)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div style={{...s.card,padding:0,overflow:'hidden',marginBottom:16}}>
+                  <div style={{background:C.danger,color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13}}>🚨 Exames vencidos — {vencidos.length}</div>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead><tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Colaborador</th><th style={s.th}>Exame</th><th style={s.th}>Realizado em</th>
+                      <th style={s.th}>Venceu em</th><th style={{...s.th,textAlign:'center'}}>Dias vencido</th><th style={{...s.th,textAlign:'right'}}>Custo estimado</th>
+                    </tr></thead>
+                    <tbody>
+                      {loadingReg||loadingTipos?(
+                        <tr><td colSpan={6} style={{textAlign:'center',padding:24,color:C.muted}}>Carregando...</td></tr>
+                      ):vencidos.length===0?(
+                        <tr><td colSpan={6} style={{textAlign:'center',padding:24,color:C.muted}}>Nenhum exame vencido. ✅</td></tr>
+                      ):vencidos.map(r=>{
+                        const tipo = tipos.find(t=>t.id===r.tipo_exame_id);
+                        return (
+                          <tr key={r.id} style={{borderTop:'1px solid '+C.border}}>
+                            <td style={{...s.td,fontWeight:600}}>{r.colaborador_nome}</td>
+                            <td style={s.td}>{r.tipo_exame_nome}</td>
+                            <td style={{...s.td,fontSize:12}}>{fmtDate(r.data_realizacao)}</td>
+                            <td style={{...s.td,fontSize:12,color:C.danger,fontWeight:700}}>{fmtDate(r.data_vencimento)}</td>
+                            <td style={{...s.td,textAlign:'center',fontWeight:700,color:C.danger}}>{diasVencido(r.data_vencimento)}</td>
+                            <td style={{...s.td,textAlign:'right',color:C.muted}}>{tipo?.valor_estimado?fmtBRL(tipo.valor_estimado):'—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {vencendoEm30.length>0&&(
+                  <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                    <div style={{background:C.amber,color:'#fff',padding:'10px 16px',fontWeight:700,fontSize:13}}>⏳ Vencendo nos próximos 30 dias — {vencendoEm30.length}</div>
+                    <table style={{width:'100%',borderCollapse:'collapse'}}>
+                      <thead><tr style={{background:'var(--c-subtle)'}}><th style={s.th}>Colaborador</th><th style={s.th}>Exame</th><th style={s.th}>Vence em</th></tr></thead>
+                      <tbody>{vencendoEm30.map(r=>(
+                        <tr key={r.id} style={{borderTop:'1px solid '+C.border}}>
+                          <td style={{...s.td,fontWeight:600}}>{r.colaborador_nome}</td>
+                          <td style={s.td}>{r.tipo_exame_nome}</td>
+                          <td style={{...s.td,fontSize:12,color:C.amber,fontWeight:700}}>{fmtDate(r.data_vencimento)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ───── ABA REGISTROS ───── */}
+            {aba==='registros'&&(
+              <div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <select value={filtroColabReg} onChange={e=>setFiltroColabReg(e.target.value)} style={{...s.input,width:180,marginBottom:0}}>
+                      <option value="">Todos os colaboradores</option>
+                      {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                    </select>
+                    <select value={filtroTipoReg} onChange={e=>setFiltroTipoReg(e.target.value)} style={{...s.input,width:180,marginBottom:0}}>
+                      <option value="">Todos os exames</option>
+                      {tipos.map(t=>(<option key={t.id} value={t.id}>{t.nome}</option>))}
+                    </select>
+                  </div>
+                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);}} style={s.btn}>➕ Registrar Exame</button>
+                </div>
+
+                {statusReg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusReg.ok?'#DCFCE7':'#FEE2E2',color:statusReg.ok?'#166534':'#991B1B',fontSize:13}}>{statusReg.msg}</div>}
+
+                {mostrarFormReg&&(
+                  <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>Registrar Exame Realizado</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Colaborador *</label>
+                        <select value={formReg.colaboradorNome} onChange={e=>setFormReg(p=>({...p,colaboradorNome:e.target.value}))} style={s.input}>
+                          <option value="">Selecione...</option>
+                          {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Tipo de Exame *</label>
+                        <select value={formReg.tipoExameId} onChange={e=>onChangeTipoReg(e.target.value)} style={s.input}>
+                          <option value="">Selecione...</option>
+                          {tipos.filter(t=>t.ativo).map(t=>(<option key={t.id} value={t.id}>{t.nome}</option>))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Data de Realização *</label>
+                        <input type="date" value={formReg.dataRealizacao} onChange={e=>onChangeDataReg(e.target.value)} style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Data de Vencimento</label>
+                        <input type="date" value={formReg.dataVencimento} onChange={e=>setFormReg(p=>({...p,dataVencimento:e.target.value}))} style={s.input}/>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>{tipos.find(t=>t.id===formReg.tipoExameId)?.tem_vencimento ? 'Sugerida automaticamente — ajuste se necessário.' : 'Deixe em branco se este exame não vence (ex: admissional, demissional).'}</div>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor pago (R$)</label>
+                        <input type="text" value={formReg.valor} onChange={e=>setFormReg(p=>({...p,valor:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Observações</label>
+                        <input type="text" value={formReg.obs} onChange={e=>setFormReg(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:10}}>
+                      <button onClick={salvarRegistro} style={s.btn}>💾 Salvar</button>
+                      <button onClick={()=>setMostrarFormReg(false)} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead><tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Colaborador</th><th style={s.th}>Exame</th><th style={s.th}>Realizado em</th>
+                      <th style={s.th}>Vencimento</th><th style={{...s.th,textAlign:'right'}}>Valor</th><th style={s.th}>Obs.</th><th style={{...s.th,textAlign:'right'}}></th>
+                    </tr></thead>
+                    <tbody>
+                      {loadingReg?(
+                        <tr><td colSpan={7} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                      ):registrosFiltrados.length===0?(
+                        <tr><td colSpan={7} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum exame registrado. Clique em "➕ Registrar Exame" para começar.</td></tr>
+                      ):registrosFiltrados.map(r=>{
+                        const venceu = r.data_vencimento && r.data_vencimento < hoje;
+                        const vence30 = r.data_vencimento && !venceu && r.data_vencimento <= toISO(new Date(Date.now()+30*86400000));
+                        return (
+                          <tr key={r.id} style={{borderTop:'1px solid '+C.border}}>
+                            <td style={{...s.td,fontWeight:600}}>{r.colaborador_nome}</td>
+                            <td style={s.td}>{r.tipo_exame_nome}</td>
+                            <td style={{...s.td,fontSize:12}}>{fmtDate(r.data_realizacao)}</td>
+                            <td style={{...s.td,fontSize:12}}>
+                              {r.data_vencimento?(
+                                <span style={{color:venceu?C.danger:vence30?C.amber:C.muted,fontWeight:venceu||vence30?700:400}}>{fmtDate(r.data_vencimento)}{venceu?' (vencido)':vence30?' (vencendo)':''}</span>
+                              ):<span style={{color:C.muted}}>Não vence</span>}
+                            </td>
+                            <td style={{...s.td,textAlign:'right'}}>{r.valor?fmtBRL(r.valor):'—'}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{r.obs||'—'}</td>
+                            <td style={{...s.td,textAlign:'right'}}>
+                              <button onClick={()=>excluirRegistro(r)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:4,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>✕</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA POR TIPO ───── */}
+            {aba==='porTipo'&&(
+              <div style={{display:'grid',gridTemplateColumns:'240px 1fr',gap:16}}>
+                <div style={{...s.card,padding:8}}>
+                  {tipos.length===0?(
+                    <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhum tipo cadastrado.</div>
+                  ):tipos.map(t=>(
+                    <div key={t.id} onClick={()=>setTipoSelecionado(t)} style={{padding:'9px 12px',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:tipoSelecionado?.id===t.id?700:400,background:tipoSelecionado?.id===t.id?'var(--c-cream)':'transparent',color:tipoSelecionado?.id===t.id?C.pri:C.text}}>
+                      {t.nome}
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  {!tipoSelecionado?(
+                    <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>Selecione um tipo de exame à esquerda para ver quem já fez.</div>
+                  ):(
+                    <div>
+                      <div style={{fontSize:16,fontWeight:800,color:C.pri,marginBottom:12}}>{tipoSelecionado.nome}</div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                        <div style={{...s.card}}>
+                          <div style={{...s.cardTitle,color:C.green}}>✅ Já fizeram ({statusPorColabParaTipo.filter(c=>c.registro).length})</div>
+                          {statusPorColabParaTipo.filter(c=>c.registro).length===0?(
+                            <div style={{color:C.muted,fontSize:13}}>Ninguém ainda.</div>
+                          ):statusPorColabParaTipo.filter(c=>c.registro).map((c,i)=>{
+                            const venceu = c.registro.data_vencimento && c.registro.data_vencimento < hoje;
+                            return (
+                              <div key={i} style={{padding:'8px 0',borderBottom:'1px solid '+C.border,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                                <div>
+                                  <div style={{fontWeight:600,fontSize:13}}>{c.nome}</div>
+                                  <div style={{fontSize:11,color:C.muted}}>Feito em {fmtDate(c.registro.data_realizacao)}</div>
+                                </div>
+                                {c.registro.data_vencimento&&(
+                                  <span style={{fontSize:11,fontWeight:700,color:venceu?C.danger:C.green}}>{venceu?'Vencido':'Válido'}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{...s.card}}>
+                          <div style={{...s.cardTitle,color:C.danger}}>❌ Nunca fizeram ({statusPorColabParaTipo.filter(c=>!c.registro).length})</div>
+                          {statusPorColabParaTipo.filter(c=>!c.registro).length===0?(
+                            <div style={{color:C.muted,fontSize:13}}>Todos já fizeram. ✅</div>
+                          ):statusPorColabParaTipo.filter(c=>!c.registro).map((c,i)=>(
+                            <div key={i} style={{padding:'8px 0',borderBottom:'1px solid '+C.border}}>
+                              <div style={{fontWeight:600,fontSize:13}}>{c.nome}</div>
+                              {c.funcao&&<div style={{fontSize:11,color:C.muted}}>{c.funcao}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA TIPOS DE EXAME ───── */}
+            {aba==='tipos'&&(
+              <div>
+                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+                  <button onClick={abrirNovoTipo} style={s.btn}>➕ Novo Tipo de Exame</button>
+                </div>
+
+                {statusTipo&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusTipo.ok?'#DCFCE7':'#FEE2E2',color:statusTipo.ok?'#166534':'#991B1B',fontSize:13}}>{statusTipo.msg}</div>}
+
+                {mostrarFormTipo&&(
+                  <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoTipoId?'Editar Tipo de Exame':'Novo Tipo de Exame'}</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                        <label style={s.label}>Nome do Exame *</label>
+                        <input type="text" value={formTipo.nome} onChange={e=>setFormTipo(p=>({...p,nome:e.target.value}))} placeholder="Ex: Exame Admissional, Audiometria (NR-7)..." style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor Estimado (R$)</label>
+                        <input type="text" value={formTipo.valor_estimado} onChange={e=>setFormTipo(p=>({...p,valor_estimado:e.target.value}))} placeholder="Opcional — usado na previsão de gasto" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,display:'flex',alignItems:'flex-end'}}>
+                        <div style={{padding:'8px 12px',borderRadius:8,background:formTipo.tem_vencimento?'#FEF9C3':'var(--c-subtle)',border:'1px solid '+(formTipo.tem_vencimento?'#FCD34D':C.border),width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                          <span style={{fontSize:13,fontWeight:600}}>Este exame vence?</span>
+                          <button type="button" onClick={()=>setFormTipo(p=>({...p,tem_vencimento:!p.tem_vencimento}))}
+                            style={{padding:'4px 16px',borderRadius:20,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',
+                              background:formTipo.tem_vencimento?C.amber:'#E5E7EB',color:formTipo.tem_vencimento?'#fff':'#6B7280'}}>
+                            {formTipo.tem_vencimento?'✓ SIM':'NÃO'}
+                          </button>
+                        </div>
+                      </div>
+                      {formTipo.tem_vencimento&&(
+                        <div style={{marginBottom:14,gridColumn:'1/-1',display:'flex',gap:10,alignItems:'flex-end'}}>
+                          <div style={{flex:1}}>
+                            <label style={s.label}>Vence a cada</label>
+                            <input type="number" min="1" value={formTipo.recorrencia_valor} onChange={e=>setFormTipo(p=>({...p,recorrencia_valor:e.target.value}))} placeholder="Ex: 12" style={s.input}/>
+                          </div>
+                          <div style={{flex:1}}>
+                            <label style={s.label}>Unidade</label>
+                            <select value={formTipo.recorrencia_unidade} onChange={e=>setFormTipo(p=>({...p,recorrencia_unidade:e.target.value}))} style={s.input}>
+                              <option value="dias">Dias</option>
+                              <option value="meses">Meses</option>
+                              <option value="anos">Anos</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                        <label style={s.label}>Observações</label>
+                        <input type="text" value={formTipo.obs} onChange={e=>setFormTipo(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:10}}>
+                      <button onClick={salvarTipo} style={s.btn}>💾 Salvar</button>
+                      <button onClick={()=>setMostrarFormTipo(false)} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead><tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Exame</th><th style={{...s.th,textAlign:'center'}}>Vencimento</th>
+                      <th style={{...s.th,textAlign:'right'}}>Valor Estimado</th><th style={{...s.th,textAlign:'center'}}>Status</th><th style={{...s.th,textAlign:'right'}}>Ações</th>
+                    </tr></thead>
+                    <tbody>
+                      {loadingTipos?(
+                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                      ):tipos.length===0?(
+                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum tipo de exame cadastrado ainda.</td></tr>
+                      ):tipos.map(t=>(
+                        <tr key={t.id} style={{borderTop:'1px solid '+C.border,opacity:t.ativo?1:0.55}}>
+                          <td style={{...s.td,fontWeight:600}}>{t.nome}{t.obs&&<div style={{fontSize:11,color:C.muted,fontWeight:400}}>{t.obs}</div>}</td>
+                          <td style={{...s.td,textAlign:'center',fontSize:12}}>{t.tem_vencimento?`A cada ${t.recorrencia_valor} ${t.recorrencia_unidade}`:'Não vence'}</td>
+                          <td style={{...s.td,textAlign:'right'}}>{t.valor_estimado?fmtBRL(t.valor_estimado):'—'}</td>
+                          <td style={{...s.td,textAlign:'center'}}>
+                            <span style={{background:t.ativo?'#DCFCE7':'#F1F5F9',color:t.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>{t.ativo?'Ativo':'Pausado'}</span>
+                          </td>
+                          <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                            <button onClick={()=>abrirEdicaoTipo(t)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px',marginRight:6}}>✏️</button>
+                            <button onClick={()=>toggleAtivoTipo(t)} style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginRight:6}}>{t.ativo?'Pausar':'Ativar'}</button>
+                            <button onClick={()=>excluirTipo(t)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer'}}>🗑</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -7590,7 +8198,7 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -7603,6 +8211,7 @@
         {k:'atestados',l:'🏥 Atestados'},
         {k:'adiantamentos',l:'💵 Antecipações'},
         {k:'compras',l:'🛍️ Compras'},
+        {k:'exames',l:'🩺 Exames'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
         {k:'relatorios',l:'📈 Relatórios'},
         {k:'ponto',l:'📋 Banco de Ponto'},
@@ -7652,6 +8261,7 @@
               {page==="atestados"&&<AtestadosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="exames"&&<ExamesPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
               {page==="relatorios"&&<RelatoriosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
