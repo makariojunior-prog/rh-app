@@ -1097,6 +1097,36 @@
       // MÓDULO COLABORADORES
       // ============================================================
       // ---- ConfirmModal (substituí window.confirm) ----
+      // Isola falhas de um módulo: um erro em uma página não pode mais derrubar o app
+      // inteiro (tela branca). Mostra o erro e permite voltar/recarregar.
+      class ErrorBoundary extends React.Component {
+        constructor(props){ super(props); this.state = {erro:null}; }
+        static getDerivedStateFromError(erro){ return {erro}; }
+        componentDidCatch(erro, info){ console.error('Erro na página:', erro, info); }
+        componentDidUpdate(prev){
+          // Ao trocar de página, limpa o erro para permitir navegar normalmente.
+          if(prev.chave !== this.props.chave && this.state.erro) this.setState({erro:null});
+        }
+        render(){
+          if(this.state.erro){
+            return (
+              <div style={{...s.card,border:`1.5px solid ${C.danger}`,maxWidth:720}}>
+                <div style={{fontSize:16,fontWeight:800,color:C.danger,marginBottom:8}}>⚠️ Esta página encontrou um erro</div>
+                <div style={{fontSize:13,color:C.text,lineHeight:1.6,marginBottom:12}}>
+                  As demais páginas continuam funcionando — use o menu lateral para seguir trabalhando.
+                  Se o erro persistir, envie a mensagem abaixo para o suporte.
+                </div>
+                <pre style={{background:'var(--c-subtle)',border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',fontSize:11,color:C.muted,marginBottom:12}}>
+                  {String(this.state.erro?.message||this.state.erro)}
+                </pre>
+                <button onClick={()=>window.location.reload()} style={s.btn}>🔄 Recarregar</button>
+              </div>
+            );
+          }
+          return this.props.children;
+        }
+      }
+
       function ConfirmModal(){
         const [st,setSt]=useState({open:false,msg:'',titulo:'Confirmar'});
         useEffect(()=>{ _setConfirmState=setSt; return ()=>{ _setConfirmState=null; }; },[]);
@@ -4664,6 +4694,40 @@
         },[vencidos,tipos,procedimentosPorTipo]);
         const custoTotalVencidos = custoPorTipo.reduce((s,c)=>s+c.total,0);
 
+        // ── Kit de exames por função (GHE) ──
+        // Declarado ANTES de statusPorColabParaTipo/tipoTemKit e da convocação, que dependem dele.
+        const [kits, setKits] = React.useState([]);
+        const [funcaoSel, setFuncaoSel] = React.useState(null);
+        const [salvandoKit, setSalvandoKit] = React.useState(false);
+        const carregarKits = async () => {
+          if(!empresaId) return;
+          const {data} = await _supa.from('exames_kit_funcao').select('*').eq('empresa_id',empresaId);
+          setKits(data||[]);
+        };
+        React.useEffect(()=>{ carregarKits(); },[empresaId]);
+
+        const funcoes = React.useMemo(()=>
+          [...new Set((colabAPI||[]).map(c=>(c.funcao||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'))
+        ,[colabAPI]);
+        const kitDaFuncao = (f) => (kits||[]).filter(k=>k.funcao===f);
+        const funcaoExigeTipo = (f, tipoId) => (kits||[]).some(k=>k.funcao===f && String(k.tipo_exame_id)===String(tipoId));
+
+        const toggleKit = async (funcao, tipo) => {
+          setSalvandoKit(true);
+          const existente = (kits||[]).find(k=>k.funcao===funcao && String(k.tipo_exame_id)===String(tipo.id));
+          if(existente){
+            await _supa.from('exames_kit_funcao').delete().eq('id',existente.id);
+            setKits(p=>p.filter(k=>k.id!==existente.id));
+          } else {
+            const {data,error} = await _supa.from('exames_kit_funcao').insert({
+              empresa_id:empresaId, funcao, tipo_exame_id:String(tipo.id), tipo_exame_nome:tipo.nome
+            }).select().single();
+            if(error) alert('Erro ao salvar o kit: '+error.message);
+            else if(data) setKits(p=>[...p,data]);
+          }
+          setSalvandoKit(false);
+        };
+
         // ── Por tipo: quem já fez / quem nunca fez ──
         const [tipoSelecionado, setTipoSelecionado] = React.useState(null);
         // Se houver kit configurado para este exame, só entram as funções que o exigem —
@@ -4690,38 +4754,6 @@
         );
 
         const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
-
-        // ── Kit de exames por função (GHE) ──
-        const [kits, setKits] = React.useState([]);
-        const [funcaoSel, setFuncaoSel] = React.useState(null);
-        const [salvandoKit, setSalvandoKit] = React.useState(false);
-        const carregarKits = async () => {
-          if(!empresaId) return;
-          const {data} = await _supa.from('exames_kit_funcao').select('*').eq('empresa_id',empresaId);
-          setKits(data||[]);
-        };
-        React.useEffect(()=>{ carregarKits(); },[empresaId]);
-
-        const funcoes = React.useMemo(()=>
-          [...new Set((colabAPI||[]).map(c=>(c.funcao||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'))
-        ,[colabAPI]);
-        const kitDaFuncao = (f) => kits.filter(k=>k.funcao===f);
-        const funcaoExigeTipo = (f, tipoId) => kits.some(k=>k.funcao===f && String(k.tipo_exame_id)===String(tipoId));
-
-        const toggleKit = async (funcao, tipo) => {
-          setSalvandoKit(true);
-          const existente = kits.find(k=>k.funcao===funcao && String(k.tipo_exame_id)===String(tipo.id));
-          if(existente){
-            await _supa.from('exames_kit_funcao').delete().eq('id',existente.id);
-            setKits(p=>p.filter(k=>k.id!==existente.id));
-          } else {
-            const {data} = await _supa.from('exames_kit_funcao').insert({
-              empresa_id:empresaId, funcao, tipo_exame_id:String(tipo.id), tipo_exame_nome:tipo.nome
-            }).select().single();
-            if(data) setKits(p=>[...p,data]);
-          }
-          setSalvandoKit(false);
-        };
 
         // ── Convocação: quem precisa fazer exame ──
         const [janelaConv, setJanelaConv] = React.useState(30);
@@ -9075,6 +9107,7 @@
               ))}
             </nav>
             <main style={s.main}>
+              <ErrorBoundary chave={page}>
               {page==="dashboard"&&<DashboardPage onNavegar={setPage} colabAPI={colabAPI} setColabAPI={setColabAPI} empresaId={empresaId}/>}
               {page==="colaboradores"&&<ColaboradoresPage empresaId={empresaId} setColabAPI={setColabAPI}/>}
               {page==="vt"&&vtPageContent}
@@ -9093,6 +9126,7 @@
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}
               {page==="ajuda"&&<AjudaPage/>}
+              </ErrorBoundary>
             </main>
           </div>
           <ConfirmModal/>
