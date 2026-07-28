@@ -4536,7 +4536,7 @@
         // ── Registros de exames realizados ──
         const [registros, setRegistros] = React.useState([]);
         const [loadingReg, setLoadingReg] = React.useState(true);
-        const VAZIO_REG = {colaboradorNome:'', tipoExameId:'', dataRealizacao: hoje, dataVencimento:'', valor:'', obs:''};
+        const VAZIO_REG = {colaboradorNome:'', tipoExameId:'', dataRealizacao: hoje, dataVencimento:'', valor:'', obs:'', prestador:''};
         const [formReg, setFormReg] = React.useState(VAZIO_REG);
         const [mostrarFormReg, setMostrarFormReg] = React.useState(false);
         const [statusReg, setStatusReg] = React.useState(null);
@@ -4579,8 +4579,23 @@
           const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
           const colab = colabAPI.find(c=>c.nome===formReg.colaboradorNome);
           const procsFeitos = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
+          const novoId = crypto.randomUUID();
+
+          // Anexo do ASO vai para bucket PRIVADO (dado de saúde). Falha no upload não
+          // impede o registro do exame — avisa e segue sem anexo.
+          let anexoPath = null, avisoAnexo = '';
+          if(anexoFile){
+            setSubindoAnexo(true);
+            const ext = (anexoFile.name.split('.').pop()||'pdf').toLowerCase();
+            const path = `${empresaId}/${novoId}.${ext}`;
+            const {error:upErr} = await _supa.storage.from('exames-aso').upload(path, anexoFile, {contentType:anexoFile.type||undefined, upsert:true});
+            setSubindoAnexo(false);
+            if(upErr) avisoAnexo = ' (⚠️ o ASO não pôde ser anexado: '+upErr.message+')';
+            else anexoPath = path;
+          }
+
           const {error} = await _supa.from('colaborador_exames').insert({
-            id: crypto.randomUUID(),
+            id: novoId,
             empresa_id: empresaId,
             colaborador_id: colab?.id_supa || null,
             colaborador_nome: formReg.colaboradorNome.trim(),
@@ -4591,9 +4606,21 @@
             valor: String(formReg.valor||'').trim() ? (parseFloat(String(formReg.valor).replace(',','.'))||null) : null,
             obs: formReg.obs?.trim()||null,
             procedimentos: procsFeitos.length ? procsFeitos : null,
+            prestador: formReg.prestador?.trim()||null,
+            anexo_path: anexoPath,
           });
           if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); }
-          else { setStatusReg({ok:true,msg:'✅ Exame registrado!'}); setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); carregarRegistros(); }
+          else {
+            setStatusReg({ok:true,msg:'✅ Exame registrado!'+avisoAnexo});
+            setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); setAnexoFile(null);
+            carregarRegistros();
+            // Se havia convocação agendada para este colaborador/exame, marca como realizada.
+            const ag = agendamentos.find(a=>a.colaborador_nome===formReg.colaboradorNome && String(a.tipo_exame_id)===String(formReg.tipoExameId));
+            if(ag){
+              await _supa.from('exames_agendamentos').update({status:'realizado'}).eq('id',ag.id);
+              setAgendamentos(p=>p.filter(a=>a.id!==ag.id));
+            }
+          }
         };
 
         const excluirRegistro = async (r) => {
@@ -4639,13 +4666,23 @@
 
         // ── Por tipo: quem já fez / quem nunca fez ──
         const [tipoSelecionado, setTipoSelecionado] = React.useState(null);
+        // Se houver kit configurado para este exame, só entram as funções que o exigem —
+        // assim "nunca fez" deixa de acusar quem nem precisa do exame.
+        const [soExigidos, setSoExigidos] = React.useState(true);
         const statusPorColabParaTipo = React.useMemo(()=>{
           if(!tipoSelecionado) return [];
-          return [...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>{
-            const reg = ultimosPorColabTipo.find(r=>r.colaborador_nome===c.nome && r.tipo_exame_id===tipoSelecionado.id);
-            return { nome: c.nome, funcao: c.funcao, registro: reg||null };
-          });
-        },[tipoSelecionado, colabAPI, ultimosPorColabTipo]);
+          const funcoesQueExigem = kits.filter(k=>String(k.tipo_exame_id)===String(tipoSelecionado.id)).map(k=>k.funcao);
+          const temKit = funcoesQueExigem.length>0;
+          return [...colabAPI]
+            .filter(c=>!(soExigidos && temKit) || funcoesQueExigem.includes((c.funcao||'').trim()))
+            .sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>{
+              const reg = ultimosPorColabTipo.find(r=>r.colaborador_nome===c.nome && String(r.tipo_exame_id)===String(tipoSelecionado.id));
+              return { nome: c.nome, funcao: c.funcao, registro: reg||null };
+            });
+        },[tipoSelecionado, colabAPI, ultimosPorColabTipo, kits, soExigidos]);
+        const tipoTemKit = React.useMemo(()=>
+          !!tipoSelecionado && kits.some(k=>String(k.tipo_exame_id)===String(tipoSelecionado.id))
+        ,[tipoSelecionado,kits]);
 
         const registrosFiltrados = registros.filter(r=>
           (!filtroColabReg||r.colaborador_nome===filtroColabReg) &&
@@ -4653,6 +4690,150 @@
         );
 
         const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
+
+        // ── Kit de exames por função (GHE) ──
+        const [kits, setKits] = React.useState([]);
+        const [funcaoSel, setFuncaoSel] = React.useState(null);
+        const [salvandoKit, setSalvandoKit] = React.useState(false);
+        const carregarKits = async () => {
+          if(!empresaId) return;
+          const {data} = await _supa.from('exames_kit_funcao').select('*').eq('empresa_id',empresaId);
+          setKits(data||[]);
+        };
+        React.useEffect(()=>{ carregarKits(); },[empresaId]);
+
+        const funcoes = React.useMemo(()=>
+          [...new Set((colabAPI||[]).map(c=>(c.funcao||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'))
+        ,[colabAPI]);
+        const kitDaFuncao = (f) => kits.filter(k=>k.funcao===f);
+        const funcaoExigeTipo = (f, tipoId) => kits.some(k=>k.funcao===f && String(k.tipo_exame_id)===String(tipoId));
+
+        const toggleKit = async (funcao, tipo) => {
+          setSalvandoKit(true);
+          const existente = kits.find(k=>k.funcao===funcao && String(k.tipo_exame_id)===String(tipo.id));
+          if(existente){
+            await _supa.from('exames_kit_funcao').delete().eq('id',existente.id);
+            setKits(p=>p.filter(k=>k.id!==existente.id));
+          } else {
+            const {data} = await _supa.from('exames_kit_funcao').insert({
+              empresa_id:empresaId, funcao, tipo_exame_id:String(tipo.id), tipo_exame_nome:tipo.nome
+            }).select().single();
+            if(data) setKits(p=>[...p,data]);
+          }
+          setSalvandoKit(false);
+        };
+
+        // ── Convocação: quem precisa fazer exame ──
+        const [janelaConv, setJanelaConv] = React.useState(30);
+        const [agendamentos, setAgendamentos] = React.useState([]);
+        const [agendandoKey, setAgendandoKey] = React.useState(null);
+        const [formAgend, setFormAgend] = React.useState({data:'', prestador:''});
+        const carregarAgendamentos = async () => {
+          if(!empresaId) return;
+          const {data} = await _supa.from('exames_agendamentos').select('*').eq('empresa_id',empresaId).eq('status','agendado');
+          setAgendamentos(data||[]);
+        };
+        React.useEffect(()=>{ carregarAgendamentos(); },[empresaId]);
+
+        const convocacao = React.useMemo(()=>{
+          const lim = new Date(); lim.setDate(lim.getDate()+Number(janelaConv||30));
+          const limISO = toISO(lim);
+          const linhas = [];
+          (colabAPI||[]).forEach(c=>{
+            const f = (c.funcao||'').trim();
+            const exigidos = f ? kitDaFuncao(f) : [];
+            exigidos.forEach(k=>{
+              const reg = ultimosPorColabTipo.find(r=>r.colaborador_nome===c.nome && String(r.tipo_exame_id)===String(k.tipo_exame_id));
+              let situacao=null, refISO=null;
+              if(!reg){ situacao='nunca'; }
+              else if(reg.data_vencimento && reg.data_vencimento < hoje){ situacao='vencido'; refISO=reg.data_vencimento; }
+              else if(reg.data_vencimento && reg.data_vencimento <= limISO){ situacao='a_vencer'; refISO=reg.data_vencimento; }
+              if(!situacao) return;
+              const ag = agendamentos.find(a=>a.colaborador_nome===c.nome && String(a.tipo_exame_id)===String(k.tipo_exame_id));
+              linhas.push({
+                colaborador:c.nome, funcao:f, tipoId:String(k.tipo_exame_id), tipoNome:k.tipo_exame_nome,
+                situacao, refISO, agendamento:ag||null,
+                custo: custoEstimadoTipo(tipos.find(t=>String(t.id)===String(k.tipo_exame_id)))
+              });
+            });
+          });
+          const ordem = {vencido:0, nunca:1, a_vencer:2};
+          return linhas.sort((a,b)=>(ordem[a.situacao]-ordem[b.situacao])||a.colaborador.localeCompare(b.colaborador,'pt'));
+        },[colabAPI,kits,ultimosPorColabTipo,agendamentos,janelaConv,hoje,tipos,procedimentosPorTipo]);
+
+        const custoConvocacao = convocacao.reduce((s,l)=>s+(l.agendamento?0:l.custo),0);
+
+        const salvarAgendamento = async (linha) => {
+          if(!formAgend.data) return;
+          const {data:{session}} = await _supa.auth.getSession();
+          const {data} = await _supa.from('exames_agendamentos').insert({
+            empresa_id:empresaId, colaborador_nome:linha.colaborador,
+            tipo_exame_id:linha.tipoId, tipo_exame_nome:linha.tipoNome,
+            data_agendada:formAgend.data, prestador:formAgend.prestador||null,
+            status:'agendado', criado_por:session?.user?.email||null
+          }).select().single();
+          if(data) setAgendamentos(p=>[...p,data]);
+          setAgendandoKey(null); setFormAgend({data:'',prestador:''});
+        };
+        const cancelarAgendamento = async (ag) => {
+          await _supa.from('exames_agendamentos').delete().eq('id',ag.id);
+          setAgendamentos(p=>p.filter(a=>a.id!==ag.id));
+        };
+
+        const exportarConvocacaoCSV = () => {
+          if(convocacao.length===0) return;
+          const SIT = {vencido:'Vencido', nunca:'Nunca realizado', a_vencer:'A vencer'};
+          const header = ['Colaborador','Função','Exame','Situação','Data de referência','Agendado para','Clínica','Custo estimado'];
+          const linhas = convocacao.map(l=>[
+            l.colaborador, l.funcao, l.tipoNome, SIT[l.situacao],
+            l.refISO?fmtDate(l.refISO):'', l.agendamento?.data_agendada?fmtDate(l.agendamento.data_agendada):'',
+            l.agendamento?.prestador||'', String(l.custo||0).replace('.',',')
+          ]);
+          const csv = [header,...linhas].map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\n');
+          const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8;'});
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `convocacao_exames_${hoje}.csv`;
+          a.click(); URL.revokeObjectURL(a.href);
+        };
+
+        // ── eSocial S-2220: prazo é o dia 15 do mês seguinte ao exame ──
+        const prazoESocial = (dataRealizacao) => {
+          if(!dataRealizacao) return null;
+          const d = new Date(dataRealizacao+'T12:00:00');
+          return toISO(new Date(d.getFullYear(), d.getMonth()+1, 15));
+        };
+        const pendentesESocial = React.useMemo(()=>
+          registros.filter(r=>!r.esocial_enviado)
+            .map(r=>({...r, prazo:prazoESocial(r.data_realizacao)}))
+            .sort((a,b)=>String(a.prazo||'').localeCompare(String(b.prazo||'')))
+        ,[registros]);
+        const esocialAtrasados = pendentesESocial.filter(r=>r.prazo && r.prazo < hoje);
+
+        const marcarESocial = async (r, enviado) => {
+          const patch = enviado
+            ? {esocial_enviado:true, esocial_data_envio:hoje}
+            : {esocial_enviado:false, esocial_data_envio:null};
+          const {error} = await _supa.from('colaborador_exames').update(patch).eq('id',r.id);
+          if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); return; }
+          setRegistros(p=>p.map(x=>x.id===r.id?{...x,...patch}:x));
+        };
+
+        // ── Anexo do ASO (bucket privado, acesso por URL assinada) ──
+        const [anexoFile, setAnexoFile] = React.useState(null);
+        const [subindoAnexo, setSubindoAnexo] = React.useState(false);
+        const abrirAnexo = async (r) => {
+          if(!r.anexo_path) return;
+          const {data,error} = await _supa.storage.from('exames-aso').createSignedUrl(r.anexo_path, 60);
+          if(error||!data?.signedUrl){ setStatusReg({ok:false,msg:'❌ Não foi possível abrir o anexo: '+(error?.message||'erro')}); return; }
+          window.open(data.signedUrl,'_blank','noopener');
+        };
+        const removerAnexo = async (r) => {
+          if(!await confirmar('Remover o ASO anexado deste exame?','Remover anexo')) return;
+          await _supa.storage.from('exames-aso').remove([r.anexo_path]);
+          await _supa.from('colaborador_exames').update({anexo_path:null}).eq('id',r.id);
+          setRegistros(p=>p.map(x=>x.id===r.id?{...x,anexo_path:null}:x));
+        };
         const tabSt = (k) => ({padding:'8px 18px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted});
 
         // ── Biblioteca de Normas (NRs e demais obrigações legais) ──
@@ -4752,10 +4933,12 @@
               </div>
               <div style={{display:'flex',gap:4,background:'#F3F4F6',borderRadius:8,padding:4}}>
                 <button style={tabSt('vencidos')} onClick={()=>setAba('vencidos')}>🚨 Vencidos</button>
+                <button style={tabSt('convocacao')} onClick={()=>setAba('convocacao')}>📢 Convocação{convocacao.length>0&&<span style={{marginLeft:5,background:C.danger,color:'#fff',borderRadius:10,padding:'0 6px',fontSize:10}}>{convocacao.length}</span>}</button>
                 <button style={tabSt('registros')} onClick={()=>setAba('registros')}>📋 Registros</button>
                 <button style={tabSt('porTipo')} onClick={()=>setAba('porTipo')}>🔍 Por Tipo</button>
+                <button style={tabSt('kits')} onClick={()=>setAba('kits')}>🎯 Kits</button>
                 <button style={tabSt('normas')} onClick={()=>setAba('normas')}>📕 Normas &amp; NRs</button>
-                <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos de Exame</button>
+                <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos</button>
               </div>
             </div>
 
@@ -4845,10 +5028,20 @@
                       {tipos.map(t=>(<option key={t.id} value={t.id}>{t.nome}</option>))}
                     </select>
                   </div>
-                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);setProcsSelecionados([]);}} style={s.btn}>➕ Registrar Exame</button>
+                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);setProcsSelecionados([]);setAnexoFile(null);}} style={s.btn}>➕ Registrar Exame</button>
                 </div>
 
                 {statusReg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusReg.ok?'#DCFCE7':'#FEE2E2',color:statusReg.ok?'#166534':'#991B1B',fontSize:13}}>{statusReg.msg}</div>}
+
+                {pendentesESocial.length>0&&(
+                  <div style={{...(esocialAtrasados.length>0?s.warnBox:s.infoBox),marginBottom:14}}>
+                    <div style={{fontWeight:800,marginBottom:4}}>
+                      📡 eSocial S-2220 — {pendentesESocial.length} exame(s) pendente(s) de envio
+                      {esocialAtrasados.length>0&&<span style={{color:C.danger}}> · {esocialAtrasados.length} fora do prazo</span>}
+                    </div>
+                    <div style={{fontSize:12}}>O prazo do S-2220 é até o <strong>dia 15 do mês seguinte</strong> ao da realização do exame. Marque o envio na coluna “eSocial” da tabela abaixo.</div>
+                  </div>
+                )}
 
                 {mostrarFormReg&&(
                   <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
@@ -4882,8 +5075,17 @@
                         <input type="text" value={formReg.valor} onChange={e=>setFormReg(p=>({...p,valor:e.target.value}))} placeholder="Opcional" style={s.input}/>
                       </div>
                       <div style={{marginBottom:14}}>
+                        <label style={s.label}>Clínica / prestador</label>
+                        <input type="text" value={formReg.prestador} onChange={e=>setFormReg(p=>({...p,prestador:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
                         <label style={s.label}>Observações</label>
                         <input type="text" value={formReg.obs} onChange={e=>setFormReg(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Anexar ASO (PDF ou imagem)</label>
+                        <input type="file" accept=".pdf,image/*" onChange={e=>setAnexoFile(e.target.files?.[0]||null)} style={{...s.input,padding:'6px 8px'}}/>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>🔒 Guardado em área privada; só abre por link temporário (dado de saúde).</div>
                       </div>
                       {(procedimentosPorTipo[formReg.tipoExameId]||[]).length>0&&(
                         <div style={{marginBottom:14,gridColumn:'1/-1'}}>
@@ -4900,8 +5102,8 @@
                       )}
                     </div>
                     <div style={{display:'flex',gap:10}}>
-                      <button onClick={salvarRegistro} style={s.btn}>💾 Salvar</button>
-                      <button onClick={()=>setMostrarFormReg(false)} style={s.btnOutline}>Cancelar</button>
+                      <button onClick={salvarRegistro} style={s.btn} disabled={subindoAnexo}>{subindoAnexo?'Enviando anexo...':'💾 Salvar'}</button>
+                      <button onClick={()=>{setMostrarFormReg(false);setAnexoFile(null);}} style={s.btnOutline}>Cancelar</button>
                     </div>
                   </div>
                 )}
@@ -4910,13 +5112,14 @@
                   <table style={{width:'100%',borderCollapse:'collapse'}}>
                     <thead><tr style={{background:'var(--c-subtle)'}}>
                       <th style={s.th}>Colaborador</th><th style={s.th}>Exame</th><th style={s.th}>Realizado em</th>
-                      <th style={s.th}>Vencimento</th><th style={s.th}>Procedimentos</th><th style={{...s.th,textAlign:'right'}}>Valor</th><th style={s.th}>Obs.</th><th style={{...s.th,textAlign:'right'}}></th>
+                      <th style={s.th}>Vencimento</th><th style={s.th}>Procedimentos</th><th style={{...s.th,textAlign:'right'}}>Valor</th>
+                      <th style={{...s.th,textAlign:'center'}}>ASO</th><th style={{...s.th,textAlign:'center'}}>eSocial</th><th style={{...s.th,textAlign:'right'}}></th>
                     </tr></thead>
                     <tbody>
                       {loadingReg?(
-                        <tr><td colSpan={8} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                        <tr><td colSpan={9} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
                       ):registrosFiltrados.length===0?(
-                        <tr><td colSpan={8} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum exame registrado. Clique em "➕ Registrar Exame" para começar.</td></tr>
+                        <tr><td colSpan={9} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum exame registrado. Clique em "➕ Registrar Exame" para começar.</td></tr>
                       ):registrosFiltrados.map(r=>{
                         const venceu = r.data_vencimento && r.data_vencimento < hoje;
                         const vence30 = r.data_vencimento && !venceu && r.data_vencimento <= toISO(new Date(Date.now()+30*86400000));
@@ -4931,8 +5134,33 @@
                               ):<span style={{color:C.muted}}>Não vence</span>}
                             </td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{(r.procedimentos&&r.procedimentos.length)?r.procedimentos.map(p=>p.nome).join(', '):'—'}</td>
-                            <td style={{...s.td,textAlign:'right'}}>{r.valor?fmtBRL(r.valor):'—'}</td>
-                            <td style={{...s.td,fontSize:12,color:C.muted}}>{r.obs||'—'}</td>
+                            <td style={{...s.td,textAlign:'right'}}>
+                              {r.valor?fmtBRL(r.valor):'—'}
+                              {r.prestador&&<div style={{fontSize:10,color:C.muted}}>{r.prestador}</div>}
+                            </td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              {r.anexo_path?(
+                                <span style={{display:'inline-flex',gap:4}}>
+                                  <button onClick={()=>abrirAnexo(r)} title="Abrir ASO" style={{background:'none',border:'1px solid '+C.pri,color:C.pri,borderRadius:4,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>📎 Ver</button>
+                                  <button onClick={()=>removerAnexo(r)} title="Remover anexo" style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:4,fontSize:11,padding:'3px 6px',cursor:'pointer'}}>✕</button>
+                                </span>
+                              ):<span style={{color:C.muted,fontSize:11}}>—</span>}
+                            </td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              {(()=>{
+                                const prazo = prazoESocial(r.data_realizacao);
+                                const atrasado = !r.esocial_enviado && prazo && prazo < hoje;
+                                return r.esocial_enviado?(
+                                  <button onClick={()=>marcarESocial(r,false)} title={'Enviado em '+(r.esocial_data_envio?fmtDate(r.esocial_data_envio):'—')+' — clique para desmarcar'}
+                                    style={{background:'#DCFCE7',border:'1px solid #86EFAC',color:'#166534',borderRadius:10,fontSize:10,fontWeight:700,padding:'2px 9px',cursor:'pointer'}}>✓ Enviado</button>
+                                ):(
+                                  <button onClick={()=>marcarESocial(r,true)} title={'Prazo: '+(prazo?fmtDate(prazo):'—')+' — clique para marcar como enviado'}
+                                    style={{background:atrasado?'#FEE2E2':'#FEF9C3',border:'1px solid '+(atrasado?'#FCA5A5':'#FCD34D'),color:atrasado?'#991B1B':'#92400E',borderRadius:10,fontSize:10,fontWeight:700,padding:'2px 9px',cursor:'pointer'}}>
+                                    {atrasado?'⚠ Atrasado':'Pendente'}
+                                  </button>
+                                );
+                              })()}
+                            </td>
                             <td style={{...s.td,textAlign:'right'}}>
                               <button onClick={()=>excluirRegistro(r)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:4,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>✕</button>
                             </td>
@@ -4968,6 +5196,12 @@
                           ?`Procedimentos: ${(procedimentosPorTipo[tipoSelecionado.id]||[]).filter(p=>p.ativo).map(p=>p.nome).join(' • ')}`
                           :'Nenhum procedimento cadastrado para este exame.'}
                       </div>
+                      {tipoTemKit&&(
+                        <label style={{display:'flex',alignItems:'center',gap:7,fontSize:12,color:C.muted,marginBottom:12,cursor:'pointer'}}>
+                          <input type="checkbox" checked={soExigidos} onChange={e=>setSoExigidos(e.target.checked)}/>
+                          Mostrar apenas as funções que <strong>exigem</strong> este exame (kit)
+                        </label>
+                      )}
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
                         <div style={{...s.card}}>
                           <div style={{...s.cardTitle,color:C.green}}>✅ Já fizeram ({statusPorColabParaTipo.filter(c=>c.registro).length})</div>
@@ -5002,6 +5236,152 @@
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA CONVOCAÇÃO ───── */}
+            {aba==='convocacao'&&(
+              <div>
+                {kits.length===0&&(
+                  <div style={{...s.infoBox,marginBottom:14}}>
+                    💡 A convocação usa o <strong>Kit de exames por função</strong>: defina em <strong>🎯 Kits</strong> quais exames cada função exige. Sem kit configurado, não há como saber quem está pendente.
+                  </div>
+                )}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
+                  <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                    <label style={{...s.label,marginBottom:0}}>Janela:</label>
+                    <select value={janelaConv} onChange={e=>setJanelaConv(e.target.value)} style={{...s.input,width:150,marginBottom:0}}>
+                      <option value="30">Próximos 30 dias</option>
+                      <option value="60">Próximos 60 dias</option>
+                      <option value="90">Próximos 90 dias</option>
+                    </select>
+                  </div>
+                  <button onClick={exportarConvocacaoCSV} style={s.btnOutline} disabled={convocacao.length===0}>📥 Exportar CSV</button>
+                </div>
+
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:16}}>
+                  <div style={{...s.card,textAlign:'center',padding:14}}><div style={{fontSize:22,fontWeight:800,color:C.danger}}>{convocacao.filter(l=>l.situacao==='vencido').length}</div><div style={{fontSize:11,color:C.muted}}>Vencidos</div></div>
+                  <div style={{...s.card,textAlign:'center',padding:14}}><div style={{fontSize:22,fontWeight:800,color:'#7C3AED'}}>{convocacao.filter(l=>l.situacao==='nunca').length}</div><div style={{fontSize:11,color:C.muted}}>Nunca realizados</div></div>
+                  <div style={{...s.card,textAlign:'center',padding:14}}><div style={{fontSize:22,fontWeight:800,color:C.amber}}>{convocacao.filter(l=>l.situacao==='a_vencer').length}</div><div style={{fontSize:11,color:C.muted}}>A vencer na janela</div></div>
+                  <div style={{...s.card,textAlign:'center',padding:14,background:'#FEF2F2'}}><div style={{fontSize:22,fontWeight:800,color:C.danger}}>{fmtBRL(custoConvocacao)}</div><div style={{fontSize:11,color:C.muted}}>Custo estimado pendente</div></div>
+                </div>
+
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead><tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Colaborador</th><th style={s.th}>Função</th><th style={s.th}>Exame</th>
+                      <th style={{...s.th,textAlign:'center'}}>Situação</th><th style={s.th}>Referência</th>
+                      <th style={{...s.th,textAlign:'right'}}>Custo est.</th><th style={{...s.th,textAlign:'right'}}>Agendamento</th>
+                    </tr></thead>
+                    <tbody>
+                      {convocacao.length===0?(
+                        <tr><td colSpan={7} style={{textAlign:'center',padding:32,color:C.muted}}>Ninguém pendente nesta janela. ✅</td></tr>
+                      ):convocacao.map((l,i)=>{
+                        const key = l.colaborador+'|'+l.tipoId;
+                        const SIT = {
+                          vencido:{l:'Vencido',bg:'#FEE2E2',c:'#991B1B'},
+                          nunca:{l:'Nunca realizado',bg:'#EDE9FE',c:'#5B21B6'},
+                          a_vencer:{l:'A vencer',bg:'#FEF9C3',c:'#92400E'},
+                        }[l.situacao];
+                        return (
+                          <React.Fragment key={key+i}>
+                            <tr style={{borderTop:'1px solid '+C.border}}>
+                              <td style={{...s.td,fontWeight:600}}>{l.colaborador}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{l.funcao||'—'}</td>
+                              <td style={{...s.td,fontSize:12}}>{l.tipoNome}</td>
+                              <td style={{...s.td,textAlign:'center'}}>
+                                <span style={{background:SIT.bg,color:SIT.c,padding:'2px 9px',borderRadius:10,fontSize:11,fontWeight:700}}>{SIT.l}</span>
+                              </td>
+                              <td style={{...s.td,fontSize:12,color:l.situacao==='vencido'?C.danger:C.muted,fontWeight:l.situacao==='vencido'?700:400}}>
+                                {l.refISO?fmtDate(l.refISO):'—'}
+                              </td>
+                              <td style={{...s.td,textAlign:'right',fontSize:12,color:C.muted}}>{l.custo>0?fmtBRL(l.custo):'—'}</td>
+                              <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                                {l.agendamento?(
+                                  <span style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                                    <span style={{fontSize:11,color:C.green,fontWeight:700}}>📅 {fmtDate(l.agendamento.data_agendada)}{l.agendamento.prestador?' · '+l.agendamento.prestador:''}</span>
+                                    <button onClick={()=>cancelarAgendamento(l.agendamento)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:4,fontSize:10,padding:'2px 6px',cursor:'pointer'}}>✕</button>
+                                  </span>
+                                ):(
+                                  <button onClick={()=>{setAgendandoKey(agendandoKey===key?null:key);setFormAgend({data:'',prestador:''});}} style={{...s.btnOutline,fontSize:11,padding:'3px 9px'}}>📅 Agendar</button>
+                                )}
+                              </td>
+                            </tr>
+                            {agendandoKey===key&&(
+                              <tr style={{background:'var(--c-subtle)'}}>
+                                <td colSpan={7} style={{padding:'10px 14px'}}>
+                                  <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+                                    <div><label style={s.label}>Data do agendamento</label><input type="date" value={formAgend.data} onChange={e=>setFormAgend(p=>({...p,data:e.target.value}))} style={{...s.input,width:160}}/></div>
+                                    <div style={{flex:1,minWidth:180}}><label style={s.label}>Clínica / prestador</label><input type="text" value={formAgend.prestador} onChange={e=>setFormAgend(p=>({...p,prestador:e.target.value}))} placeholder="Opcional" style={s.input}/></div>
+                                    <button onClick={()=>salvarAgendamento(l)} style={s.btn} disabled={!formAgend.data}>💾 Salvar</button>
+                                    <button onClick={()=>setAgendandoKey(null)} style={s.btnOutline}>Cancelar</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA KITS POR FUNÇÃO ───── */}
+            {aba==='kits'&&(
+              <div>
+                <div style={{...s.infoBox,marginBottom:16}}>
+                  🎯 Defina quais exames cada <strong>função</strong> exige. Isso alimenta a <strong>Convocação</strong> e faz a aba <strong>Por Tipo</strong> comparar só com quem realmente precisa do exame.
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'260px 1fr',gap:16,alignItems:'start'}}>
+                  <div style={{...s.card,padding:8}}>
+                    {funcoes.length===0?(
+                      <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhuma função cadastrada nos colaboradores.</div>
+                    ):funcoes.map(f=>{
+                      const qtd = kitDaFuncao(f).length;
+                      const sel = funcaoSel===f;
+                      return (
+                        <div key={f} onClick={()=>setFuncaoSel(f)} style={{padding:'9px 12px',borderRadius:7,cursor:'pointer',marginBottom:3,
+                          background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
+                          <div style={{fontWeight:sel?700:500,fontSize:13,color:sel?C.pri:C.text}}>{f}</div>
+                          <div style={{fontSize:10,color:qtd>0?C.green:C.muted,marginTop:2}}>{qtd>0?`${qtd} exame${qtd!==1?'s':''} exigido${qtd!==1?'s':''}`:'sem kit definido'}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div>
+                    {!funcaoSel?(
+                      <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>Selecione uma função à esquerda para definir o kit de exames.</div>
+                    ):(
+                      <div style={s.card}>
+                        <div style={{fontSize:16,fontWeight:800,color:C.pri,marginBottom:4}}>{funcaoSel}</div>
+                        <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+                          {(colabAPI||[]).filter(c=>(c.funcao||'').trim()===funcaoSel).length} colaborador(es) nesta função
+                        </div>
+                        {tipos.length===0?(
+                          <div style={{color:C.muted,fontSize:13}}>Cadastre os tipos de exame primeiro na aba ⚙️ Tipos.</div>
+                        ):tipos.filter(t=>t.ativo).map(t=>{
+                          const exige = funcaoExigeTipo(funcaoSel, t.id);
+                          return (
+                            <div key={t.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 12px',borderRadius:7,marginBottom:6,
+                              background:exige?'#F0FDF4':'var(--c-subtle)',border:'1px solid '+(exige?C.green:C.border)}}>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:600}}>{t.nome}</div>
+                                <div style={{fontSize:11,color:C.muted}}>{t.tem_vencimento?`Vence a cada ${t.recorrencia_valor} ${t.recorrencia_unidade}`:'Não vence'}{custoEstimadoTipo(t)>0?` · ${fmtBRL(custoEstimadoTipo(t))}`:''}</div>
+                              </div>
+                              <button type="button" onClick={()=>toggleKit(funcaoSel,t)} disabled={salvandoKit}
+                                style={{padding:'3px 16px',borderRadius:20,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',minWidth:60,
+                                  background:exige?C.green:'#E5E7EB',color:exige?'#fff':'#6B7280'}}>
+                                {exige?'✓ EXIGE':'NÃO'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
