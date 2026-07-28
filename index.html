@@ -1853,7 +1853,7 @@
                         <table style={{width:"100%",borderCollapse:"collapse"}}>
                           <thead><tr style={{background:"var(--c-subtle)"}}>
                             <th style={s.th}>Exame</th><th style={s.th}>Realizado em</th><th style={s.th}>Vencimento</th>
-                            <th style={{...s.th,textAlign:"right"}}>Valor</th><th style={s.th}>Obs.</th>
+                            <th style={s.th}>Procedimentos</th><th style={{...s.th,textAlign:"right"}}>Valor</th><th style={s.th}>Obs.</th>
                           </tr></thead>
                           <tbody>{historicoExames.map(e=>{
                             const hojeISO = new Date().toISOString().slice(0,10);
@@ -1862,6 +1862,7 @@
                               <td style={{...s.td,fontSize:12,fontWeight:600}}>{e.tipo_exame_nome}</td>
                               <td style={{...s.td,fontSize:12}}>{e.data_realizacao?fmtDate(e.data_realizacao):"—"}</td>
                               <td style={{...s.td,fontSize:12,color:venceu?C.danger:C.text,fontWeight:venceu?700:400}}>{e.data_vencimento?fmtDate(e.data_vencimento)+(venceu?" (vencido)":""):"Não vence"}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{(e.procedimentos&&e.procedimentos.length)?e.procedimentos.map(p=>p.nome).join(", "):"—"}</td>
                               <td style={{...s.td,textAlign:"right",fontSize:12}}>{e.valor?fmtBRL(e.valor):"—"}</td>
                               <td style={{...s.td,fontSize:12,color:C.muted}}>{e.obs||"—"}</td>
                             </tr>);
@@ -4459,9 +4460,77 @@
 
         const toggleAtivoTipo = async (t) => { await _supa.from('tipos_exame').update({ativo:!t.ativo}).eq('id',t.id); carregarTipos(); };
         const excluirTipo = async (t) => {
-          if(!await confirmar(`Excluir o tipo de exame "${t.nome}"? Os registros já lançados deste exame NÃO serão apagados, mas perderão o vínculo com o tipo.`,'Excluir Tipo de Exame')) return;
+          if(!await confirmar(`Excluir o tipo de exame "${t.nome}"? Os registros já lançados deste exame NÃO serão apagados, mas perderão o vínculo com o tipo. Os procedimentos cadastrados para este exame também serão excluídos.`,'Excluir Tipo de Exame')) return;
           await _supa.from('tipos_exame').delete().eq('id',t.id);
           carregarTipos();
+          carregarProcedimentos();
+        };
+
+        // ── Procedimentos de cada tipo de exame (ex.: Admissional → Glicemia, Hemograma...) ──
+        const [procedimentos, setProcedimentos] = React.useState([]);
+        const [loadingProc, setLoadingProc] = React.useState(true);
+        const VAZIO_PROC = {nome:'', valor_estimado:''};
+        const [formProc, setFormProc] = React.useState(VAZIO_PROC);
+        const [editandoProcId, setEditandoProcId] = React.useState(null);
+        const [tipoExpandidoId, setTipoExpandidoId] = React.useState(null);
+        const [statusProc, setStatusProc] = React.useState(null);
+
+        const carregarProcedimentos = async () => {
+          setLoadingProc(true);
+          const {data} = await _supa.from('procedimentos_exame').select('*').eq('empresa_id',empresaId).order('ordem');
+          setProcedimentos(data||[]);
+          setLoadingProc(false);
+        };
+        React.useEffect(()=>{ if(empresaId) carregarProcedimentos(); },[empresaId]);
+
+        const procedimentosPorTipo = React.useMemo(()=>{
+          const m = {};
+          procedimentos.forEach(p=>{
+            if(!m[p.tipo_exame_id]) m[p.tipo_exame_id]=[];
+            m[p.tipo_exame_id].push(p);
+          });
+          return m;
+        },[procedimentos]);
+
+        const custoEstimadoTipo = (tipo) => {
+          if(!tipo) return 0;
+          const procs = (procedimentosPorTipo[tipo.id]||[]).filter(p=>p.ativo && p.valor_estimado!=null);
+          if(procs.length>0) return procs.reduce((sm,p)=>sm+Number(p.valor_estimado),0);
+          return Number(tipo.valor_estimado)||0;
+        };
+
+        const toggleExpandirTipo = (tipoId) => {
+          setTipoExpandidoId(p=>p===tipoId?null:tipoId);
+          setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null);
+        };
+        const abrirEdicaoProcedimento = (p) => {
+          setFormProc({nome:p.nome||'', valor_estimado:p.valor_estimado!=null?String(p.valor_estimado).replace('.',','):''});
+          setEditandoProcId(p.id); setStatusProc(null);
+        };
+        const cancelarEdicaoProcedimento = () => { setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null); };
+
+        const salvarProcedimento = async (tipoId) => {
+          if(!formProc.nome.trim()){ setStatusProc({ok:false,msg:'Nome é obrigatório.'}); return; }
+          const payload = {
+            nome: formProc.nome.trim(),
+            valor_estimado: String(formProc.valor_estimado||'').trim() ? (parseFloat(String(formProc.valor_estimado).replace(',','.'))||null) : null,
+          };
+          let error;
+          if(editandoProcId){
+            ({error} = await _supa.from('procedimentos_exame').update(payload).eq('id',editandoProcId));
+          } else {
+            const lista = procedimentosPorTipo[tipoId]||[];
+            ({error} = await _supa.from('procedimentos_exame').insert({...payload, empresa_id:empresaId, tipo_exame_id:tipoId, ativo:true, ordem:(lista.length+1)}));
+          }
+          if(error){ setStatusProc({ok:false,msg:'❌ '+error.message}); }
+          else { setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null); carregarProcedimentos(); }
+        };
+
+        const toggleAtivoProcedimento = async (p) => { await _supa.from('procedimentos_exame').update({ativo:!p.ativo}).eq('id',p.id); carregarProcedimentos(); };
+        const excluirProcedimento = async (p) => {
+          if(!await confirmar(`Excluir o procedimento "${p.nome}"?`,'Excluir Procedimento')) return;
+          await _supa.from('procedimentos_exame').delete().eq('id',p.id);
+          carregarProcedimentos();
         };
 
         // ── Registros de exames realizados ──
@@ -4473,6 +4542,7 @@
         const [statusReg, setStatusReg] = React.useState(null);
         const [filtroColabReg, setFiltroColabReg] = React.useState('');
         const [filtroTipoReg, setFiltroTipoReg] = React.useState('');
+        const [procsSelecionados, setProcsSelecionados] = React.useState([]);
 
         const carregarRegistros = async () => {
           setLoadingReg(true);
@@ -4494,7 +4564,9 @@
         const onChangeTipoReg = (tipoId) => {
           const tipo = tipos.find(t=>t.id===tipoId);
           setFormReg(p=>({...p, tipoExameId:tipoId, dataVencimento: calcVencimento(p.dataRealizacao, tipo)}));
+          setProcsSelecionados((procedimentosPorTipo[tipoId]||[]).filter(pr=>pr.ativo).map(pr=>pr.id));
         };
+        const toggleProcSelecionado = (id) => setProcsSelecionados(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
         const onChangeDataReg = (dataISO) => {
           const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
           setFormReg(p=>({...p, dataRealizacao:dataISO, dataVencimento: calcVencimento(dataISO, tipo)}));
@@ -4506,6 +4578,7 @@
           }
           const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
           const colab = colabAPI.find(c=>c.nome===formReg.colaboradorNome);
+          const procsFeitos = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
           const {error} = await _supa.from('colaborador_exames').insert({
             id: crypto.randomUUID(),
             empresa_id: empresaId,
@@ -4517,9 +4590,10 @@
             data_vencimento: formReg.dataVencimento || null,
             valor: String(formReg.valor||'').trim() ? (parseFloat(String(formReg.valor).replace(',','.'))||null) : null,
             obs: formReg.obs?.trim()||null,
+            procedimentos: procsFeitos.length ? procsFeitos : null,
           });
           if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); }
-          else { setStatusReg({ok:true,msg:'✅ Exame registrado!'}); setMostrarFormReg(false); setFormReg(VAZIO_REG); carregarRegistros(); }
+          else { setStatusReg({ok:true,msg:'✅ Exame registrado!'}); setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); carregarRegistros(); }
         };
 
         const excluirRegistro = async (r) => {
@@ -4554,13 +4628,13 @@
           const m = {};
           vencidos.forEach(r=>{
             const tipo = tipos.find(t=>t.id===r.tipo_exame_id);
-            const est = Number(tipo?.valor_estimado)||0;
+            const est = custoEstimadoTipo(tipo);
             if(!m[r.tipo_exame_id]) m[r.tipo_exame_id]={nome:r.tipo_exame_nome, qtd:0, total:0};
             m[r.tipo_exame_id].qtd++;
             m[r.tipo_exame_id].total += est;
           });
           return Object.values(m).sort((a,b)=>b.total-a.total);
-        },[vencidos,tipos]);
+        },[vencidos,tipos,procedimentosPorTipo]);
         const custoTotalVencidos = custoPorTipo.reduce((s,c)=>s+c.total,0);
 
         // ── Por tipo: quem já fez / quem nunca fez ──
@@ -4581,6 +4655,94 @@
         const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
         const tabSt = (k) => ({padding:'8px 18px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted});
 
+        // ── Biblioteca de Normas (NRs e demais obrigações legais) ──
+        const [normas, setNormas] = React.useState([]);
+        const [loadingNormas, setLoadingNormas] = React.useState(false);
+        const [erroNormas, setErroNormas] = React.useState(null);
+        const [normaSel, setNormaSel] = React.useState(null);
+        const [destaques, setDestaques] = React.useState([]);
+        const [filtroNorma, setFiltroNorma] = React.useState('');
+        const [paragrafoAtivo, setParagrafoAtivo] = React.useState(null);
+        const [notaDestaque, setNotaDestaque] = React.useState('');
+        const [mostrarFormNorma, setMostrarFormNorma] = React.useState(false);
+        const VAZIO_NORMA = {codigo:'', titulo:'', orgao:'', categoria:'NR', prioridade:'media', aplicabilidade:'', resumo:'', texto:'', link_oficial:'', ultima_atualizacao:''};
+        const [formNorma, setFormNorma] = React.useState(VAZIO_NORMA);
+        const [editandoNormaId, setEditandoNormaId] = React.useState(null);
+
+        const TIPOS_DESTAQUE = {
+          critico:    {l:'Crítico',    ico:'🔴', bg:'#FEE2E2', bd:'#DC2626', c:'#991B1B'},
+          importante: {l:'Importante', ico:'🟡', bg:'#FEF9C3', bd:'#D4972A', c:'#92400E'},
+          prazo:      {l:'Prazo/Data', ico:'📅', bg:'#DBEAFE', bd:'#2563EB', c:'#1D4ED8'},
+          atencao:    {l:'Atenção',    ico:'🔵', bg:'#EDE9FE', bd:'#7C3AED', c:'#5B21B6'},
+        };
+
+        const carregarNormas = async () => {
+          if(!empresaId) return;
+          setLoadingNormas(true); setErroNormas(null);
+          const {data, error} = await _supa.from('normas_sst').select('*').eq('empresa_id',empresaId).order('ordem');
+          if(error){ setErroNormas(error.message); setNormas([]); }
+          else setNormas(data||[]);
+          const {data:dd} = await _supa.from('normas_destaques').select('*').eq('empresa_id',empresaId);
+          setDestaques(dd||[]);
+          setLoadingNormas(false);
+        };
+        React.useEffect(()=>{ if(aba==='normas') carregarNormas(); },[aba,empresaId]);
+
+        const paragrafosDaNorma = React.useMemo(()=>
+          String(normaSel?.texto||'').split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean)
+        ,[normaSel]);
+
+        const destaquesDaNorma = React.useMemo(()=>
+          destaques.filter(d=>String(d.norma_id)===String(normaSel?.id))
+        ,[destaques,normaSel]);
+        const destaqueDoParagrafo = (idx) => destaquesDaNorma.find(d=>d.paragrafo_idx===idx);
+
+        const marcarParagrafo = async (idx, tipo) => {
+          if(!normaSel) return;
+          const existente = destaqueDoParagrafo(idx);
+          // Clicar no mesmo tipo remove o destaque (toggle).
+          if(existente && existente.tipo===tipo && !notaDestaque.trim()){
+            await _supa.from('normas_destaques').delete().eq('id',existente.id);
+            setDestaques(p=>p.filter(d=>d.id!==existente.id));
+            setParagrafoAtivo(null); setNotaDestaque('');
+            return;
+          }
+          const {data:{session}} = await _supa.auth.getSession();
+          const row = {
+            empresa_id: empresaId, norma_id: String(normaSel.id), paragrafo_idx: idx,
+            trecho: (paragrafosDaNorma[idx]||'').slice(0,300),
+            tipo, nota: notaDestaque.trim()||null,
+            criado_por: session?.user?.email||'Desconhecido',
+          };
+          if(existente){
+            const {data,error} = await _supa.from('normas_destaques').update(row).eq('id',existente.id).select().single();
+            if(!error&&data) setDestaques(p=>p.map(d=>d.id===existente.id?data:d));
+          } else {
+            const {data,error} = await _supa.from('normas_destaques').insert(row).select().single();
+            if(!error&&data) setDestaques(p=>[...p,data]);
+          }
+          setParagrafoAtivo(null); setNotaDestaque('');
+        };
+
+        const salvarNorma = async () => {
+          if(!formNorma.codigo.trim()||!formNorma.titulo.trim()) return;
+          const payload = {...formNorma, empresa_id:empresaId};
+          let res;
+          if(editandoNormaId) res = await _supa.from('normas_sst').update(payload).eq('id',editandoNormaId).select().single();
+          else res = await _supa.from('normas_sst').insert({...payload, ativo:true, ordem:(normas.length+1)}).select().single();
+          if(res.error){ setErroNormas(res.error.message); return; }
+          setMostrarFormNorma(false); setEditandoNormaId(null); setFormNorma(VAZIO_NORMA);
+          await carregarNormas();
+          if(res.data) setNormaSel(res.data);
+        };
+
+        const normasFiltradas = normas.filter(n=>{
+          if(!filtroNorma) return true;
+          const q = filtroNorma.toLowerCase();
+          return (n.codigo||'').toLowerCase().includes(q) || (n.titulo||'').toLowerCase().includes(q) || (n.resumo||'').toLowerCase().includes(q);
+        });
+        const PRIOR = {critica:{l:'Crítica',bg:'#FEE2E2',c:'#991B1B'}, alta:{l:'Alta',bg:'#FEF9C3',c:'#92400E'}, media:{l:'Média',bg:'#F1F5F9',c:'#475569'}};
+
         return (
           <div>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
@@ -4592,6 +4754,7 @@
                 <button style={tabSt('vencidos')} onClick={()=>setAba('vencidos')}>🚨 Vencidos</button>
                 <button style={tabSt('registros')} onClick={()=>setAba('registros')}>📋 Registros</button>
                 <button style={tabSt('porTipo')} onClick={()=>setAba('porTipo')}>🔍 Por Tipo</button>
+                <button style={tabSt('normas')} onClick={()=>setAba('normas')}>📕 Normas &amp; NRs</button>
                 <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos de Exame</button>
               </div>
             </div>
@@ -4642,7 +4805,7 @@
                             <td style={{...s.td,fontSize:12}}>{fmtDate(r.data_realizacao)}</td>
                             <td style={{...s.td,fontSize:12,color:C.danger,fontWeight:700}}>{fmtDate(r.data_vencimento)}</td>
                             <td style={{...s.td,textAlign:'center',fontWeight:700,color:C.danger}}>{diasVencido(r.data_vencimento)}</td>
-                            <td style={{...s.td,textAlign:'right',color:C.muted}}>{tipo?.valor_estimado?fmtBRL(tipo.valor_estimado):'—'}</td>
+                            <td style={{...s.td,textAlign:'right',color:C.muted}}>{custoEstimadoTipo(tipo)?fmtBRL(custoEstimadoTipo(tipo)):'—'}</td>
                           </tr>
                         );
                       })}
@@ -4682,7 +4845,7 @@
                       {tipos.map(t=>(<option key={t.id} value={t.id}>{t.nome}</option>))}
                     </select>
                   </div>
-                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);}} style={s.btn}>➕ Registrar Exame</button>
+                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);setProcsSelecionados([]);}} style={s.btn}>➕ Registrar Exame</button>
                 </div>
 
                 {statusReg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusReg.ok?'#DCFCE7':'#FEE2E2',color:statusReg.ok?'#166534':'#991B1B',fontSize:13}}>{statusReg.msg}</div>}
@@ -4722,6 +4885,19 @@
                         <label style={s.label}>Observações</label>
                         <input type="text" value={formReg.obs} onChange={e=>setFormReg(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
                       </div>
+                      {(procedimentosPorTipo[formReg.tipoExameId]||[]).length>0&&(
+                        <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                          <label style={s.label}>Procedimentos realizados</label>
+                          <div style={{display:'flex',flexWrap:'wrap',gap:'6px 18px',padding:'10px 12px',background:'var(--c-subtle)',borderRadius:8}}>
+                            {(procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>p.ativo).map(p=>(
+                              <label key={p.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
+                                <input type="checkbox" checked={procsSelecionados.includes(p.id)} onChange={()=>toggleProcSelecionado(p.id)}/>
+                                {p.nome}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div style={{display:'flex',gap:10}}>
                       <button onClick={salvarRegistro} style={s.btn}>💾 Salvar</button>
@@ -4734,13 +4910,13 @@
                   <table style={{width:'100%',borderCollapse:'collapse'}}>
                     <thead><tr style={{background:'var(--c-subtle)'}}>
                       <th style={s.th}>Colaborador</th><th style={s.th}>Exame</th><th style={s.th}>Realizado em</th>
-                      <th style={s.th}>Vencimento</th><th style={{...s.th,textAlign:'right'}}>Valor</th><th style={s.th}>Obs.</th><th style={{...s.th,textAlign:'right'}}></th>
+                      <th style={s.th}>Vencimento</th><th style={s.th}>Procedimentos</th><th style={{...s.th,textAlign:'right'}}>Valor</th><th style={s.th}>Obs.</th><th style={{...s.th,textAlign:'right'}}></th>
                     </tr></thead>
                     <tbody>
                       {loadingReg?(
-                        <tr><td colSpan={7} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                        <tr><td colSpan={8} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
                       ):registrosFiltrados.length===0?(
-                        <tr><td colSpan={7} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum exame registrado. Clique em "➕ Registrar Exame" para começar.</td></tr>
+                        <tr><td colSpan={8} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum exame registrado. Clique em "➕ Registrar Exame" para começar.</td></tr>
                       ):registrosFiltrados.map(r=>{
                         const venceu = r.data_vencimento && r.data_vencimento < hoje;
                         const vence30 = r.data_vencimento && !venceu && r.data_vencimento <= toISO(new Date(Date.now()+30*86400000));
@@ -4754,6 +4930,7 @@
                                 <span style={{color:venceu?C.danger:vence30?C.amber:C.muted,fontWeight:venceu||vence30?700:400}}>{fmtDate(r.data_vencimento)}{venceu?' (vencido)':vence30?' (vencendo)':''}</span>
                               ):<span style={{color:C.muted}}>Não vence</span>}
                             </td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{(r.procedimentos&&r.procedimentos.length)?r.procedimentos.map(p=>p.nome).join(', '):'—'}</td>
                             <td style={{...s.td,textAlign:'right'}}>{r.valor?fmtBRL(r.valor):'—'}</td>
                             <td style={{...s.td,fontSize:12,color:C.muted}}>{r.obs||'—'}</td>
                             <td style={{...s.td,textAlign:'right'}}>
@@ -4785,7 +4962,12 @@
                     <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>Selecione um tipo de exame à esquerda para ver quem já fez.</div>
                   ):(
                     <div>
-                      <div style={{fontSize:16,fontWeight:800,color:C.pri,marginBottom:12}}>{tipoSelecionado.nome}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:C.pri,marginBottom:4}}>{tipoSelecionado.nome}</div>
+                      <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
+                        {(procedimentosPorTipo[tipoSelecionado.id]||[]).filter(p=>p.ativo).length>0
+                          ?`Procedimentos: ${(procedimentosPorTipo[tipoSelecionado.id]||[]).filter(p=>p.ativo).map(p=>p.nome).join(' • ')}`
+                          :'Nenhum procedimento cadastrado para este exame.'}
+                      </div>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
                         <div style={{...s.card}}>
                           <div style={{...s.cardTitle,color:C.green}}>✅ Já fizeram ({statusPorColabParaTipo.filter(c=>c.registro).length})</div>
@@ -4820,6 +5002,212 @@
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA NORMAS & NRs ───── */}
+            {aba==='normas'&&(
+              <div>
+                {erroNormas&&(
+                  <div style={{...s.warnBox,marginBottom:14}}>
+                    ⚠️ Não foi possível carregar a biblioteca de normas: {erroNormas}
+                    <div style={{fontSize:12,marginTop:6}}>Se esta é a primeira vez, rode o arquivo <strong>sql/2026-07-21_exames_tipos_aso_e_normas.sql</strong> no Supabase → SQL Editor para criar as tabelas e carregar as normas.</div>
+                  </div>
+                )}
+
+                {mostrarFormNorma&&(
+                  <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoNormaId?'Editar Norma':'Nova Norma / Obrigação'}</div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'0 20px'}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Código *</label>
+                        <input type="text" value={formNorma.codigo} onChange={e=>setFormNorma(p=>({...p,codigo:e.target.value}))} placeholder="Ex: NR-36" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Título *</label>
+                        <input type="text" value={formNorma.titulo} onChange={e=>setFormNorma(p=>({...p,titulo:e.target.value}))} placeholder="Nome da norma" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Órgão</label>
+                        <input type="text" value={formNorma.orgao} onChange={e=>setFormNorma(p=>({...p,orgao:e.target.value}))} placeholder="MTE, ANVISA..." style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                        <div>
+                          <label style={s.label}>Categoria</label>
+                          <select value={formNorma.categoria} onChange={e=>setFormNorma(p=>({...p,categoria:e.target.value}))} style={s.input}>
+                            <option value="NR">NR</option><option value="Sanitária">Sanitária</option>
+                            <option value="Lei">Lei</option><option value="eSocial">eSocial</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={s.label}>Prioridade</label>
+                          <select value={formNorma.prioridade} onChange={e=>setFormNorma(p=>({...p,prioridade:e.target.value}))} style={s.input}>
+                            <option value="critica">Crítica</option><option value="alta">Alta</option><option value="media">Média</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                        <label style={s.label}>Resumo</label>
+                        <input type="text" value={formNorma.resumo} onChange={e=>setFormNorma(p=>({...p,resumo:e.target.value}))} placeholder="Uma frase sobre o que a norma exige" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                        <label style={s.label}>Aplicabilidade</label>
+                        <input type="text" value={formNorma.aplicabilidade} onChange={e=>setFormNorma(p=>({...p,aplicabilidade:e.target.value}))} placeholder="A quem/o que se aplica" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                        <label style={s.label}>Texto (separe os parágrafos com uma linha em branco)</label>
+                        <textarea value={formNorma.texto} onChange={e=>setFormNorma(p=>({...p,texto:e.target.value}))} rows={10} style={{...s.input,fontFamily:'inherit',lineHeight:1.6,resize:'vertical'}} placeholder={'Primeiro parágrafo.\n\nSegundo parágrafo.'}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Link oficial</label>
+                        <input type="text" value={formNorma.link_oficial} onChange={e=>setFormNorma(p=>({...p,link_oficial:e.target.value}))} placeholder="https://..." style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Última atualização</label>
+                        <input type="text" value={formNorma.ultima_atualizacao} onChange={e=>setFormNorma(p=>({...p,ultima_atualizacao:e.target.value}))} placeholder="Ex: Portaria X/2024 · vigente" style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:10}}>
+                      <button onClick={salvarNorma} style={s.btn}>💾 Salvar</button>
+                      <button onClick={()=>{setMostrarFormNorma(false);setEditandoNormaId(null);setFormNorma(VAZIO_NORMA);}} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:16,alignItems:'start'}}>
+                  {/* Lista de normas */}
+                  <div style={{...s.card,padding:10}}>
+                    <div style={{display:'flex',gap:6,marginBottom:10}}>
+                      <input type="text" value={filtroNorma} onChange={e=>setFiltroNorma(e.target.value)} placeholder="Buscar norma..." style={{...s.inputSm,flex:1}}/>
+                      <button onClick={()=>{setFormNorma(VAZIO_NORMA);setEditandoNormaId(null);setMostrarFormNorma(true);}} style={{...s.btn,fontSize:11,padding:'4px 10px'}} title="Cadastrar nova norma">+</button>
+                    </div>
+                    {loadingNormas?(
+                      <div style={{color:C.muted,fontSize:13,padding:12}}>Carregando...</div>
+                    ):normasFiltradas.length===0?(
+                      <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhuma norma cadastrada. Use o botão “+” ou rode o SQL de carga inicial.</div>
+                    ):normasFiltradas.map(n=>{
+                      const pr = PRIOR[n.prioridade]||PRIOR.media;
+                      const qtdDest = destaques.filter(d=>String(d.norma_id)===String(n.id)).length;
+                      const sel = String(normaSel?.id)===String(n.id);
+                      return (
+                        <div key={n.id} onClick={()=>{setNormaSel(n);setParagrafoAtivo(null);}}
+                          style={{padding:'9px 11px',borderRadius:7,cursor:'pointer',marginBottom:4,
+                            background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6}}>
+                            <span style={{fontWeight:800,fontSize:12,color:C.pri}}>{n.codigo}</span>
+                            <span style={{background:pr.bg,color:pr.c,fontSize:9,fontWeight:700,padding:'1px 7px',borderRadius:10}}>{pr.l}</span>
+                          </div>
+                          <div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.35}}>{n.titulo}</div>
+                          {qtdDest>0&&<div style={{fontSize:10,color:C.acc,fontWeight:700,marginTop:3}}>✍️ {qtdDest} destaque{qtdDest!==1?'s':''}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Leitor */}
+                  <div>
+                    {!normaSel?(
+                      <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>
+                        <div style={{fontSize:32,marginBottom:8}}>📕</div>
+                        <div style={{fontWeight:700,marginBottom:4}}>Biblioteca de Normas e Obrigações</div>
+                        <div style={{fontSize:12}}>Selecione uma norma à esquerda para ler. Clique em qualquer parágrafo para destacar pontos críticos, prazos e observações.</div>
+                      </div>
+                    ):(
+                      <div>
+                        <div style={{...s.card,marginBottom:14}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+                            <div style={{flex:1,minWidth:240}}>
+                              <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{normaSel.codigo} — {normaSel.titulo}</div>
+                              {normaSel.resumo&&<div style={{fontSize:13,color:C.text,marginTop:6,lineHeight:1.6}}>{normaSel.resumo}</div>}
+                              <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:10,fontSize:11,color:C.muted}}>
+                                {normaSel.orgao&&<span>🏛️ {normaSel.orgao}</span>}
+                                {normaSel.categoria&&<span>🗂️ {normaSel.categoria}</span>}
+                                {normaSel.ultima_atualizacao&&<span>🕒 {normaSel.ultima_atualizacao}</span>}
+                              </div>
+                              {normaSel.aplicabilidade&&(
+                                <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:12}}>👥 <strong>Aplica-se a:</strong> {normaSel.aplicabilidade}</div>
+                              )}
+                            </div>
+                            <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
+                              <button onClick={()=>{setFormNorma({codigo:normaSel.codigo||'',titulo:normaSel.titulo||'',orgao:normaSel.orgao||'',categoria:normaSel.categoria||'NR',prioridade:normaSel.prioridade||'media',aplicabilidade:normaSel.aplicabilidade||'',resumo:normaSel.resumo||'',texto:normaSel.texto||'',link_oficial:normaSel.link_oficial||'',ultima_atualizacao:normaSel.ultima_atualizacao||''});setEditandoNormaId(normaSel.id);setMostrarFormNorma(true);}}
+                                style={{...s.btnOutline,fontSize:11,padding:'4px 10px'}}>✏️ Editar</button>
+                              {normaSel.link_oficial&&(
+                                <a href={normaSel.link_oficial} target="_blank" rel="noreferrer" style={{...s.btnOutline,fontSize:11,padding:'4px 10px',textDecoration:'none',textAlign:'center'}}>🔗 Texto oficial</a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Painel de destaques */}
+                        {destaquesDaNorma.length>0&&(
+                          <div style={{...s.card,marginBottom:14}}>
+                            <div style={s.cardTitle}>✍️ Seus destaques nesta norma</div>
+                            {destaquesDaNorma.slice().sort((a,b)=>a.paragrafo_idx-b.paragrafo_idx).map(d=>{
+                              const td = TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao;
+                              return (
+                                <div key={d.id} style={{borderLeft:'3px solid '+td.bd,background:td.bg,borderRadius:'0 7px 7px 0',padding:'8px 12px',marginBottom:6}}>
+                                  <div style={{fontSize:10,fontWeight:800,color:td.c,marginBottom:3}}>{td.ico} {td.l} · parágrafo {d.paragrafo_idx+1}</div>
+                                  <div style={{fontSize:12,color:C.text,lineHeight:1.5}}>{(d.trecho||'').slice(0,180)}{(d.trecho||'').length>180?'…':''}</div>
+                                  {d.nota&&<div style={{fontSize:11,color:td.c,marginTop:4,fontStyle:'italic'}}>📝 {d.nota}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Texto */}
+                        <div style={s.card}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                            <div style={s.cardTitle}>📖 Texto</div>
+                            <div style={{fontSize:11,color:C.muted}}>Clique em um parágrafo para destacar</div>
+                          </div>
+                          {paragrafosDaNorma.length===0?(
+                            <div style={{color:C.muted,fontSize:13}}>Esta norma ainda não tem texto cadastrado. Use “✏️ Editar” para inserir.</div>
+                          ):paragrafosDaNorma.map((p,idx)=>{
+                            const d = destaqueDoParagrafo(idx);
+                            const td = d?(TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao):null;
+                            const ativo = paragrafoAtivo===idx;
+                            return (
+                              <div key={idx} style={{marginBottom:10}}>
+                                <div onClick={()=>{setParagrafoAtivo(ativo?null:idx);setNotaDestaque(d?.nota||'');}}
+                                  style={{cursor:'pointer',padding:'9px 12px',borderRadius:7,lineHeight:1.75,fontSize:13.5,
+                                    background:td?td.bg:(ativo?'var(--c-subtle)':'transparent'),
+                                    borderLeft:td?('4px solid '+td.bd):(ativo?'4px solid '+C.acc:'4px solid transparent'),
+                                    color:C.text,transition:'background .15s'}}>
+                                  {td&&<span style={{fontSize:10,fontWeight:800,color:td.c,display:'block',marginBottom:3}}>{td.ico} {td.l}</span>}
+                                  {p}
+                                  {d?.nota&&<div style={{fontSize:11,color:td.c,marginTop:5,fontStyle:'italic'}}>📝 {d.nota}</div>}
+                                </div>
+                                {ativo&&(
+                                  <div style={{border:'1px solid '+C.border,borderRadius:8,padding:'10px 12px',marginTop:6,background:'var(--c-subtle)'}}>
+                                    <div style={{fontSize:11,color:C.muted,fontWeight:700,marginBottom:8}}>Marcar este parágrafo como:</div>
+                                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                                      {Object.entries(TIPOS_DESTAQUE).map(([k,v])=>(
+                                        <button key={k} onClick={()=>marcarParagrafo(idx,k)}
+                                          style={{background:v.bg,color:v.c,border:'1.5px solid '+((d?.tipo===k)?v.bd:'transparent'),borderRadius:20,padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                                          {v.ico} {v.l}{d?.tipo===k?' ✓':''}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <input type="text" value={notaDestaque} onChange={e=>setNotaDestaque(e.target.value)}
+                                      placeholder="Nota (opcional): o que precisa ser feito, responsável, prazo..."
+                                      style={{...s.inputSm,width:'100%'}}/>
+                                    {d&&(
+                                      <button onClick={async()=>{ await _supa.from('normas_destaques').delete().eq('id',d.id); setDestaques(pp=>pp.filter(x=>x.id!==d.id)); setParagrafoAtivo(null); setNotaDestaque(''); }}
+                                        style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginTop:8}}>
+                                        🗑 Remover destaque
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -4887,18 +5275,24 @@
                   <table style={{width:'100%',borderCollapse:'collapse'}}>
                     <thead><tr style={{background:'var(--c-subtle)'}}>
                       <th style={s.th}>Exame</th><th style={{...s.th,textAlign:'center'}}>Vencimento</th>
-                      <th style={{...s.th,textAlign:'right'}}>Valor Estimado</th><th style={{...s.th,textAlign:'center'}}>Status</th><th style={{...s.th,textAlign:'right'}}>Ações</th>
+                      <th style={{...s.th,textAlign:'right'}}>Valor Estimado</th><th style={{...s.th,textAlign:'center'}}>Procedimentos</th><th style={{...s.th,textAlign:'center'}}>Status</th><th style={{...s.th,textAlign:'right'}}>Ações</th>
                     </tr></thead>
                     <tbody>
                       {loadingTipos?(
-                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                        <tr><td colSpan={6} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
                       ):tipos.length===0?(
-                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum tipo de exame cadastrado ainda.</td></tr>
+                        <tr><td colSpan={6} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum tipo de exame cadastrado ainda.</td></tr>
                       ):tipos.map(t=>(
-                        <tr key={t.id} style={{borderTop:'1px solid '+C.border,opacity:t.ativo?1:0.55}}>
+                        <React.Fragment key={t.id}>
+                        <tr style={{borderTop:'1px solid '+C.border,opacity:t.ativo?1:0.55}}>
                           <td style={{...s.td,fontWeight:600}}>{t.nome}{t.obs&&<div style={{fontSize:11,color:C.muted,fontWeight:400}}>{t.obs}</div>}</td>
                           <td style={{...s.td,textAlign:'center',fontSize:12}}>{t.tem_vencimento?`A cada ${t.recorrencia_valor} ${t.recorrencia_unidade}`:'Não vence'}</td>
                           <td style={{...s.td,textAlign:'right'}}>{t.valor_estimado?fmtBRL(t.valor_estimado):'—'}</td>
+                          <td style={{...s.td,textAlign:'center'}}>
+                            <button onClick={()=>toggleExpandirTipo(t.id)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px'}}>
+                              {(procedimentosPorTipo[t.id]||[]).length} {tipoExpandidoId===t.id?'▲':'▼'}
+                            </button>
+                          </td>
                           <td style={{...s.td,textAlign:'center'}}>
                             <span style={{background:t.ativo?'#DCFCE7':'#F1F5F9',color:t.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>{t.ativo?'Ativo':'Pausado'}</span>
                           </td>
@@ -4908,6 +5302,55 @@
                             <button onClick={()=>excluirTipo(t)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer'}}>🗑</button>
                           </td>
                         </tr>
+                        {tipoExpandidoId===t.id&&(
+                          <tr style={{background:'var(--c-subtle)'}}>
+                            <td colSpan={6} style={{padding:'14px 20px'}}>
+                              <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:10}}>🧪 Procedimentos de "{t.nome}"</div>
+                              {statusProc&&<div style={{padding:'8px 12px',borderRadius:6,marginBottom:10,background:statusProc.ok?'#DCFCE7':'#FEE2E2',color:statusProc.ok?'#166534':'#991B1B',fontSize:12}}>{statusProc.msg}</div>}
+                              {(procedimentosPorTipo[t.id]||[]).length===0?(
+                                <div style={{color:C.muted,fontSize:13,marginBottom:12}}>Nenhum procedimento cadastrado para este exame ainda.</div>
+                              ):(
+                                <table style={{...s.table,fontSize:12,marginBottom:12}}>
+                                  <thead><tr>
+                                    <th style={{...s.th,fontSize:10}}>Procedimento</th>
+                                    <th style={{...s.th,fontSize:10,textAlign:'right'}}>Valor estimado</th>
+                                    <th style={{...s.th,fontSize:10,textAlign:'center'}}>Status</th>
+                                    <th style={{...s.th,fontSize:10,textAlign:'right'}}>Ações</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {(procedimentosPorTipo[t.id]||[]).map(p=>(
+                                      <tr key={p.id} style={{opacity:p.ativo?1:0.55}}>
+                                        <td style={{...s.td,padding:'5px 12px'}}>{p.nome}</td>
+                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right'}}>{p.valor_estimado?fmtBRL(p.valor_estimado):'—'}</td>
+                                        <td style={{...s.td,padding:'5px 12px',textAlign:'center'}}>
+                                          <span style={{background:p.ativo?'#DCFCE7':'#F1F5F9',color:p.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>{p.ativo?'Ativo':'Pausado'}</span>
+                                        </td>
+                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right',whiteSpace:'nowrap'}}>
+                                          <button onClick={()=>abrirEdicaoProcedimento(p)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px',marginRight:6}}>✏️</button>
+                                          <button onClick={()=>toggleAtivoProcedimento(p)} style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginRight:6}}>{p.ativo?'Pausar':'Ativar'}</button>
+                                          <button onClick={()=>excluirProcedimento(p)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer'}}>🗑</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                              <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+                                <div style={{flex:'1 1 220px'}}>
+                                  <label style={s.label}>{editandoProcId?'Editar procedimento':'Novo procedimento'}</label>
+                                  <input type="text" value={formProc.nome} onChange={e=>setFormProc(p=>({...p,nome:e.target.value}))} placeholder="Ex: Glicemia, Hemograma, Raio-X de Tórax..." style={s.input}/>
+                                </div>
+                                <div style={{width:160}}>
+                                  <label style={s.label}>Valor (R$)</label>
+                                  <input type="text" value={formProc.valor_estimado} onChange={e=>setFormProc(p=>({...p,valor_estimado:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                                </div>
+                                <button onClick={()=>salvarProcedimento(t.id)} style={s.btn}>{editandoProcId?'💾 Salvar':'➕ Adicionar'}</button>
+                                {editandoProcId&&<button onClick={cancelarEdicaoProcedimento} style={s.btnOutline}>Cancelar</button>}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
