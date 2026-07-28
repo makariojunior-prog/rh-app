@@ -4496,13 +4496,15 @@
           carregarProcedimentos();
         };
 
-        // ── Procedimentos de cada tipo de exame (ex.: Admissional → Glicemia, Hemograma...) ──
+        // ── Procedimentos: catálogo reutilizável (Glicemia, ECG, Raio-X...) ──
+        // Independente do Tipo de Exame. Cada Tipo (Admissional, Periódico...) associa
+        // os procedimentos que exige através de tipo_exame_procedimentos (N:N).
         const [procedimentos, setProcedimentos] = React.useState([]);
         const [loadingProc, setLoadingProc] = React.useState(true);
         const VAZIO_PROC = {nome:'', valor_estimado:''};
         const [formProc, setFormProc] = React.useState(VAZIO_PROC);
         const [editandoProcId, setEditandoProcId] = React.useState(null);
-        const [tipoExpandidoId, setTipoExpandidoId] = React.useState(null);
+        const [mostrarFormProc, setMostrarFormProc] = React.useState(false);
         const [statusProc, setStatusProc] = React.useState(null);
 
         const carregarProcedimentos = async () => {
@@ -4513,14 +4515,57 @@
         };
         React.useEffect(()=>{ if(empresaId) carregarProcedimentos(); },[empresaId]);
 
+        const abrirNovoProcedimento = () => { setFormProc(VAZIO_PROC); setEditandoProcId(null); setMostrarFormProc(true); setStatusProc(null); };
+        const abrirEdicaoProcedimento = (p) => {
+          setFormProc({nome:p.nome||'', valor_estimado:p.valor_estimado!=null?String(p.valor_estimado).replace('.',','):''});
+          setEditandoProcId(p.id); setMostrarFormProc(true); setStatusProc(null);
+        };
+
+        const salvarProcedimento = async () => {
+          if(!formProc.nome.trim()){ setStatusProc({ok:false,msg:'Nome é obrigatório.'}); return; }
+          const payload = {
+            nome: formProc.nome.trim(),
+            valor_estimado: String(formProc.valor_estimado||'').trim() ? (parseFloat(String(formProc.valor_estimado).replace(',','.'))||null) : null,
+          };
+          let error;
+          if(editandoProcId){
+            ({error} = await _supa.from('procedimentos_exame').update(payload).eq('id',editandoProcId));
+          } else {
+            ({error} = await _supa.from('procedimentos_exame').insert({...payload, empresa_id:empresaId, ativo:true, ordem:(procedimentos.length+1)}));
+          }
+          if(error){ setStatusProc({ok:false,msg:'❌ '+error.message}); }
+          else { setStatusProc({ok:true,msg:'✅ Procedimento salvo!'}); setMostrarFormProc(false); setFormProc(VAZIO_PROC); setEditandoProcId(null); carregarProcedimentos(); }
+        };
+
+        const toggleAtivoProcedimento = async (p) => { await _supa.from('procedimentos_exame').update({ativo:!p.ativo}).eq('id',p.id); carregarProcedimentos(); };
+        const excluirProcedimento = async (p) => {
+          if(!await confirmar(`Excluir o procedimento "${p.nome}"? Ele será removido de todos os tipos de exame aos quais está associado.`,'Excluir Procedimento')) return;
+          await _supa.from('procedimentos_exame').delete().eq('id',p.id);
+          await _supa.from('tipo_exame_procedimentos').delete().eq('procedimento_id',p.id);
+          carregarProcedimentos();
+          carregarVinculos();
+        };
+
+        // ── Associação Tipo ↔ Procedimentos (N:N) ──
+        const [vinculos, setVinculos] = React.useState([]);
+        const [tipoExpandidoId, setTipoExpandidoId] = React.useState(null);
+        const [procParaVincular, setProcParaVincular] = React.useState('');
+        const carregarVinculos = async () => {
+          const {data} = await _supa.from('tipo_exame_procedimentos').select('*').eq('empresa_id',empresaId);
+          setVinculos(data||[]);
+        };
+        React.useEffect(()=>{ if(empresaId) carregarVinculos(); },[empresaId]);
+
         const procedimentosPorTipo = React.useMemo(()=>{
           const m = {};
-          procedimentos.forEach(p=>{
-            if(!m[p.tipo_exame_id]) m[p.tipo_exame_id]=[];
-            m[p.tipo_exame_id].push(p);
+          vinculos.forEach(v=>{
+            const proc = procedimentos.find(p=>String(p.id)===String(v.procedimento_id));
+            if(!proc) return;
+            if(!m[v.tipo_exame_id]) m[v.tipo_exame_id]=[];
+            m[v.tipo_exame_id].push({...proc, vinculo_id:v.id});
           });
           return m;
-        },[procedimentos]);
+        },[vinculos,procedimentos]);
 
         const custoEstimadoTipo = (tipo) => {
           if(!tipo) return 0;
@@ -4531,36 +4576,22 @@
 
         const toggleExpandirTipo = (tipoId) => {
           setTipoExpandidoId(p=>p===tipoId?null:tipoId);
-          setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null);
+          setProcParaVincular('');
         };
-        const abrirEdicaoProcedimento = (p) => {
-          setFormProc({nome:p.nome||'', valor_estimado:p.valor_estimado!=null?String(p.valor_estimado).replace('.',','):''});
-          setEditandoProcId(p.id); setStatusProc(null);
+        const procedimentosDisponiveisPara = (tipoId) => {
+          const jaVinculados = new Set((procedimentosPorTipo[tipoId]||[]).map(p=>String(p.id)));
+          return procedimentos.filter(p=>p.ativo && !jaVinculados.has(String(p.id)));
         };
-        const cancelarEdicaoProcedimento = () => { setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null); };
-
-        const salvarProcedimento = async (tipoId) => {
-          if(!formProc.nome.trim()){ setStatusProc({ok:false,msg:'Nome é obrigatório.'}); return; }
-          const payload = {
-            nome: formProc.nome.trim(),
-            valor_estimado: String(formProc.valor_estimado||'').trim() ? (parseFloat(String(formProc.valor_estimado).replace(',','.'))||null) : null,
-          };
-          let error;
-          if(editandoProcId){
-            ({error} = await _supa.from('procedimentos_exame').update(payload).eq('id',editandoProcId));
-          } else {
-            const lista = procedimentosPorTipo[tipoId]||[];
-            ({error} = await _supa.from('procedimentos_exame').insert({...payload, empresa_id:empresaId, tipo_exame_id:tipoId, ativo:true, ordem:(lista.length+1)}));
-          }
-          if(error){ setStatusProc({ok:false,msg:'❌ '+error.message}); }
-          else { setFormProc(VAZIO_PROC); setEditandoProcId(null); setStatusProc(null); carregarProcedimentos(); }
+        const vincularProcedimento = async (tipoId, procId) => {
+          if(!procId) return;
+          const {data,error} = await _supa.from('tipo_exame_procedimentos').insert({
+            empresa_id:empresaId, tipo_exame_id:String(tipoId), procedimento_id:String(procId)
+          }).select().single();
+          if(!error && data){ setVinculos(p=>[...p,data]); setProcParaVincular(''); }
         };
-
-        const toggleAtivoProcedimento = async (p) => { await _supa.from('procedimentos_exame').update({ativo:!p.ativo}).eq('id',p.id); carregarProcedimentos(); };
-        const excluirProcedimento = async (p) => {
-          if(!await confirmar(`Excluir o procedimento "${p.nome}"?`,'Excluir Procedimento')) return;
-          await _supa.from('procedimentos_exame').delete().eq('id',p.id);
-          carregarProcedimentos();
+        const desvincularProcedimento = async (vinculoId) => {
+          await _supa.from('tipo_exame_procedimentos').delete().eq('id',vinculoId);
+          setVinculos(p=>p.filter(v=>v.id!==vinculoId));
         };
 
         // ── Registros de exames realizados ──
@@ -4971,6 +5002,7 @@
                 <button style={tabSt('kits')} onClick={()=>setAba('kits')}>🎯 Kits</button>
                 <button style={tabSt('normas')} onClick={()=>setAba('normas')}>📕 Normas &amp; NRs</button>
                 <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos</button>
+                <button style={tabSt('procedimentos')} onClick={()=>setAba('procedimentos')}>🧪 Procedimentos</button>
               </div>
             </div>
 
@@ -5717,53 +5749,112 @@
                         {tipoExpandidoId===t.id&&(
                           <tr style={{background:'var(--c-subtle)'}}>
                             <td colSpan={6} style={{padding:'14px 20px'}}>
-                              <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:10}}>🧪 Procedimentos de "{t.nome}"</div>
-                              {statusProc&&<div style={{padding:'8px 12px',borderRadius:6,marginBottom:10,background:statusProc.ok?'#DCFCE7':'#FEE2E2',color:statusProc.ok?'#166534':'#991B1B',fontSize:12}}>{statusProc.msg}</div>}
+                              <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:10}}>🧪 Procedimentos exigidos em "{t.nome}"</div>
                               {(procedimentosPorTipo[t.id]||[]).length===0?(
-                                <div style={{color:C.muted,fontSize:13,marginBottom:12}}>Nenhum procedimento cadastrado para este exame ainda.</div>
+                                <div style={{color:C.muted,fontSize:13,marginBottom:12}}>Nenhum procedimento associado a este tipo ainda.</div>
                               ):(
-                                <table style={{...s.table,fontSize:12,marginBottom:12}}>
-                                  <thead><tr>
-                                    <th style={{...s.th,fontSize:10}}>Procedimento</th>
-                                    <th style={{...s.th,fontSize:10,textAlign:'right'}}>Valor estimado</th>
-                                    <th style={{...s.th,fontSize:10,textAlign:'center'}}>Status</th>
-                                    <th style={{...s.th,fontSize:10,textAlign:'right'}}>Ações</th>
-                                  </tr></thead>
-                                  <tbody>
-                                    {(procedimentosPorTipo[t.id]||[]).map(p=>(
-                                      <tr key={p.id} style={{opacity:p.ativo?1:0.55}}>
-                                        <td style={{...s.td,padding:'5px 12px'}}>{p.nome}</td>
-                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right'}}>{p.valor_estimado?fmtBRL(p.valor_estimado):'—'}</td>
-                                        <td style={{...s.td,padding:'5px 12px',textAlign:'center'}}>
-                                          <span style={{background:p.ativo?'#DCFCE7':'#F1F5F9',color:p.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>{p.ativo?'Ativo':'Pausado'}</span>
-                                        </td>
-                                        <td style={{...s.td,padding:'5px 12px',textAlign:'right',whiteSpace:'nowrap'}}>
-                                          <button onClick={()=>abrirEdicaoProcedimento(p)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px',marginRight:6}}>✏️</button>
-                                          <button onClick={()=>toggleAtivoProcedimento(p)} style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginRight:6}}>{p.ativo?'Pausar':'Ativar'}</button>
-                                          <button onClick={()=>excluirProcedimento(p)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer'}}>🗑</button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                                <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:14}}>
+                                  {(procedimentosPorTipo[t.id]||[]).map(p=>(
+                                    <span key={p.vinculo_id} style={{display:'inline-flex',alignItems:'center',gap:6,background:'#F0FDF4',border:'1px solid '+C.green,borderRadius:20,padding:'4px 6px 4px 12px',fontSize:12}}>
+                                      {p.nome}{p.valor_estimado?<span style={{color:C.muted,fontSize:11}}>· {fmtBRL(p.valor_estimado)}</span>:null}
+                                      <button onClick={()=>desvincularProcedimento(p.vinculo_id)} title="Remover deste tipo"
+                                        style={{background:'none',border:'none',color:C.danger,cursor:'pointer',fontSize:13,fontWeight:700,lineHeight:1,padding:'2px 4px'}}>✕</button>
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                               <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
-                                <div style={{flex:'1 1 220px'}}>
-                                  <label style={s.label}>{editandoProcId?'Editar procedimento':'Novo procedimento'}</label>
-                                  <input type="text" value={formProc.nome} onChange={e=>setFormProc(p=>({...p,nome:e.target.value}))} placeholder="Ex: Glicemia, Hemograma, Raio-X de Tórax..." style={s.input}/>
+                                <div style={{flex:'1 1 260px'}}>
+                                  <label style={s.label}>Associar procedimento já cadastrado</label>
+                                  <select value={procParaVincular} onChange={e=>setProcParaVincular(e.target.value)} style={s.input}>
+                                    <option value="">Selecione...</option>
+                                    {procedimentosDisponiveisPara(t.id).map(p=>(
+                                      <option key={p.id} value={p.id}>{p.nome}{p.valor_estimado?` — ${fmtBRL(p.valor_estimado)}`:''}</option>
+                                    ))}
+                                  </select>
+                                  {procedimentosDisponiveisPara(t.id).length===0&&procedimentos.length>0&&(
+                                    <div style={{fontSize:11,color:C.muted,marginTop:3}}>Todos os procedimentos ativos já estão associados a este tipo.</div>
+                                  )}
                                 </div>
-                                <div style={{width:160}}>
-                                  <label style={s.label}>Valor (R$)</label>
-                                  <input type="text" value={formProc.valor_estimado} onChange={e=>setFormProc(p=>({...p,valor_estimado:e.target.value}))} placeholder="Opcional" style={s.input}/>
-                                </div>
-                                <button onClick={()=>salvarProcedimento(t.id)} style={s.btn}>{editandoProcId?'💾 Salvar':'➕ Adicionar'}</button>
-                                {editandoProcId&&<button onClick={cancelarEdicaoProcedimento} style={s.btnOutline}>Cancelar</button>}
+                                <button onClick={()=>vincularProcedimento(t.id,procParaVincular)} style={s.btn} disabled={!procParaVincular}>➕ Associar</button>
                               </div>
+                              {procedimentos.length===0&&(
+                                <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:12}}>
+                                  Nenhum procedimento cadastrado ainda. Vá na aba <strong>🧪 Procedimentos</strong> para criar o catálogo primeiro.
+                                </div>
+                              )}
                             </td>
                           </tr>
                         )}
                         </React.Fragment>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ───── ABA PROCEDIMENTOS (catálogo reutilizável) ───── */}
+            {aba==='procedimentos'&&(
+              <div>
+                <div style={{...s.infoBox,marginBottom:16}}>
+                  🧪 Catálogo de exames clínicos e laboratoriais (Glicemia, ECG, Raio-X...). Cada procedimento pode ser associado a vários <strong>Tipos de Exame</strong> na aba ⚙️ Tipos.
+                </div>
+                <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+                  <button onClick={abrirNovoProcedimento} style={s.btn}>➕ Novo Procedimento</button>
+                </div>
+
+                {statusProc&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusProc.ok?'#DCFCE7':'#FEE2E2',color:statusProc.ok?'#166534':'#991B1B',fontSize:13}}>{statusProc.msg}</div>}
+
+                {mostrarFormProc&&(
+                  <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoProcId?'Editar Procedimento':'Novo Procedimento'}</div>
+                    <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:'0 20px'}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Nome do Procedimento *</label>
+                        <input type="text" value={formProc.nome} onChange={e=>setFormProc(p=>({...p,nome:e.target.value}))} placeholder="Ex: Glicemia, Hemograma, Raio-X de Tórax..." style={s.input} autoFocus/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor Estimado (R$)</label>
+                        <input type="text" value={formProc.valor_estimado} onChange={e=>setFormProc(p=>({...p,valor_estimado:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:10}}>
+                      <button onClick={salvarProcedimento} style={s.btn}>💾 Salvar</button>
+                      <button onClick={()=>setMostrarFormProc(false)} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead><tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Procedimento</th><th style={{...s.th,textAlign:'right'}}>Valor Estimado</th>
+                      <th style={{...s.th,textAlign:'center'}}>Usado em</th><th style={{...s.th,textAlign:'center'}}>Status</th><th style={{...s.th,textAlign:'right'}}>Ações</th>
+                    </tr></thead>
+                    <tbody>
+                      {loadingProc?(
+                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Carregando...</td></tr>
+                      ):procedimentos.length===0?(
+                        <tr><td colSpan={5} style={{textAlign:'center',padding:32,color:C.muted}}>Nenhum procedimento cadastrado ainda.</td></tr>
+                      ):procedimentos.map(p=>{
+                        const qtdTipos = vinculos.filter(v=>String(v.procedimento_id)===String(p.id)).length;
+                        return (
+                          <tr key={p.id} style={{borderTop:'1px solid '+C.border,opacity:p.ativo?1:0.55}}>
+                            <td style={{...s.td,fontWeight:600}}>{p.nome}</td>
+                            <td style={{...s.td,textAlign:'right'}}>{p.valor_estimado?fmtBRL(p.valor_estimado):'—'}</td>
+                            <td style={{...s.td,textAlign:'center',fontSize:12,color:C.muted}}>{qtdTipos>0?`${qtdTipos} tipo${qtdTipos!==1?'s':''}`:'—'}</td>
+                            <td style={{...s.td,textAlign:'center'}}>
+                              <span style={{background:p.ativo?'#DCFCE7':'#F1F5F9',color:p.ativo?'#166534':'#64748B',padding:'2px 10px',borderRadius:10,fontSize:11,fontWeight:700}}>{p.ativo?'Ativo':'Pausado'}</span>
+                            </td>
+                            <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                              <button onClick={()=>abrirEdicaoProcedimento(p)} style={{...s.btnOutline,fontSize:11,padding:'3px 9px',marginRight:6}}>✏️</button>
+                              <button onClick={()=>toggleAtivoProcedimento(p)} style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginRight:6}}>{p.ativo?'Pausar':'Ativar'}</button>
+                              <button onClick={()=>excluirProcedimento(p)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer'}}>🗑</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
