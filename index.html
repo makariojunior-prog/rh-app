@@ -280,9 +280,16 @@
               nome:f.nome, setor:getSetor(f.nome),
               inicio:f.gozo_inicio||'', fim:f.gozo_fim||'', tipo:'ferias'
             }));
+            // Retorno é o dia SEGUINTE ao término (o dia do término ainda é de afastamento/férias).
+            const ehRetornoHoje = fimISO => {
+              if(!fimISO) return false;
+              const d = new Date(fimISO+'T12:00:00');
+              d.setDate(d.getDate()+1);
+              return toISO(d)===today;
+            };
             const retornandoHoje = [
-              ...atestados.filter(a=>a.fim===today),
-              ...ferias.filter(f=>f.fim===today)
+              ...atestados.filter(a=>ehRetornoHoje(a.fim)),
+              ...ferias.filter(f=>ehRetornoHoje(f.fim))
             ];
             const ativosHoje = [
               ...atestados.filter(a=>a.inicio<=today&&a.fim>=today),
@@ -1191,6 +1198,14 @@
       }
 
       function ColaboradoresPage({ empresaId, setColabAPI }) {
+        // Catálogo centralizado de funções (cadastro em 🧩 Funções) — usado como
+        // dropdown aqui em vez de texto livre, para manter os dados consistentes.
+        const [funcoesCat, setFuncoesCat] = useState([]);
+        useEffect(()=>{
+          if(!empresaId) return;
+          _supa.from('funcoes').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('nome')
+            .then(({data})=>setFuncoesCat(data||[])).catch(()=>setFuncoesCat([]));
+        },[empresaId]);
         const [lista, setLista] = useState([]);
         const [listaDesligados, setListaDesligados] = useState([]);
         const [mostrarDesligados, setMostrarDesligados] = useState(false);
@@ -1646,7 +1661,21 @@
             <div style={s.card}>
               <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Cargo e Período</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
-                <CampoForm label="Função" campo="funcao" placeholder="Ex: Auxiliar de Cozinha" form={form} setForm={setForm}/>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Função</label>
+                  <select value={form.funcao||''} onChange={e=>{
+                    const nome = e.target.value;
+                    const f = funcoesCat.find(x=>x.nome===nome);
+                    setForm(p=>({...p, funcao:nome, setor: (f?.setor_padrao && !p.setor) ? f.setor_padrao : p.setor}));
+                  }} style={s.input}>
+                    <option value="">Selecione...</option>
+                    {funcoesCat.map(f=>(<option key={f.id} value={f.nome}>{f.nome}</option>))}
+                    {form.funcao && !funcoesCat.some(f=>f.nome===form.funcao) && (
+                      <option value={form.funcao}>{form.funcao} (fora do catálogo)</option>
+                    )}
+                  </select>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 🧩 Funções, no menu lateral.</div>
+                </div>
                 <CampoForm label="Setor" campo="setor" placeholder="Ex: Produção" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Admissão" campo="admissao" type="date" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Encerramento" campo="encerramento" type="date" form={form} setForm={setForm} hint={form.encerramento?"⚠️ Preencher esta data torna o colaborador inativo":undefined}/>
@@ -2047,6 +2076,7 @@
         const TODAS_PAGINAS = [
           {k:'dashboard',    l:'🏠 Início'},
           {k:'colaboradores',l:'👥 Colaboradores'},
+          {k:'funcoes',      l:'🧩 Funções'},
           {k:'vt',           l:'🚌 Vale Transporte'},
           {k:'folha',        l:'💼 Folha de Pagamento'},
           {k:'ponto',        l:'📋 Banco de Ponto'},
@@ -4432,6 +4462,314 @@
       }
 
       // ============================================================
+      // MÓDULO FUNÇÕES (CARGOS) — cadastro centralizado
+      // ============================================================
+      function FuncoesPage({ colabAPI, empresaId }) {
+        const [funcoes, setFuncoes] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const VAZIO = {
+          nome:'', setor_padrao:'', cbo_codigo:'', cbo_titulo:'', nivel:'operacional',
+          descricao:'', atribuicoes:'', requisitos:'',
+          faixa_salarial_min:'', faixa_salarial_max:'', periculosidade_padrao:false
+        };
+        const [form, setForm] = React.useState(VAZIO);
+        const [mostrarForm, setMostrarForm] = React.useState(false);
+        const [editandoId, setEditandoId] = React.useState(null);
+        const [status, setStatus] = React.useState(null);
+        const [funcaoSel, setFuncaoSel] = React.useState(null);
+        const [busca, setBusca] = React.useState('');
+
+        // ── Mesclar funções (para o usuário unificar variações que ele confirmar serem o mesmo cargo) ──
+        const [mostrarMesclar, setMostrarMesclar] = React.useState(false);
+        const [mesclarOrigem, setMesclarOrigem] = React.useState('');
+        const [mesclarDestino, setMesclarDestino] = React.useState('');
+        const [mesclando, setMesclando] = React.useState(false);
+
+        const NIVEIS = {operacional:'Operacional', tecnico:'Técnico', supervisao:'Supervisão', gerencia:'Gerência'};
+
+        const carregar = async () => {
+          setLoading(true);
+          const {data} = await _supa.from('funcoes').select('*').eq('empresa_id',empresaId).order('nome');
+          setFuncoes(data||[]);
+          setLoading(false);
+        };
+        React.useEffect(()=>{ if(empresaId) carregar(); },[empresaId]);
+
+        const contagemPorFuncao = React.useMemo(()=>{
+          const m = {};
+          (colabAPI||[]).forEach(c=>{ const f=(c.funcao||'').trim(); if(!f) return; m[f]=(m[f]||0)+1; });
+          return m;
+        },[colabAPI]);
+
+        const abrirNovo = () => { setForm(VAZIO); setEditandoId(null); setMostrarForm(true); setStatus(null); };
+        const abrirEdicao = (f) => {
+          setForm({
+            nome:f.nome||'', setor_padrao:f.setor_padrao||'', cbo_codigo:f.cbo_codigo||'', cbo_titulo:f.cbo_titulo||'',
+            nivel:f.nivel||'operacional', descricao:f.descricao||'', atribuicoes:f.atribuicoes||'', requisitos:f.requisitos||'',
+            faixa_salarial_min:f.faixa_salarial_min!=null?String(f.faixa_salarial_min).replace('.',','):'',
+            faixa_salarial_max:f.faixa_salarial_max!=null?String(f.faixa_salarial_max).replace('.',','):'',
+            periculosidade_padrao:!!f.periculosidade_padrao
+          });
+          setEditandoId(f.id); setMostrarForm(true); setStatus(null);
+        };
+
+        const salvar = async () => {
+          if(!form.nome.trim()){ setStatus({ok:false,msg:'Nome é obrigatório.'}); return; }
+          const payload = {
+            empresa_id: empresaId,
+            nome: form.nome.trim(),
+            setor_padrao: form.setor_padrao?.trim()||null,
+            cbo_codigo: form.cbo_codigo?.trim()||null,
+            cbo_titulo: form.cbo_titulo?.trim()||null,
+            nivel: form.nivel||null,
+            descricao: form.descricao?.trim()||null,
+            atribuicoes: form.atribuicoes?.trim()||null,
+            requisitos: form.requisitos?.trim()||null,
+            faixa_salarial_min: String(form.faixa_salarial_min||'').trim() ? (parseFloat(String(form.faixa_salarial_min).replace(',','.'))||null) : null,
+            faixa_salarial_max: String(form.faixa_salarial_max||'').trim() ? (parseFloat(String(form.faixa_salarial_max).replace(',','.'))||null) : null,
+            periculosidade_padrao: !!form.periculosidade_padrao,
+            atualizado_em: new Date().toISOString(),
+          };
+          let error;
+          if(editandoId){
+            ({error} = await _supa.from('funcoes').update(payload).eq('id',editandoId));
+          } else {
+            ({error} = await _supa.from('funcoes').insert({...payload, ativo:true, ordem:(funcoes.length+1)}));
+          }
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
+          else { setStatus({ok:true,msg:'✅ Função salva!'}); setMostrarForm(false); setForm(VAZIO); setEditandoId(null); carregar(); }
+        };
+
+        const toggleAtivo = async (f) => { await _supa.from('funcoes').update({ativo:!f.ativo}).eq('id',f.id); carregar(); };
+        const excluir = async (f) => {
+          const qtd = contagemPorFuncao[f.nome]||0;
+          const aviso = qtd>0 ? ` ${qtd} colaborador(es) usam esta função hoje — eles não serão alterados, mas a função some do catálogo.` : '';
+          if(!await confirmar(`Excluir a função "${f.nome}"?${aviso}`,'Excluir Função')) return;
+          await _supa.from('funcoes').delete().eq('id',f.id);
+          if(funcaoSel?.id===f.id) setFuncaoSel(null);
+          carregar();
+        };
+
+        const mesclarFuncoes = async () => {
+          if(!mesclarOrigem||!mesclarDestino||mesclarOrigem===mesclarDestino) return;
+          if(!await confirmar(`Todos os colaboradores com a função "${mesclarOrigem}" passarão a usar "${mesclarDestino}", e a função "${mesclarOrigem}" será excluída do catálogo. Confirma?`,'Mesclar Funções')) return;
+          setMesclando(true);
+          try {
+            await _supa.from('colaboradores').update({funcao:mesclarDestino}).eq('empresa_id',empresaId).eq('funcao',mesclarOrigem);
+            await _supa.from('exames_kit_funcao').update({funcao:mesclarDestino}).eq('empresa_id',empresaId).eq('funcao',mesclarOrigem);
+            const origemRow = funcoes.find(f=>f.nome===mesclarOrigem);
+            if(origemRow) await _supa.from('funcoes').delete().eq('id',origemRow.id);
+            setStatus({ok:true,msg:`✅ "${mesclarOrigem}" mesclada em "${mesclarDestino}".`});
+            setMostrarMesclar(false); setMesclarOrigem(''); setMesclarDestino('');
+            await carregar();
+          } catch(e){ setStatus({ok:false,msg:'❌ '+e.message}); }
+          setMesclando(false);
+        };
+
+        const funcoesFiltradas = funcoes.filter(f=>!busca||f.nome.toLowerCase().includes(busca.toLowerCase()));
+
+        return (
+          <div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🧩 Funções (Cargos)</div>
+                <div style={{fontSize:13,color:C.muted}}>Cadastro centralizado — usado em Colaboradores, Exames e demais módulos</div>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>setMostrarMesclar(p=>!p)} style={s.btnOutline}>🔀 Mesclar Funções</button>
+                <button onClick={abrirNovo} style={s.btn}>➕ Nova Função</button>
+              </div>
+            </div>
+
+            {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13}}>{status.msg}</div>}
+
+            {mostrarMesclar&&(
+              <div style={{...s.card,marginBottom:16,border:'1px solid '+C.acc}}>
+                <div style={{fontWeight:700,color:C.pri,marginBottom:6,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>🔀 Mesclar Funções</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+                  Use quando duas entradas do catálogo forem, na prática, o mesmo cargo (ex.: uma abreviação ou erro de digitação). Os colaboradores da função de origem passam para a de destino, e a origem é excluída.
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Função de origem (será excluída)</label>
+                    <select value={mesclarOrigem} onChange={e=>setMesclarOrigem(e.target.value)} style={s.input}>
+                      <option value="">Selecione...</option>
+                      {funcoes.map(f=>(<option key={f.id} value={f.nome}>{f.nome} {contagemPorFuncao[f.nome]?`(${contagemPorFuncao[f.nome]} colab.)`:''}</option>))}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Função de destino (permanece)</label>
+                    <select value={mesclarDestino} onChange={e=>setMesclarDestino(e.target.value)} style={s.input}>
+                      <option value="">Selecione...</option>
+                      {funcoes.filter(f=>f.nome!==mesclarOrigem).map(f=>(<option key={f.id} value={f.nome}>{f.nome}</option>))}
+                    </select>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button onClick={mesclarFuncoes} style={{...s.btn,background:C.acc}} disabled={!mesclarOrigem||!mesclarDestino||mesclando}>{mesclando?'Mesclando...':'🔀 Mesclar'}</button>
+                  <button onClick={()=>setMostrarMesclar(false)} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            {mostrarForm&&(
+              <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoId?'Editar Função':'Nova Função'}</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Nome da Função *</label>
+                    <input type="text" value={form.nome} onChange={e=>setForm(p=>({...p,nome:e.target.value}))} placeholder="Ex: Auxiliar de Produção" style={s.input} autoFocus/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Setor padrão</label>
+                    <input type="text" value={form.setor_padrao} onChange={e=>setForm(p=>({...p,setor_padrao:e.target.value}))} placeholder="Ex: Produção" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Nível</label>
+                    <select value={form.nivel} onChange={e=>setForm(p=>({...p,nivel:e.target.value}))} style={s.input}>
+                      {Object.entries(NIVEIS).map(([k,l])=>(<option key={k} value={k}>{l}</option>))}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Código CBO</label>
+                    <input type="text" value={form.cbo_codigo} onChange={e=>setForm(p=>({...p,cbo_codigo:e.target.value}))} placeholder="Ex: 5211-05" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Título CBO</label>
+                    <input type="text" value={form.cbo_titulo} onChange={e=>setForm(p=>({...p,cbo_titulo:e.target.value}))} placeholder="Título oficial na CBO" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Faixa salarial — mínimo (R$)</label>
+                    <input type="text" value={form.faixa_salarial_min} onChange={e=>setForm(p=>({...p,faixa_salarial_min:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Faixa salarial — máximo (R$)</label>
+                    <input type="text" value={form.faixa_salarial_max} onChange={e=>setForm(p=>({...p,faixa_salarial_max:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14,display:'flex',alignItems:'flex-end'}}>
+                    <div style={{padding:'8px 12px',borderRadius:8,background:form.periculosidade_padrao?'#FEF9C3':'var(--c-subtle)',border:'1px solid '+(form.periculosidade_padrao?'#FCD34D':C.border),width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:13,fontWeight:600}}>Periculosidade por padrão?</span>
+                      <button type="button" onClick={()=>setForm(p=>({...p,periculosidade_padrao:!p.periculosidade_padrao}))}
+                        style={{padding:'4px 16px',borderRadius:20,fontSize:12,fontWeight:700,cursor:'pointer',border:'none',
+                          background:form.periculosidade_padrao?C.amber:'#E5E7EB',color:form.periculosidade_padrao?'#fff':'#6B7280'}}>
+                        {form.periculosidade_padrao?'✓ SIM':'NÃO'}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Missão / Descrição do cargo</label>
+                    <textarea value={form.descricao} onChange={e=>setForm(p=>({...p,descricao:e.target.value}))} rows={2} style={{...s.input,fontFamily:'inherit',resize:'vertical'}} placeholder="Resumo do propósito do cargo"/>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Atribuições (uma por linha)</label>
+                    <textarea value={form.atribuicoes} onChange={e=>setForm(p=>({...p,atribuicoes:e.target.value}))} rows={5} style={{...s.input,fontFamily:'inherit',resize:'vertical'}} placeholder={'Ex:\nOperar a linha de produção conforme POP\nRealizar controle de qualidade visual\nManter a área de trabalho higienizada'}/>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Requisitos (formação / experiência)</label>
+                    <textarea value={form.requisitos} onChange={e=>setForm(p=>({...p,requisitos:e.target.value}))} rows={2} style={{...s.input,fontFamily:'inherit',resize:'vertical'}} placeholder="Ex: Ensino fundamental completo, experiência não obrigatória"/>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button onClick={salvar} style={s.btn}>💾 Salvar</button>
+                  <button onClick={()=>setMostrarForm(false)} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:'grid',gridTemplateColumns:'320px 1fr',gap:16,alignItems:'start'}}>
+              <div style={{...s.card,padding:8}}>
+                <input type="text" value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar função..." style={{...s.inputSm,width:'100%',marginBottom:8}}/>
+                {loading?(
+                  <div style={{color:C.muted,fontSize:13,padding:12}}>Carregando...</div>
+                ):funcoesFiltradas.length===0?(
+                  <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhuma função encontrada.</div>
+                ):funcoesFiltradas.map(f=>{
+                  const sel = funcaoSel?.id===f.id;
+                  const qtd = contagemPorFuncao[f.nome]||0;
+                  return (
+                    <div key={f.id} onClick={()=>setFuncaoSel(f)} style={{padding:'9px 12px',borderRadius:7,cursor:'pointer',marginBottom:3,opacity:f.ativo?1:0.55,
+                      background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
+                      <div style={{fontWeight:sel?700:500,fontSize:13,color:sel?C.pri:C.text}}>{f.nome}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:1}}>{qtd} colaborador{qtd!==1?'es':''}{!f.ativo?' · pausada':''}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div>
+                {!funcaoSel?(
+                  <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>Selecione uma função à esquerda para ver os detalhes.</div>
+                ):(
+                  <div style={s.card}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,flexWrap:'wrap',gap:10}}>
+                      <div>
+                        <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{funcaoSel.nome}</div>
+                        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:6,fontSize:11,color:C.muted}}>
+                          {funcaoSel.setor_padrao&&<span>🏭 {funcaoSel.setor_padrao}</span>}
+                          {funcaoSel.nivel&&<span>📶 {NIVEIS[funcaoSel.nivel]||funcaoSel.nivel}</span>}
+                          {funcaoSel.cbo_codigo&&<span>🔖 CBO {funcaoSel.cbo_codigo}{funcaoSel.cbo_titulo?' — '+funcaoSel.cbo_titulo:''}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:6}}>
+                        <button onClick={()=>abrirEdicao(funcaoSel)} style={{...s.btnOutline,fontSize:11,padding:'4px 10px'}}>✏️ Editar</button>
+                        <button onClick={()=>toggleAtivo(funcaoSel)} style={{background:'none',border:'1px solid '+C.border,color:C.muted,borderRadius:5,fontSize:11,padding:'4px 10px',cursor:'pointer'}}>{funcaoSel.ativo?'Pausar':'Ativar'}</button>
+                        <button onClick={()=>excluir(funcaoSel)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'4px 10px',cursor:'pointer'}}>🗑 Excluir</button>
+                      </div>
+                    </div>
+
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
+                      <div style={{...s.card,textAlign:'center',padding:12,background:'var(--c-subtle)'}}>
+                        <div style={{fontSize:20,fontWeight:800,color:C.pri}}>{contagemPorFuncao[funcaoSel.nome]||0}</div>
+                        <div style={{fontSize:10,color:C.muted}}>Colaboradores hoje</div>
+                      </div>
+                      <div style={{...s.card,textAlign:'center',padding:12,background:'var(--c-subtle)',gridColumn:'span 2'}}>
+                        <div style={{fontSize:15,fontWeight:800,color:C.pri}}>
+                          {(funcaoSel.faixa_salarial_min||funcaoSel.faixa_salarial_max)
+                            ? `${funcaoSel.faixa_salarial_min?fmtBRL(funcaoSel.faixa_salarial_min):'—'} a ${funcaoSel.faixa_salarial_max?fmtBRL(funcaoSel.faixa_salarial_max):'—'}`
+                            : '—'}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted}}>Faixa salarial de referência</div>
+                      </div>
+                    </div>
+
+                    {funcaoSel.periculosidade_padrao&&(
+                      <div style={{...s.warnBox,marginBottom:14}}>⚠️ Colaboradores nesta função normalmente recebem adicional de periculosidade.</div>
+                    )}
+
+                    {funcaoSel.descricao&&(
+                      <div style={{marginBottom:16}}>
+                        <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Missão do cargo</div>
+                        <div style={{fontSize:13,lineHeight:1.6}}>{funcaoSel.descricao}</div>
+                      </div>
+                    )}
+
+                    {funcaoSel.atribuicoes&&(
+                      <div style={{marginBottom:16}}>
+                        <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Atribuições</div>
+                        <ul style={{paddingLeft:20,fontSize:13,lineHeight:1.9}}>
+                          {funcaoSel.atribuicoes.split('\n').map(l=>l.trim()).filter(Boolean).map((l,i)=>(<li key={i}>{l}</li>))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {funcaoSel.requisitos&&(
+                      <div style={{marginBottom:4}}>
+                        <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Requisitos</div>
+                        <div style={{fontSize:13,lineHeight:1.6}}>{funcaoSel.requisitos}</div>
+                      </div>
+                    )}
+
+                    {!funcaoSel.descricao&&!funcaoSel.atribuicoes&&!funcaoSel.requisitos&&(
+                      <div style={{color:C.muted,fontSize:13,textAlign:'center',padding:'16px 0'}}>Nenhum detalhe cadastrado ainda. Clique em "✏️ Editar" para completar.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
       // MÓDULO EXAMES OCUPACIONAIS
       // ============================================================
       function ExamesPage({ colabAPI, empresaId }) {
@@ -4633,13 +4971,31 @@
           setFormReg(p=>({...p, dataRealizacao:dataISO, dataVencimento: calcVencimento(dataISO, tipo)}));
         };
 
+        // ── Procedimentos avulsos: independentes do Tipo. O mesmo Tipo (ex.: Admissional)
+        // pode exigir procedimentos diferentes conforme a função do colaborador — aqui é
+        // possível adicionar qualquer procedimento do catálogo, além dos ligados ao Tipo. ──
+        const [procsAvulsosSelecionados, setProcsAvulsosSelecionados] = React.useState([]);
+        const [procAvulsoParaAdicionar, setProcAvulsoParaAdicionar] = React.useState('');
+        const procedimentosAvulsosDisponiveis = React.useMemo(()=>{
+          const ligadosAoTipo = new Set((procedimentosPorTipo[formReg.tipoExameId]||[]).map(p=>String(p.id)));
+          return procedimentos.filter(p=>p.ativo && !ligadosAoTipo.has(String(p.id)) && !procsAvulsosSelecionados.includes(p.id));
+        },[procedimentos, procedimentosPorTipo, formReg.tipoExameId, procsAvulsosSelecionados]);
+        const adicionarProcAvulso = () => {
+          if(!procAvulsoParaAdicionar) return;
+          setProcsAvulsosSelecionados(p=>[...p, procAvulsoParaAdicionar]);
+          setProcAvulsoParaAdicionar('');
+        };
+        const removerProcAvulso = (id) => setProcsAvulsosSelecionados(p=>p.filter(x=>x!==id));
+
         const salvarRegistro = async () => {
           if(!formReg.colaboradorNome||!formReg.tipoExameId||!formReg.dataRealizacao){
             setStatusReg({ok:false,msg:'Preencha colaborador, tipo de exame e data.'}); return;
           }
           const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
           const colab = colabAPI.find(c=>c.nome===formReg.colaboradorNome);
-          const procsFeitos = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
+          const procsDoTipo = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
+          const procsAvulsos = procedimentos.filter(p=>procsAvulsosSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome, avulso:true}));
+          const procsFeitos = [...procsDoTipo, ...procsAvulsos];
           const novoId = crypto.randomUUID();
 
           // Anexo do ASO vai para bucket PRIVADO (dado de saúde). Falha no upload não
@@ -4673,7 +5029,7 @@
           if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); }
           else {
             setStatusReg({ok:true,msg:'✅ Exame registrado!'+avisoAnexo});
-            setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); setAnexoFile(null);
+            setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); setProcsAvulsosSelecionados([]); setProcAvulsoParaAdicionar(''); setAnexoFile(null);
             carregarRegistros();
             // Se havia convocação agendada para este colaborador/exame, marca como realizada.
             const ag = agendamentos.find(a=>a.colaborador_nome===formReg.colaboradorNome && String(a.tipo_exame_id)===String(formReg.tipoExameId));
@@ -4737,9 +5093,15 @@
         };
         React.useEffect(()=>{ carregarKits(); },[empresaId]);
 
-        const funcoes = React.useMemo(()=>
-          [...new Set((colabAPI||[]).map(c=>(c.funcao||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'))
-        ,[colabAPI]);
+        // Lista de funções vem do catálogo centralizado (módulo 🧩 Funções), não mais
+        // de valores livres em colabAPI — garante nomes consistentes com o resto do app.
+        const [funcoesCatalogo, setFuncoesCatalogo] = React.useState([]);
+        React.useEffect(()=>{
+          if(!empresaId) return;
+          _supa.from('funcoes').select('nome').eq('empresa_id',empresaId).eq('ativo',true).order('nome')
+            .then(({data})=>setFuncoesCatalogo((data||[]).map(f=>f.nome))).catch(()=>setFuncoesCatalogo([]));
+        },[empresaId]);
+        const funcoes = funcoesCatalogo;
         const kitDaFuncao = (f) => (kits||[]).filter(k=>k.funcao===f);
         const funcaoExigeTipo = (f, tipoId) => (kits||[]).some(k=>k.funcao===f && String(k.tipo_exame_id)===String(tipoId));
 
@@ -5153,7 +5515,7 @@
                       </div>
                       {(procedimentosPorTipo[formReg.tipoExameId]||[]).length>0&&(
                         <div style={{marginBottom:14,gridColumn:'1/-1'}}>
-                          <label style={s.label}>Procedimentos realizados</label>
+                          <label style={s.label}>Procedimentos do tipo "{tipos.find(t=>t.id===formReg.tipoExameId)?.nome}"</label>
                           <div style={{display:'flex',flexWrap:'wrap',gap:'6px 18px',padding:'10px 12px',background:'var(--c-subtle)',borderRadius:8}}>
                             {(procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>p.ativo).map(p=>(
                               <label key={p.id} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,cursor:'pointer'}}>
@@ -5161,6 +5523,32 @@
                                 {p.nome}
                               </label>
                             ))}
+                          </div>
+                        </div>
+                      )}
+                      {formReg.tipoExameId&&(
+                        <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                          <label style={s.label}>Procedimentos avulsos (independentes do tipo — ex: variam conforme a função)</label>
+                          {procsAvulsosSelecionados.length>0&&(
+                            <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:8}}>
+                              {procsAvulsosSelecionados.map(id=>{
+                                const p = procedimentos.find(x=>String(x.id)===String(id));
+                                if(!p) return null;
+                                return (
+                                  <span key={id} style={{display:'inline-flex',alignItems:'center',gap:6,background:'#EDE9FE',border:'1px solid #C4B5FD',borderRadius:20,padding:'4px 6px 4px 12px',fontSize:12}}>
+                                    {p.nome}
+                                    <button type="button" onClick={()=>removerProcAvulso(id)} style={{background:'none',border:'none',color:'#7C3AED',cursor:'pointer',fontSize:13,fontWeight:700,lineHeight:1,padding:'2px 4px'}}>✕</button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div style={{display:'flex',gap:8}}>
+                            <select value={procAvulsoParaAdicionar} onChange={e=>setProcAvulsoParaAdicionar(e.target.value)} style={s.input}>
+                              <option value="">Selecione um procedimento do catálogo...</option>
+                              {procedimentosAvulsosDisponiveis.map(p=>(<option key={p.id} value={p.id}>{p.nome}{p.valor_estimado?` — ${fmtBRL(p.valor_estimado)}`:''}</option>))}
+                            </select>
+                            <button type="button" onClick={adicionarProcAvulso} style={s.btnOutline} disabled={!procAvulsoParaAdicionar}>➕ Adicionar</button>
                           </div>
                         </div>
                       )}
@@ -9144,12 +9532,13 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','funcoes','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
         {k:'dashboard',l:'🏠 Início'},
         {k:'colaboradores',l:'👥 Colaboradores'},
+        {k:'funcoes',l:'🧩 Funções'},
         {k:'vt',l:'🚌 Vale Transporte'},
         {k:'folha',l:'💼 Folha de Pagto'},
         {k:'orcamento',l:'📊 Orçamento Folha'},
@@ -9209,6 +9598,7 @@
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="exames"&&<ExamesPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="funcoes"&&<FuncoesPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
               {page==="relatorios"&&<RelatoriosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
