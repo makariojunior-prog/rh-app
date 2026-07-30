@@ -4942,6 +4942,7 @@
         const [filtroColabReg, setFiltroColabReg] = React.useState('');
         const [filtroTipoReg, setFiltroTipoReg] = React.useState('');
         const [procsSelecionados, setProcsSelecionados] = React.useState([]);
+        const [editandoRegId, setEditandoRegId] = React.useState(null);
 
         const carregarRegistros = async () => {
           setLoadingReg(true);
@@ -4987,6 +4988,19 @@
         };
         const removerProcAvulso = (id) => setProcsAvulsosSelecionados(p=>p.filter(x=>x!==id));
 
+        const abrirEdicaoReg = (r) => {
+          setFormReg({
+            colaboradorNome: r.colaborador_nome||'', tipoExameId: r.tipo_exame_id||'',
+            dataRealizacao: r.data_realizacao||hoje, dataVencimento: r.data_vencimento||'',
+            valor: r.valor!=null?String(r.valor).replace('.',','):'', obs: r.obs||'', prestador: r.prestador||'',
+          });
+          const procs = r.procedimentos||[];
+          setProcsSelecionados(procs.filter(p=>!p.avulso).map(p=>p.id));
+          setProcsAvulsosSelecionados(procs.filter(p=>p.avulso).map(p=>p.id));
+          setProcAvulsoParaAdicionar(''); setAnexoFile(null);
+          setEditandoRegId(r.id); setMostrarFormReg(true); setStatusReg(null);
+        };
+
         const salvarRegistro = async () => {
           if(!formReg.colaboradorNome||!formReg.tipoExameId||!formReg.dataRealizacao){
             setStatusReg({ok:false,msg:'Preencha colaborador, tipo de exame e data.'}); return;
@@ -4996,11 +5010,13 @@
           const procsDoTipo = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
           const procsAvulsos = procedimentos.filter(p=>procsAvulsosSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome, avulso:true}));
           const procsFeitos = [...procsDoTipo, ...procsAvulsos];
-          const novoId = crypto.randomUUID();
+          const novoId = editandoRegId || crypto.randomUUID();
 
           // Anexo do ASO vai para bucket PRIVADO (dado de saúde). Falha no upload não
-          // impede o registro do exame — avisa e segue sem anexo.
-          let anexoPath = null, avisoAnexo = '';
+          // impede o registro do exame — avisa e segue sem anexo. Ao editar, só sobe um
+          // anexo novo se o usuário escolher outro arquivo; senão mantém o já salvo.
+          const registroAtual = editandoRegId ? registros.find(x=>x.id===editandoRegId) : null;
+          let anexoPath = registroAtual?.anexo_path || null, avisoAnexo = '';
           if(anexoFile){
             setSubindoAnexo(true);
             const ext = (anexoFile.name.split('.').pop()||'pdf').toLowerCase();
@@ -5011,8 +5027,7 @@
             else anexoPath = path;
           }
 
-          const {error} = await _supa.from('colaborador_exames').insert({
-            id: novoId,
+          const payload = {
             empresa_id: empresaId,
             colaborador_id: colab?.id_supa || null,
             colaborador_nome: formReg.colaboradorNome.trim(),
@@ -5025,11 +5040,14 @@
             procedimentos: procsFeitos.length ? procsFeitos : null,
             prestador: formReg.prestador?.trim()||null,
             anexo_path: anexoPath,
-          });
+          };
+          const {error} = editandoRegId
+            ? await _supa.from('colaborador_exames').update(payload).eq('id',editandoRegId)
+            : await _supa.from('colaborador_exames').insert({id: novoId, ...payload});
           if(error){ setStatusReg({ok:false,msg:'❌ '+error.message}); }
           else {
-            setStatusReg({ok:true,msg:'✅ Exame registrado!'+avisoAnexo});
-            setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); setProcsAvulsosSelecionados([]); setProcAvulsoParaAdicionar(''); setAnexoFile(null);
+            setStatusReg({ok:true,msg: editandoRegId ? '✅ Registro atualizado!'+avisoAnexo : '✅ Exame registrado!'+avisoAnexo});
+            setMostrarFormReg(false); setFormReg(VAZIO_REG); setProcsSelecionados([]); setProcsAvulsosSelecionados([]); setProcAvulsoParaAdicionar(''); setAnexoFile(null); setEditandoRegId(null);
             carregarRegistros();
             // Se havia convocação agendada para este colaborador/exame, marca como realizada.
             const ag = agendamentos.find(a=>a.colaborador_nome===formReg.colaboradorNome && String(a.tipo_exame_id)===String(formReg.tipoExameId));
@@ -5145,6 +5163,27 @@
           (!filtroColabReg||r.colaborador_nome===filtroColabReg) &&
           (!filtroTipoReg||r.tipo_exame_id===filtroTipoReg)
         );
+
+        // ── Totais de gasto (respeitam os filtros de colaborador/tipo acima) ──
+        const [mostrarPorMes, setMostrarPorMes] = React.useState(false);
+        const custoTotalRegistros = React.useMemo(()=>
+          registrosFiltrados.reduce((s,r)=>s+(Number(r.valor)||0),0)
+        ,[registrosFiltrados]);
+        const mesAtualChave = hoje.slice(0,7);
+        const mesAtualLabel = MESES_FULL[Number(mesAtualChave.slice(5,7))-1]+'/'+mesAtualChave.slice(0,4);
+        const custoMesAtualRegistros = React.useMemo(()=>
+          registrosFiltrados.filter(r=>r.data_realizacao && r.data_realizacao.slice(0,7)===mesAtualChave).reduce((s,r)=>s+(Number(r.valor)||0),0)
+        ,[registrosFiltrados,mesAtualChave]);
+        const custoPorMes = React.useMemo(()=>{
+          const m = {};
+          registrosFiltrados.forEach(r=>{
+            if(!r.data_realizacao) return;
+            const chave = r.data_realizacao.slice(0,7);
+            m[chave] = (m[chave]||0) + (Number(r.valor)||0);
+          });
+          return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0]))
+            .map(([chave,total])=>({chave, total, label: MESES_FULL[Number(chave.slice(5,7))-1]+'/'+chave.slice(0,4)}));
+        },[registrosFiltrados]);
 
         const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
 
@@ -5454,7 +5493,7 @@
                       {tipos.map(t=>(<option key={t.id} value={t.id}>{t.nome}</option>))}
                     </select>
                   </div>
-                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);setProcsSelecionados([]);setAnexoFile(null);}} style={s.btn}>➕ Registrar Exame</button>
+                  <button onClick={()=>{setMostrarFormReg(true);setFormReg(VAZIO_REG);setStatusReg(null);setProcsSelecionados([]);setProcsAvulsosSelecionados([]);setProcAvulsoParaAdicionar('');setAnexoFile(null);setEditandoRegId(null);}} style={s.btn}>➕ Registrar Exame</button>
                 </div>
 
                 {statusReg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:statusReg.ok?'#DCFCE7':'#FEE2E2',color:statusReg.ok?'#166534':'#991B1B',fontSize:13}}>{statusReg.msg}</div>}
@@ -5471,7 +5510,7 @@
 
                 {mostrarFormReg&&(
                   <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
-                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>Registrar Exame Realizado</div>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoRegId?'Editar Exame Registrado':'Registrar Exame Realizado'}</div>
                     <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 20px'}}>
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Colaborador *</label>
@@ -5554,9 +5593,43 @@
                       )}
                     </div>
                     <div style={{display:'flex',gap:10}}>
-                      <button onClick={salvarRegistro} style={s.btn} disabled={subindoAnexo}>{subindoAnexo?'Enviando anexo...':'💾 Salvar'}</button>
-                      <button onClick={()=>{setMostrarFormReg(false);setAnexoFile(null);}} style={s.btnOutline}>Cancelar</button>
+                      <button onClick={salvarRegistro} style={s.btn} disabled={subindoAnexo}>{subindoAnexo?'Enviando anexo...':(editandoRegId?'💾 Salvar alterações':'💾 Salvar')}</button>
+                      <button onClick={()=>{setMostrarFormReg(false);setAnexoFile(null);setEditandoRegId(null);}} style={s.btnOutline}>Cancelar</button>
                     </div>
+                  </div>
+                )}
+
+                <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12,marginBottom:16}}>
+                  <div style={{...s.card,textAlign:'center',padding:14}}>
+                    <div style={{fontSize:22,fontWeight:800,color:C.pri}}>{fmtBRL(custoTotalRegistros)}</div>
+                    <div style={{fontSize:11,color:C.muted}}>Total gasto {filtroColabReg||filtroTipoReg?'(com o filtro atual)':'em exames'}</div>
+                  </div>
+                  <div style={{...s.card,textAlign:'center',padding:14}}>
+                    <div style={{fontSize:22,fontWeight:800,color:C.pri}}>{fmtBRL(custoMesAtualRegistros)}</div>
+                    <div style={{fontSize:11,color:C.muted}}>Gasto em {mesAtualLabel}</div>
+                  </div>
+                </div>
+
+                {custoPorMes.length>0&&(
+                  <div style={{...s.card,marginBottom:16}}>
+                    <div onClick={()=>setMostrarPorMes(p=>!p)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+                      <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>📅 Gasto por mês</div>
+                      <span style={{fontSize:12,color:C.muted}}>{mostrarPorMes?'▲ Ocultar':'▼ Mostrar'}</span>
+                    </div>
+                    {mostrarPorMes&&(
+                      <div style={{marginTop:12,maxHeight:260,overflowY:'auto'}}>
+                        <table style={{width:'100%',borderCollapse:'collapse'}}>
+                          <tbody>
+                            {custoPorMes.map(m=>(
+                              <tr key={m.chave} style={{borderTop:'1px solid '+C.border}}>
+                                <td style={{...s.td,fontSize:13}}>{m.label}</td>
+                                <td style={{...s.td,fontSize:13,textAlign:'right',fontWeight:600}}>{fmtBRL(m.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -5613,7 +5686,8 @@
                                 );
                               })()}
                             </td>
-                            <td style={{...s.td,textAlign:'right'}}>
+                            <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                              <button onClick={()=>abrirEdicaoReg(r)} style={{background:'none',border:'1px solid '+C.border,color:C.pri,borderRadius:4,fontSize:11,padding:'3px 8px',cursor:'pointer',marginRight:6}}>✏️ Editar</button>
                               <button onClick={()=>excluirRegistro(r)} style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:4,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>✕</button>
                             </td>
                           </tr>
