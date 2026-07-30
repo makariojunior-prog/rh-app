@@ -4774,6 +4774,7 @@
       // ============================================================
       function ExamesPage({ colabAPI, empresaId }) {
         const hoje = new Date().toISOString().slice(0,10);
+        const MESES_FULL = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
         const [aba, setAba] = React.useState('vencidos');
 
         // ── Tipos de exame ──
