@@ -2085,6 +2085,7 @@
           {k:'adiantamentos',l:'💵 Antecipações'},
           {k:'compras',      l:'🛍️ Compras'},
           {k:'exames',       l:'🩺 Exames'},
+          {k:'normas',       l:'📕 Normas & NRs'},
           {k:'recrutamento', l:'🧑‍💼 Recrutamento'},
           {k:'orcamento',    l:'📊 Orçamento Folha'},
           {k:'relatorios',   l:'📈 Relatórios'},
@@ -4770,6 +4771,311 @@
       }
 
       // ============================================================
+      // MÓDULO NORMAS & NRs — biblioteca de normas regulamentadoras e
+      // demais obrigações legais, com leitura por parágrafo e destaques
+      // colaborativos. Independente de Exames (usa suas próprias tabelas
+      // normas_sst / normas_destaques).
+      // ============================================================
+      function NormasPage({ empresaId }) {
+        const [normas, setNormas] = React.useState([]);
+        const [loadingNormas, setLoadingNormas] = React.useState(false);
+        const [erroNormas, setErroNormas] = React.useState(null);
+        const [normaSel, setNormaSel] = React.useState(null);
+        const [destaques, setDestaques] = React.useState([]);
+        const [filtroNorma, setFiltroNorma] = React.useState('');
+        const [paragrafoAtivo, setParagrafoAtivo] = React.useState(null);
+        const [notaDestaque, setNotaDestaque] = React.useState('');
+        const [mostrarFormNorma, setMostrarFormNorma] = React.useState(false);
+        const VAZIO_NORMA = {codigo:'', titulo:'', orgao:'', categoria:'NR', prioridade:'media', aplicabilidade:'', resumo:'', texto:'', link_oficial:'', ultima_atualizacao:''};
+        const [formNorma, setFormNorma] = React.useState(VAZIO_NORMA);
+        const [editandoNormaId, setEditandoNormaId] = React.useState(null);
+
+        const TIPOS_DESTAQUE = {
+          critico:    {l:'Crítico',    ico:'🔴', bg:'#FEE2E2', bd:'#DC2626', c:'#991B1B'},
+          importante: {l:'Importante', ico:'🟡', bg:'#FEF9C3', bd:'#D4972A', c:'#92400E'},
+          prazo:      {l:'Prazo/Data', ico:'📅', bg:'#DBEAFE', bd:'#2563EB', c:'#1D4ED8'},
+          atencao:    {l:'Atenção',    ico:'🔵', bg:'#EDE9FE', bd:'#7C3AED', c:'#5B21B6'},
+        };
+
+        const carregarNormas = async () => {
+          if(!empresaId) return;
+          setLoadingNormas(true); setErroNormas(null);
+          const {data, error} = await _supa.from('normas_sst').select('*').eq('empresa_id',empresaId).order('ordem');
+          if(error){ setErroNormas(error.message); setNormas([]); }
+          else setNormas(data||[]);
+          const {data:dd} = await _supa.from('normas_destaques').select('*').eq('empresa_id',empresaId);
+          setDestaques(dd||[]);
+          setLoadingNormas(false);
+        };
+        React.useEffect(()=>{ carregarNormas(); },[empresaId]);
+
+        const paragrafosDaNorma = React.useMemo(()=>
+          String(normaSel?.texto||'').split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean)
+        ,[normaSel]);
+
+        const destaquesDaNorma = React.useMemo(()=>
+          destaques.filter(d=>String(d.norma_id)===String(normaSel?.id))
+        ,[destaques,normaSel]);
+        const destaqueDoParagrafo = (idx) => destaquesDaNorma.find(d=>d.paragrafo_idx===idx);
+
+        const marcarParagrafo = async (idx, tipo) => {
+          if(!normaSel) return;
+          const existente = destaqueDoParagrafo(idx);
+          // Clicar no mesmo tipo remove o destaque (toggle).
+          if(existente && existente.tipo===tipo && !notaDestaque.trim()){
+            await _supa.from('normas_destaques').delete().eq('id',existente.id);
+            setDestaques(p=>p.filter(d=>d.id!==existente.id));
+            setParagrafoAtivo(null); setNotaDestaque('');
+            return;
+          }
+          const {data:{session}} = await _supa.auth.getSession();
+          const row = {
+            empresa_id: empresaId, norma_id: String(normaSel.id), paragrafo_idx: idx,
+            trecho: (paragrafosDaNorma[idx]||'').slice(0,300),
+            tipo, nota: notaDestaque.trim()||null,
+            criado_por: session?.user?.email||'Desconhecido',
+          };
+          if(existente){
+            const {data,error} = await _supa.from('normas_destaques').update(row).eq('id',existente.id).select().single();
+            if(!error&&data) setDestaques(p=>p.map(d=>d.id===existente.id?data:d));
+          } else {
+            const {data,error} = await _supa.from('normas_destaques').insert(row).select().single();
+            if(!error&&data) setDestaques(p=>[...p,data]);
+          }
+          setParagrafoAtivo(null); setNotaDestaque('');
+        };
+
+        const salvarNorma = async () => {
+          if(!formNorma.codigo.trim()||!formNorma.titulo.trim()) return;
+          const payload = {...formNorma, empresa_id:empresaId};
+          let res;
+          if(editandoNormaId) res = await _supa.from('normas_sst').update(payload).eq('id',editandoNormaId).select().single();
+          else res = await _supa.from('normas_sst').insert({...payload, ativo:true, ordem:(normas.length+1)}).select().single();
+          if(res.error){ setErroNormas(res.error.message); return; }
+          setMostrarFormNorma(false); setEditandoNormaId(null); setFormNorma(VAZIO_NORMA);
+          await carregarNormas();
+          if(res.data) setNormaSel(res.data);
+        };
+
+        const normasFiltradas = normas.filter(n=>{
+          if(!filtroNorma) return true;
+          const q = filtroNorma.toLowerCase();
+          return (n.codigo||'').toLowerCase().includes(q) || (n.titulo||'').toLowerCase().includes(q) || (n.resumo||'').toLowerCase().includes(q);
+        });
+        const PRIOR = {critica:{l:'Crítica',bg:'#FEE2E2',c:'#991B1B'}, alta:{l:'Alta',bg:'#FEF9C3',c:'#92400E'}, media:{l:'Média',bg:'#F1F5F9',c:'#475569'}};
+
+        return (
+          <div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📕 Normas & NRs</div>
+              <div style={{fontSize:13,color:C.muted}}>Biblioteca de normas regulamentadoras e demais obrigações legais, com leitura por parágrafo e destaques</div>
+            </div>
+
+            {erroNormas&&(
+              <div style={{...s.warnBox,marginBottom:14}}>
+                ⚠️ Não foi possível carregar a biblioteca de normas: {erroNormas}
+                <div style={{fontSize:12,marginTop:6}}>Se esta é a primeira vez, rode o arquivo <strong>sql/2026-07-21_exames_tipos_aso_e_normas.sql</strong> no Supabase → SQL Editor para criar as tabelas e carregar as normas.</div>
+              </div>
+            )}
+
+            {mostrarFormNorma&&(
+              <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
+                <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoNormaId?'Editar Norma':'Nova Norma / Obrigação'}</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'0 20px'}}>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Código *</label>
+                    <input type="text" value={formNorma.codigo} onChange={e=>setFormNorma(p=>({...p,codigo:e.target.value}))} placeholder="Ex: NR-36" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Título *</label>
+                    <input type="text" value={formNorma.titulo} onChange={e=>setFormNorma(p=>({...p,titulo:e.target.value}))} placeholder="Nome da norma" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Órgão</label>
+                    <input type="text" value={formNorma.orgao} onChange={e=>setFormNorma(p=>({...p,orgao:e.target.value}))} placeholder="MTE, ANVISA..." style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                    <div>
+                      <label style={s.label}>Categoria</label>
+                      <select value={formNorma.categoria} onChange={e=>setFormNorma(p=>({...p,categoria:e.target.value}))} style={s.input}>
+                        <option value="NR">NR</option><option value="Sanitária">Sanitária</option>
+                        <option value="Lei">Lei</option><option value="eSocial">eSocial</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={s.label}>Prioridade</label>
+                      <select value={formNorma.prioridade} onChange={e=>setFormNorma(p=>({...p,prioridade:e.target.value}))} style={s.input}>
+                        <option value="critica">Crítica</option><option value="alta">Alta</option><option value="media">Média</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Resumo</label>
+                    <input type="text" value={formNorma.resumo} onChange={e=>setFormNorma(p=>({...p,resumo:e.target.value}))} placeholder="Uma frase sobre o que a norma exige" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Aplicabilidade</label>
+                    <input type="text" value={formNorma.aplicabilidade} onChange={e=>setFormNorma(p=>({...p,aplicabilidade:e.target.value}))} placeholder="A quem/o que se aplica" style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14,gridColumn:'1/-1'}}>
+                    <label style={s.label}>Texto (separe os parágrafos com uma linha em branco)</label>
+                    <textarea value={formNorma.texto} onChange={e=>setFormNorma(p=>({...p,texto:e.target.value}))} rows={10} style={{...s.input,fontFamily:'inherit',lineHeight:1.6,resize:'vertical'}} placeholder={'Primeiro parágrafo.\n\nSegundo parágrafo.'}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Link oficial</label>
+                    <input type="text" value={formNorma.link_oficial} onChange={e=>setFormNorma(p=>({...p,link_oficial:e.target.value}))} placeholder="https://..." style={s.input}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={s.label}>Última atualização</label>
+                    <input type="text" value={formNorma.ultima_atualizacao} onChange={e=>setFormNorma(p=>({...p,ultima_atualizacao:e.target.value}))} placeholder="Ex: Portaria X/2024 · vigente" style={s.input}/>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10}}>
+                  <button onClick={salvarNorma} style={s.btn}>💾 Salvar</button>
+                  <button onClick={()=>{setMostrarFormNorma(false);setEditandoNormaId(null);setFormNorma(VAZIO_NORMA);}} style={s.btnOutline}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:16,alignItems:'start'}}>
+              {/* Lista de normas */}
+              <div style={{...s.card,padding:10}}>
+                <div style={{display:'flex',gap:6,marginBottom:10}}>
+                  <input type="text" value={filtroNorma} onChange={e=>setFiltroNorma(e.target.value)} placeholder="Buscar norma..." style={{...s.inputSm,flex:1}}/>
+                  <button onClick={()=>{setFormNorma(VAZIO_NORMA);setEditandoNormaId(null);setMostrarFormNorma(true);}} style={{...s.btn,fontSize:11,padding:'4px 10px'}} title="Cadastrar nova norma">+</button>
+                </div>
+                {loadingNormas?(
+                  <div style={{color:C.muted,fontSize:13,padding:12}}>Carregando...</div>
+                ):normasFiltradas.length===0?(
+                  <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhuma norma cadastrada. Use o botão “+” ou rode o SQL de carga inicial.</div>
+                ):normasFiltradas.map(n=>{
+                  const pr = PRIOR[n.prioridade]||PRIOR.media;
+                  const qtdDest = destaques.filter(d=>String(d.norma_id)===String(n.id)).length;
+                  const sel = String(normaSel?.id)===String(n.id);
+                  return (
+                    <div key={n.id} onClick={()=>{setNormaSel(n);setParagrafoAtivo(null);}}
+                      style={{padding:'9px 11px',borderRadius:7,cursor:'pointer',marginBottom:4,
+                        background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6}}>
+                        <span style={{fontWeight:800,fontSize:12,color:C.pri}}>{n.codigo}</span>
+                        <span style={{background:pr.bg,color:pr.c,fontSize:9,fontWeight:700,padding:'1px 7px',borderRadius:10}}>{pr.l}</span>
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.35}}>{n.titulo}</div>
+                      {qtdDest>0&&<div style={{fontSize:10,color:C.acc,fontWeight:700,marginTop:3}}>✍️ {qtdDest} destaque{qtdDest!==1?'s':''}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Leitor */}
+              <div>
+                {!normaSel?(
+                  <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>
+                    <div style={{fontSize:32,marginBottom:8}}>📕</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Biblioteca de Normas e Obrigações</div>
+                    <div style={{fontSize:12}}>Selecione uma norma à esquerda para ler. Clique em qualquer parágrafo para destacar pontos críticos, prazos e observações.</div>
+                  </div>
+                ):(
+                  <div>
+                    <div style={{...s.card,marginBottom:14}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+                        <div style={{flex:1,minWidth:240}}>
+                          <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{normaSel.codigo} — {normaSel.titulo}</div>
+                          {normaSel.resumo&&<div style={{fontSize:13,color:C.text,marginTop:6,lineHeight:1.6}}>{normaSel.resumo}</div>}
+                          <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:10,fontSize:11,color:C.muted}}>
+                            {normaSel.orgao&&<span>🏛️ {normaSel.orgao}</span>}
+                            {normaSel.categoria&&<span>🗂️ {normaSel.categoria}</span>}
+                            {normaSel.ultima_atualizacao&&<span>🕒 {normaSel.ultima_atualizacao}</span>}
+                          </div>
+                          {normaSel.aplicabilidade&&(
+                            <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:12}}>👥 <strong>Aplica-se a:</strong> {normaSel.aplicabilidade}</div>
+                          )}
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
+                          <button onClick={()=>{setFormNorma({codigo:normaSel.codigo||'',titulo:normaSel.titulo||'',orgao:normaSel.orgao||'',categoria:normaSel.categoria||'NR',prioridade:normaSel.prioridade||'media',aplicabilidade:normaSel.aplicabilidade||'',resumo:normaSel.resumo||'',texto:normaSel.texto||'',link_oficial:normaSel.link_oficial||'',ultima_atualizacao:normaSel.ultima_atualizacao||''});setEditandoNormaId(normaSel.id);setMostrarFormNorma(true);}}
+                            style={{...s.btnOutline,fontSize:11,padding:'4px 10px'}}>✏️ Editar</button>
+                          {normaSel.link_oficial&&(
+                            <a href={normaSel.link_oficial} target="_blank" rel="noreferrer" style={{...s.btnOutline,fontSize:11,padding:'4px 10px',textDecoration:'none',textAlign:'center'}}>🔗 Texto oficial</a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Painel de destaques */}
+                    {destaquesDaNorma.length>0&&(
+                      <div style={{...s.card,marginBottom:14}}>
+                        <div style={s.cardTitle}>✍️ Seus destaques nesta norma</div>
+                        {destaquesDaNorma.slice().sort((a,b)=>a.paragrafo_idx-b.paragrafo_idx).map(d=>{
+                          const td = TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao;
+                          return (
+                            <div key={d.id} style={{borderLeft:'3px solid '+td.bd,background:td.bg,borderRadius:'0 7px 7px 0',padding:'8px 12px',marginBottom:6}}>
+                              <div style={{fontSize:10,fontWeight:800,color:td.c,marginBottom:3}}>{td.ico} {td.l} · parágrafo {d.paragrafo_idx+1}</div>
+                              <div style={{fontSize:12,color:C.text,lineHeight:1.5}}>{(d.trecho||'').slice(0,180)}{(d.trecho||'').length>180?'…':''}</div>
+                              {d.nota&&<div style={{fontSize:11,color:td.c,marginTop:4,fontStyle:'italic'}}>📝 {d.nota}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Texto */}
+                    <div style={s.card}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                        <div style={s.cardTitle}>📖 Texto</div>
+                        <div style={{fontSize:11,color:C.muted}}>Clique em um parágrafo para destacar</div>
+                      </div>
+                      {paragrafosDaNorma.length===0?(
+                        <div style={{color:C.muted,fontSize:13}}>Esta norma ainda não tem texto cadastrado. Use “✏️ Editar” para inserir.</div>
+                      ):paragrafosDaNorma.map((p,idx)=>{
+                        const d = destaqueDoParagrafo(idx);
+                        const td = d?(TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao):null;
+                        const ativo = paragrafoAtivo===idx;
+                        return (
+                          <div key={idx} style={{marginBottom:10}}>
+                            <div onClick={()=>{setParagrafoAtivo(ativo?null:idx);setNotaDestaque(d?.nota||'');}}
+                              style={{cursor:'pointer',padding:'9px 12px',borderRadius:7,lineHeight:1.75,fontSize:13.5,
+                                background:td?td.bg:(ativo?'var(--c-subtle)':'transparent'),
+                                borderLeft:td?('4px solid '+td.bd):(ativo?'4px solid '+C.acc:'4px solid transparent'),
+                                color:C.text,transition:'background .15s'}}>
+                              {td&&<span style={{fontSize:10,fontWeight:800,color:td.c,display:'block',marginBottom:3}}>{td.ico} {td.l}</span>}
+                              {p}
+                              {d?.nota&&<div style={{fontSize:11,color:td.c,marginTop:5,fontStyle:'italic'}}>📝 {d.nota}</div>}
+                            </div>
+                            {ativo&&(
+                              <div style={{border:'1px solid '+C.border,borderRadius:8,padding:'10px 12px',marginTop:6,background:'var(--c-subtle)'}}>
+                                <div style={{fontSize:11,color:C.muted,fontWeight:700,marginBottom:8}}>Marcar este parágrafo como:</div>
+                                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+                                  {Object.entries(TIPOS_DESTAQUE).map(([k,v])=>(
+                                    <button key={k} onClick={()=>marcarParagrafo(idx,k)}
+                                      style={{background:v.bg,color:v.c,border:'1.5px solid '+((d?.tipo===k)?v.bd:'transparent'),borderRadius:20,padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
+                                      {v.ico} {v.l}{d?.tipo===k?' ✓':''}
+                                    </button>
+                                  ))}
+                                </div>
+                                <input type="text" value={notaDestaque} onChange={e=>setNotaDestaque(e.target.value)}
+                                  placeholder="Nota (opcional): o que precisa ser feito, responsável, prazo..."
+                                  style={{...s.inputSm,width:'100%'}}/>
+                                {d&&(
+                                  <button onClick={async()=>{ await _supa.from('normas_destaques').delete().eq('id',d.id); setDestaques(pp=>pp.filter(x=>x.id!==d.id)); setParagrafoAtivo(null); setNotaDestaque(''); }}
+                                    style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginTop:8}}>
+                                    🗑 Remover destaque
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
       // MÓDULO EXAMES OCUPACIONAIS
       // ============================================================
       function ExamesPage({ colabAPI, empresaId }) {
@@ -5297,100 +5603,12 @@
         };
         const tabSt = (k) => ({padding:'8px 18px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted});
 
-        // ── Biblioteca de Normas (NRs e demais obrigações legais) ──
-        const [normas, setNormas] = React.useState([]);
-        const [loadingNormas, setLoadingNormas] = React.useState(false);
-        const [erroNormas, setErroNormas] = React.useState(null);
-        const [normaSel, setNormaSel] = React.useState(null);
-        const [destaques, setDestaques] = React.useState([]);
-        const [filtroNorma, setFiltroNorma] = React.useState('');
-        const [paragrafoAtivo, setParagrafoAtivo] = React.useState(null);
-        const [notaDestaque, setNotaDestaque] = React.useState('');
-        const [mostrarFormNorma, setMostrarFormNorma] = React.useState(false);
-        const VAZIO_NORMA = {codigo:'', titulo:'', orgao:'', categoria:'NR', prioridade:'media', aplicabilidade:'', resumo:'', texto:'', link_oficial:'', ultima_atualizacao:''};
-        const [formNorma, setFormNorma] = React.useState(VAZIO_NORMA);
-        const [editandoNormaId, setEditandoNormaId] = React.useState(null);
-
-        const TIPOS_DESTAQUE = {
-          critico:    {l:'Crítico',    ico:'🔴', bg:'#FEE2E2', bd:'#DC2626', c:'#991B1B'},
-          importante: {l:'Importante', ico:'🟡', bg:'#FEF9C3', bd:'#D4972A', c:'#92400E'},
-          prazo:      {l:'Prazo/Data', ico:'📅', bg:'#DBEAFE', bd:'#2563EB', c:'#1D4ED8'},
-          atencao:    {l:'Atenção',    ico:'🔵', bg:'#EDE9FE', bd:'#7C3AED', c:'#5B21B6'},
-        };
-
-        const carregarNormas = async () => {
-          if(!empresaId) return;
-          setLoadingNormas(true); setErroNormas(null);
-          const {data, error} = await _supa.from('normas_sst').select('*').eq('empresa_id',empresaId).order('ordem');
-          if(error){ setErroNormas(error.message); setNormas([]); }
-          else setNormas(data||[]);
-          const {data:dd} = await _supa.from('normas_destaques').select('*').eq('empresa_id',empresaId);
-          setDestaques(dd||[]);
-          setLoadingNormas(false);
-        };
-        React.useEffect(()=>{ if(aba==='normas') carregarNormas(); },[aba,empresaId]);
-
-        const paragrafosDaNorma = React.useMemo(()=>
-          String(normaSel?.texto||'').split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean)
-        ,[normaSel]);
-
-        const destaquesDaNorma = React.useMemo(()=>
-          destaques.filter(d=>String(d.norma_id)===String(normaSel?.id))
-        ,[destaques,normaSel]);
-        const destaqueDoParagrafo = (idx) => destaquesDaNorma.find(d=>d.paragrafo_idx===idx);
-
-        const marcarParagrafo = async (idx, tipo) => {
-          if(!normaSel) return;
-          const existente = destaqueDoParagrafo(idx);
-          // Clicar no mesmo tipo remove o destaque (toggle).
-          if(existente && existente.tipo===tipo && !notaDestaque.trim()){
-            await _supa.from('normas_destaques').delete().eq('id',existente.id);
-            setDestaques(p=>p.filter(d=>d.id!==existente.id));
-            setParagrafoAtivo(null); setNotaDestaque('');
-            return;
-          }
-          const {data:{session}} = await _supa.auth.getSession();
-          const row = {
-            empresa_id: empresaId, norma_id: String(normaSel.id), paragrafo_idx: idx,
-            trecho: (paragrafosDaNorma[idx]||'').slice(0,300),
-            tipo, nota: notaDestaque.trim()||null,
-            criado_por: session?.user?.email||'Desconhecido',
-          };
-          if(existente){
-            const {data,error} = await _supa.from('normas_destaques').update(row).eq('id',existente.id).select().single();
-            if(!error&&data) setDestaques(p=>p.map(d=>d.id===existente.id?data:d));
-          } else {
-            const {data,error} = await _supa.from('normas_destaques').insert(row).select().single();
-            if(!error&&data) setDestaques(p=>[...p,data]);
-          }
-          setParagrafoAtivo(null); setNotaDestaque('');
-        };
-
-        const salvarNorma = async () => {
-          if(!formNorma.codigo.trim()||!formNorma.titulo.trim()) return;
-          const payload = {...formNorma, empresa_id:empresaId};
-          let res;
-          if(editandoNormaId) res = await _supa.from('normas_sst').update(payload).eq('id',editandoNormaId).select().single();
-          else res = await _supa.from('normas_sst').insert({...payload, ativo:true, ordem:(normas.length+1)}).select().single();
-          if(res.error){ setErroNormas(res.error.message); return; }
-          setMostrarFormNorma(false); setEditandoNormaId(null); setFormNorma(VAZIO_NORMA);
-          await carregarNormas();
-          if(res.data) setNormaSel(res.data);
-        };
-
-        const normasFiltradas = normas.filter(n=>{
-          if(!filtroNorma) return true;
-          const q = filtroNorma.toLowerCase();
-          return (n.codigo||'').toLowerCase().includes(q) || (n.titulo||'').toLowerCase().includes(q) || (n.resumo||'').toLowerCase().includes(q);
-        });
-        const PRIOR = {critica:{l:'Crítica',bg:'#FEE2E2',c:'#991B1B'}, alta:{l:'Alta',bg:'#FEF9C3',c:'#92400E'}, media:{l:'Média',bg:'#F1F5F9',c:'#475569'}};
-
         return (
           <div>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
               <div>
                 <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🩺 Exames Ocupacionais</div>
-                <div style={{fontSize:13,color:C.muted}}>Admissional, demissional, periódicos, NRs e demais exames obrigatórios</div>
+                <div style={{fontSize:13,color:C.muted}}>Admissional, demissional, periódicos e demais exames obrigatórios</div>
               </div>
               <div style={{display:'flex',gap:4,background:'#F3F4F6',borderRadius:8,padding:4}}>
                 <button style={tabSt('vencidos')} onClick={()=>setAba('vencidos')}>🚨 Vencidos</button>
@@ -5398,7 +5616,6 @@
                 <button style={tabSt('registros')} onClick={()=>setAba('registros')}>📋 Registros</button>
                 <button style={tabSt('porTipo')} onClick={()=>setAba('porTipo')}>🔍 Por Tipo</button>
                 <button style={tabSt('kits')} onClick={()=>setAba('kits')}>🎯 Kits</button>
-                <button style={tabSt('normas')} onClick={()=>setAba('normas')}>📕 Normas &amp; NRs</button>
                 <button style={tabSt('tipos')} onClick={()=>setAba('tipos')}>⚙️ Tipos</button>
                 <button style={tabSt('procedimentos')} onClick={()=>setAba('procedimentos')}>🧪 Procedimentos</button>
               </div>
@@ -5887,212 +6104,6 @@
                             </div>
                           );
                         })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ───── ABA NORMAS & NRs ───── */}
-            {aba==='normas'&&(
-              <div>
-                {erroNormas&&(
-                  <div style={{...s.warnBox,marginBottom:14}}>
-                    ⚠️ Não foi possível carregar a biblioteca de normas: {erroNormas}
-                    <div style={{fontSize:12,marginTop:6}}>Se esta é a primeira vez, rode o arquivo <strong>sql/2026-07-21_exames_tipos_aso_e_normas.sql</strong> no Supabase → SQL Editor para criar as tabelas e carregar as normas.</div>
-                  </div>
-                )}
-
-                {mostrarFormNorma&&(
-                  <div style={{...s.card,marginBottom:16,border:'1px solid '+C.pri}}>
-                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>{editandoNormaId?'Editar Norma':'Nova Norma / Obrigação'}</div>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:'0 20px'}}>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Código *</label>
-                        <input type="text" value={formNorma.codigo} onChange={e=>setFormNorma(p=>({...p,codigo:e.target.value}))} placeholder="Ex: NR-36" style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Título *</label>
-                        <input type="text" value={formNorma.titulo} onChange={e=>setFormNorma(p=>({...p,titulo:e.target.value}))} placeholder="Nome da norma" style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Órgão</label>
-                        <input type="text" value={formNorma.orgao} onChange={e=>setFormNorma(p=>({...p,orgao:e.target.value}))} placeholder="MTE, ANVISA..." style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                        <div>
-                          <label style={s.label}>Categoria</label>
-                          <select value={formNorma.categoria} onChange={e=>setFormNorma(p=>({...p,categoria:e.target.value}))} style={s.input}>
-                            <option value="NR">NR</option><option value="Sanitária">Sanitária</option>
-                            <option value="Lei">Lei</option><option value="eSocial">eSocial</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label style={s.label}>Prioridade</label>
-                          <select value={formNorma.prioridade} onChange={e=>setFormNorma(p=>({...p,prioridade:e.target.value}))} style={s.input}>
-                            <option value="critica">Crítica</option><option value="alta">Alta</option><option value="media">Média</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
-                        <label style={s.label}>Resumo</label>
-                        <input type="text" value={formNorma.resumo} onChange={e=>setFormNorma(p=>({...p,resumo:e.target.value}))} placeholder="Uma frase sobre o que a norma exige" style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
-                        <label style={s.label}>Aplicabilidade</label>
-                        <input type="text" value={formNorma.aplicabilidade} onChange={e=>setFormNorma(p=>({...p,aplicabilidade:e.target.value}))} placeholder="A quem/o que se aplica" style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14,gridColumn:'1/-1'}}>
-                        <label style={s.label}>Texto (separe os parágrafos com uma linha em branco)</label>
-                        <textarea value={formNorma.texto} onChange={e=>setFormNorma(p=>({...p,texto:e.target.value}))} rows={10} style={{...s.input,fontFamily:'inherit',lineHeight:1.6,resize:'vertical'}} placeholder={'Primeiro parágrafo.\n\nSegundo parágrafo.'}/>
-                      </div>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Link oficial</label>
-                        <input type="text" value={formNorma.link_oficial} onChange={e=>setFormNorma(p=>({...p,link_oficial:e.target.value}))} placeholder="https://..." style={s.input}/>
-                      </div>
-                      <div style={{marginBottom:14}}>
-                        <label style={s.label}>Última atualização</label>
-                        <input type="text" value={formNorma.ultima_atualizacao} onChange={e=>setFormNorma(p=>({...p,ultima_atualizacao:e.target.value}))} placeholder="Ex: Portaria X/2024 · vigente" style={s.input}/>
-                      </div>
-                    </div>
-                    <div style={{display:'flex',gap:10}}>
-                      <button onClick={salvarNorma} style={s.btn}>💾 Salvar</button>
-                      <button onClick={()=>{setMostrarFormNorma(false);setEditandoNormaId(null);setFormNorma(VAZIO_NORMA);}} style={s.btnOutline}>Cancelar</button>
-                    </div>
-                  </div>
-                )}
-
-                <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:16,alignItems:'start'}}>
-                  {/* Lista de normas */}
-                  <div style={{...s.card,padding:10}}>
-                    <div style={{display:'flex',gap:6,marginBottom:10}}>
-                      <input type="text" value={filtroNorma} onChange={e=>setFiltroNorma(e.target.value)} placeholder="Buscar norma..." style={{...s.inputSm,flex:1}}/>
-                      <button onClick={()=>{setFormNorma(VAZIO_NORMA);setEditandoNormaId(null);setMostrarFormNorma(true);}} style={{...s.btn,fontSize:11,padding:'4px 10px'}} title="Cadastrar nova norma">+</button>
-                    </div>
-                    {loadingNormas?(
-                      <div style={{color:C.muted,fontSize:13,padding:12}}>Carregando...</div>
-                    ):normasFiltradas.length===0?(
-                      <div style={{color:C.muted,fontSize:13,padding:12}}>Nenhuma norma cadastrada. Use o botão “+” ou rode o SQL de carga inicial.</div>
-                    ):normasFiltradas.map(n=>{
-                      const pr = PRIOR[n.prioridade]||PRIOR.media;
-                      const qtdDest = destaques.filter(d=>String(d.norma_id)===String(n.id)).length;
-                      const sel = String(normaSel?.id)===String(n.id);
-                      return (
-                        <div key={n.id} onClick={()=>{setNormaSel(n);setParagrafoAtivo(null);}}
-                          style={{padding:'9px 11px',borderRadius:7,cursor:'pointer',marginBottom:4,
-                            background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:6}}>
-                            <span style={{fontWeight:800,fontSize:12,color:C.pri}}>{n.codigo}</span>
-                            <span style={{background:pr.bg,color:pr.c,fontSize:9,fontWeight:700,padding:'1px 7px',borderRadius:10}}>{pr.l}</span>
-                          </div>
-                          <div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.35}}>{n.titulo}</div>
-                          {qtdDest>0&&<div style={{fontSize:10,color:C.acc,fontWeight:700,marginTop:3}}>✍️ {qtdDest} destaque{qtdDest!==1?'s':''}</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Leitor */}
-                  <div>
-                    {!normaSel?(
-                      <div style={{...s.card,textAlign:'center',padding:'48px 20px',color:C.muted}}>
-                        <div style={{fontSize:32,marginBottom:8}}>📕</div>
-                        <div style={{fontWeight:700,marginBottom:4}}>Biblioteca de Normas e Obrigações</div>
-                        <div style={{fontSize:12}}>Selecione uma norma à esquerda para ler. Clique em qualquer parágrafo para destacar pontos críticos, prazos e observações.</div>
-                      </div>
-                    ):(
-                      <div>
-                        <div style={{...s.card,marginBottom:14}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
-                            <div style={{flex:1,minWidth:240}}>
-                              <div style={{fontSize:18,fontWeight:800,color:C.pri}}>{normaSel.codigo} — {normaSel.titulo}</div>
-                              {normaSel.resumo&&<div style={{fontSize:13,color:C.text,marginTop:6,lineHeight:1.6}}>{normaSel.resumo}</div>}
-                              <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:10,fontSize:11,color:C.muted}}>
-                                {normaSel.orgao&&<span>🏛️ {normaSel.orgao}</span>}
-                                {normaSel.categoria&&<span>🗂️ {normaSel.categoria}</span>}
-                                {normaSel.ultima_atualizacao&&<span>🕒 {normaSel.ultima_atualizacao}</span>}
-                              </div>
-                              {normaSel.aplicabilidade&&(
-                                <div style={{...s.infoBox,marginTop:12,marginBottom:0,fontSize:12}}>👥 <strong>Aplica-se a:</strong> {normaSel.aplicabilidade}</div>
-                              )}
-                            </div>
-                            <div style={{display:'flex',flexDirection:'column',gap:6,flexShrink:0}}>
-                              <button onClick={()=>{setFormNorma({codigo:normaSel.codigo||'',titulo:normaSel.titulo||'',orgao:normaSel.orgao||'',categoria:normaSel.categoria||'NR',prioridade:normaSel.prioridade||'media',aplicabilidade:normaSel.aplicabilidade||'',resumo:normaSel.resumo||'',texto:normaSel.texto||'',link_oficial:normaSel.link_oficial||'',ultima_atualizacao:normaSel.ultima_atualizacao||''});setEditandoNormaId(normaSel.id);setMostrarFormNorma(true);}}
-                                style={{...s.btnOutline,fontSize:11,padding:'4px 10px'}}>✏️ Editar</button>
-                              {normaSel.link_oficial&&(
-                                <a href={normaSel.link_oficial} target="_blank" rel="noreferrer" style={{...s.btnOutline,fontSize:11,padding:'4px 10px',textDecoration:'none',textAlign:'center'}}>🔗 Texto oficial</a>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Painel de destaques */}
-                        {destaquesDaNorma.length>0&&(
-                          <div style={{...s.card,marginBottom:14}}>
-                            <div style={s.cardTitle}>✍️ Seus destaques nesta norma</div>
-                            {destaquesDaNorma.slice().sort((a,b)=>a.paragrafo_idx-b.paragrafo_idx).map(d=>{
-                              const td = TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao;
-                              return (
-                                <div key={d.id} style={{borderLeft:'3px solid '+td.bd,background:td.bg,borderRadius:'0 7px 7px 0',padding:'8px 12px',marginBottom:6}}>
-                                  <div style={{fontSize:10,fontWeight:800,color:td.c,marginBottom:3}}>{td.ico} {td.l} · parágrafo {d.paragrafo_idx+1}</div>
-                                  <div style={{fontSize:12,color:C.text,lineHeight:1.5}}>{(d.trecho||'').slice(0,180)}{(d.trecho||'').length>180?'…':''}</div>
-                                  {d.nota&&<div style={{fontSize:11,color:td.c,marginTop:4,fontStyle:'italic'}}>📝 {d.nota}</div>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Texto */}
-                        <div style={s.card}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-                            <div style={s.cardTitle}>📖 Texto</div>
-                            <div style={{fontSize:11,color:C.muted}}>Clique em um parágrafo para destacar</div>
-                          </div>
-                          {paragrafosDaNorma.length===0?(
-                            <div style={{color:C.muted,fontSize:13}}>Esta norma ainda não tem texto cadastrado. Use “✏️ Editar” para inserir.</div>
-                          ):paragrafosDaNorma.map((p,idx)=>{
-                            const d = destaqueDoParagrafo(idx);
-                            const td = d?(TIPOS_DESTAQUE[d.tipo]||TIPOS_DESTAQUE.atencao):null;
-                            const ativo = paragrafoAtivo===idx;
-                            return (
-                              <div key={idx} style={{marginBottom:10}}>
-                                <div onClick={()=>{setParagrafoAtivo(ativo?null:idx);setNotaDestaque(d?.nota||'');}}
-                                  style={{cursor:'pointer',padding:'9px 12px',borderRadius:7,lineHeight:1.75,fontSize:13.5,
-                                    background:td?td.bg:(ativo?'var(--c-subtle)':'transparent'),
-                                    borderLeft:td?('4px solid '+td.bd):(ativo?'4px solid '+C.acc:'4px solid transparent'),
-                                    color:C.text,transition:'background .15s'}}>
-                                  {td&&<span style={{fontSize:10,fontWeight:800,color:td.c,display:'block',marginBottom:3}}>{td.ico} {td.l}</span>}
-                                  {p}
-                                  {d?.nota&&<div style={{fontSize:11,color:td.c,marginTop:5,fontStyle:'italic'}}>📝 {d.nota}</div>}
-                                </div>
-                                {ativo&&(
-                                  <div style={{border:'1px solid '+C.border,borderRadius:8,padding:'10px 12px',marginTop:6,background:'var(--c-subtle)'}}>
-                                    <div style={{fontSize:11,color:C.muted,fontWeight:700,marginBottom:8}}>Marcar este parágrafo como:</div>
-                                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
-                                      {Object.entries(TIPOS_DESTAQUE).map(([k,v])=>(
-                                        <button key={k} onClick={()=>marcarParagrafo(idx,k)}
-                                          style={{background:v.bg,color:v.c,border:'1.5px solid '+((d?.tipo===k)?v.bd:'transparent'),borderRadius:20,padding:'4px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}}>
-                                          {v.ico} {v.l}{d?.tipo===k?' ✓':''}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <input type="text" value={notaDestaque} onChange={e=>setNotaDestaque(e.target.value)}
-                                      placeholder="Nota (opcional): o que precisa ser feito, responsável, prazo..."
-                                      style={{...s.inputSm,width:'100%'}}/>
-                                    {d&&(
-                                      <button onClick={async()=>{ await _supa.from('normas_destaques').delete().eq('id',d.id); setDestaques(pp=>pp.filter(x=>x.id!==d.id)); setParagrafoAtivo(null); setNotaDestaque(''); }}
-                                        style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 9px',cursor:'pointer',marginTop:8}}>
-                                        🗑 Remover destaque
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
                       </div>
                     )}
                   </div>
@@ -9588,7 +9599,7 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','funcoes','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','normas','funcoes','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -9603,6 +9614,7 @@
         {k:'adiantamentos',l:'💵 Antecipações'},
         {k:'compras',l:'🛍️ Compras'},
         {k:'exames',l:'🩺 Exames'},
+        {k:'normas',l:'📕 Normas & NRs'},
         {k:'recrutamento',l:'🧑‍💼 Recrutamento'},
         {k:'relatorios',l:'📈 Relatórios'},
         {k:'ponto',l:'📋 Banco de Ponto'},
@@ -9654,6 +9666,7 @@
               {page==="adiantamentos"&&<AdiantamentosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="compras"&&<ComprasPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="exames"&&<ExamesPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="normas"&&<NormasPage empresaId={empresaId}/>}
               {page==="funcoes"&&<FuncoesPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="recrutamento"&&<RecrutamentoPage empresaId={empresaId}/>}
               {page==="relatorios"&&<RelatoriosPage colabAPI={colabAPI} empresaId={empresaId}/>}
