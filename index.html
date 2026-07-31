@@ -5166,25 +5166,21 @@
         );
 
         // ── Totais de gasto (respeitam os filtros de colaborador/tipo acima) ──
-        const [mostrarPorMes, setMostrarPorMes] = React.useState(false);
-        const custoTotalRegistros = React.useMemo(()=>
-          registrosFiltrados.reduce((s,r)=>s+(Number(r.valor)||0),0)
-        ,[registrosFiltrados]);
-        const mesAtualChave = hoje.slice(0,7);
-        const mesAtualLabel = MESES_FULL[Number(mesAtualChave.slice(5,7))-1]+'/'+mesAtualChave.slice(0,4);
-        const custoMesAtualRegistros = React.useMemo(()=>
-          registrosFiltrados.filter(r=>r.data_realizacao && r.data_realizacao.slice(0,7)===mesAtualChave).reduce((s,r)=>s+(Number(r.valor)||0),0)
-        ,[registrosFiltrados,mesAtualChave]);
-        const custoPorMes = React.useMemo(()=>{
-          const m = {};
-          registrosFiltrados.forEach(r=>{
-            if(!r.data_realizacao) return;
-            const chave = r.data_realizacao.slice(0,7);
-            m[chave] = (m[chave]||0) + (Number(r.valor)||0);
-          });
-          return Object.entries(m).sort((a,b)=>b[0].localeCompare(a[0]))
-            .map(([chave,total])=>({chave, total, label: MESES_FULL[Number(chave.slice(5,7))-1]+'/'+chave.slice(0,4)}));
-        },[registrosFiltrados]);
+        // Ano e mês navegáveis por setas, cada um independente do outro.
+        const [anoSelecionado, setAnoSelecionado] = React.useState(Number(hoje.slice(0,4)));
+        const [mesSelecionado, setMesSelecionado] = React.useState(hoje.slice(0,7)); // 'YYYY-MM'
+        const custoAnoSelecionado = React.useMemo(()=>
+          registrosFiltrados.filter(r=>r.data_realizacao && r.data_realizacao.slice(0,4)===String(anoSelecionado)).reduce((s,r)=>s+(Number(r.valor)||0),0)
+        ,[registrosFiltrados,anoSelecionado]);
+        const mudarAno = (delta) => setAnoSelecionado(a=>a+delta);
+        const mesSelecionadoLabel = MESES_FULL[Number(mesSelecionado.slice(5,7))-1]+'/'+mesSelecionado.slice(0,4);
+        const custoMesSelecionado = React.useMemo(()=>
+          registrosFiltrados.filter(r=>r.data_realizacao && r.data_realizacao.slice(0,7)===mesSelecionado).reduce((s,r)=>s+(Number(r.valor)||0),0)
+        ,[registrosFiltrados,mesSelecionado]);
+        const mudarMes = (delta) => setMesSelecionado(m=>{
+          const d = new Date(Number(m.slice(0,4)), Number(m.slice(5,7))-1+delta, 1);
+          return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+        });
 
         const diasVencido = (iso) => Math.round((new Date(hoje+'T12:00:00')-new Date(iso+'T12:00:00'))/86400000);
 
@@ -5602,37 +5598,22 @@
 
                 <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12,marginBottom:16}}>
                   <div style={{...s.card,textAlign:'center',padding:14}}>
-                    <div style={{fontSize:22,fontWeight:800,color:C.pri}}>{fmtBRL(custoTotalRegistros)}</div>
-                    <div style={{fontSize:11,color:C.muted}}>Total gasto {filtroColabReg||filtroTipoReg?'(com o filtro atual)':'em exames'}</div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:14}}>
+                      <button onClick={()=>mudarAno(-1)} style={{background:'none',border:'none',color:C.muted,fontSize:16,cursor:'pointer',padding:4}}>◀</button>
+                      <div style={{fontSize:22,fontWeight:800,color:C.pri,minWidth:110}}>{fmtBRL(custoAnoSelecionado)}</div>
+                      <button onClick={()=>mudarAno(1)} style={{background:'none',border:'none',color:C.muted,fontSize:16,cursor:'pointer',padding:4}}>▶</button>
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>Total gasto em {anoSelecionado}{filtroColabReg||filtroTipoReg?' (com o filtro atual)':''}</div>
                   </div>
                   <div style={{...s.card,textAlign:'center',padding:14}}>
-                    <div style={{fontSize:22,fontWeight:800,color:C.pri}}>{fmtBRL(custoMesAtualRegistros)}</div>
-                    <div style={{fontSize:11,color:C.muted}}>Gasto em {mesAtualLabel}</div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:14}}>
+                      <button onClick={()=>mudarMes(-1)} style={{background:'none',border:'none',color:C.muted,fontSize:16,cursor:'pointer',padding:4}}>◀</button>
+                      <div style={{fontSize:22,fontWeight:800,color:C.pri,minWidth:110}}>{fmtBRL(custoMesSelecionado)}</div>
+                      <button onClick={()=>mudarMes(1)} style={{background:'none',border:'none',color:C.muted,fontSize:16,cursor:'pointer',padding:4}}>▶</button>
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>Gasto em {mesSelecionadoLabel}</div>
                   </div>
                 </div>
-
-                {custoPorMes.length>0&&(
-                  <div style={{...s.card,marginBottom:16}}>
-                    <div onClick={()=>setMostrarPorMes(p=>!p)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
-                      <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>📅 Gasto por mês</div>
-                      <span style={{fontSize:12,color:C.muted}}>{mostrarPorMes?'▲ Ocultar':'▼ Mostrar'}</span>
-                    </div>
-                    {mostrarPorMes&&(
-                      <div style={{marginTop:12,maxHeight:260,overflowY:'auto'}}>
-                        <table style={{width:'100%',borderCollapse:'collapse'}}>
-                          <tbody>
-                            {custoPorMes.map(m=>(
-                              <tr key={m.chave} style={{borderTop:'1px solid '+C.border}}>
-                                <td style={{...s.td,fontSize:13}}>{m.label}</td>
-                                <td style={{...s.td,fontSize:13,textAlign:'right',fontWeight:600}}>{fmtBRL(m.total)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 <div style={{...s.card,padding:0,overflow:'hidden'}}>
                   <table style={{width:'100%',borderCollapse:'collapse'}}>
