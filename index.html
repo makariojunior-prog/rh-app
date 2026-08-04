@@ -4502,6 +4502,12 @@
           return m;
         },[colabAPI]);
 
+        const colaboradoresDaFuncao = React.useMemo(()=>{
+          if(!funcaoSel) return [];
+          return (colabAPI||[]).filter(c=>(c.funcao||'').trim()===funcaoSel.nome)
+            .sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt'));
+        },[colabAPI,funcaoSel]);
+
         const abrirNovo = () => { setForm(VAZIO); setEditandoId(null); setMostrarForm(true); setStatus(null); };
         const abrirEdicao = (f) => {
           setForm({
@@ -4735,6 +4741,25 @@
                     {funcaoSel.periculosidade_padrao&&(
                       <div style={{...s.warnBox,marginBottom:14}}>⚠️ Colaboradores nesta função normalmente recebem adicional de periculosidade.</div>
                     )}
+
+                    <div style={{marginBottom:16}}>
+                      <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>
+                        Colaboradores nesta função ({colaboradoresDaFuncao.length})
+                      </div>
+                      {colaboradoresDaFuncao.length===0?(
+                        <div style={{color:C.muted,fontSize:13,padding:'8px 0'}}>Nenhum colaborador com esta função hoje.</div>
+                      ):(
+                        <div style={{border:'1px solid '+C.border,borderRadius:8,overflow:'hidden'}}>
+                          {colaboradoresDaFuncao.map((c,i)=>(
+                            <div key={c.id||c.nome} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',
+                              borderTop:i===0?'none':'1px solid '+C.border}}>
+                              <div style={{fontSize:13,fontWeight:600,color:C.text}}>{c.nome}</div>
+                              <div style={{fontSize:11,color:C.muted}}>{c.setor||'—'}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
                     {funcaoSel.descricao&&(
                       <div style={{marginBottom:16}}>
