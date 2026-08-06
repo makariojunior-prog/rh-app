@@ -3797,6 +3797,25 @@
         const hoje = new Date().toISOString().slice(0,10);
         const mesAtual = hoje.slice(0,7);
 
+        // O colabAPI global só traz colaboradores ATIVOS (usado por toda a aplicação
+        // para folha/VT/ponto etc.). Para o relatório de Colaboradores poder incluir
+        // também os desligados, este módulo busca sua própria lista completa.
+        const [colabTodos, setColabTodos] = React.useState(colabAPI);
+        React.useEffect(()=>{
+          if(!empresaId) return;
+          _supa.from('colaboradores').select('*').eq('empresa_id',empresaId).order('nome')
+            .then(({data})=>{
+              if(!data) return;
+              setColabTodos(data.map(c=>({
+                nome:c.nome, setor:c.setor||'', funcao:c.funcao||'',
+                telefone:c.telefone||'', email:c.email||'', admissao:c.admissao||'',
+                salario:Number(c.salario)||0, transporte:Number(c.transporte)||0,
+                periculosidade:!!c.periculosidade, jornada:c.jornada||'SEG-SAB',
+                ativo:!!c.ativo, encerramento:c.data_encerramento||'',
+              })));
+            }).catch(()=>{});
+        },[empresaId]);
+
         const [tipoRel, setTipoRel] = React.useState('adiantamentos');
         const [relDados, setRelDados] = React.useState([]);
         const [relCarregando, setRelCarregando] = React.useState(false);
@@ -3819,7 +3838,7 @@
         const [colabComEmail, setColabComEmail] = React.useState(false);
         const [colabComTelefone, setColabComTelefone] = React.useState(false);
         const [colabCamposRelatorio, setColabCamposRelatorio] = React.useState({
-          nome:true, funcao:true, setor:true, salario:true, telefone:true, email:true,
+          nome:true, status:true, funcao:true, setor:true, salario:true, telefone:true, email:true,
           admissao:true, encerramento:true, jornada:false, transporte:false, periculosidade:false
         });
 
@@ -3852,11 +3871,11 @@
               }));
               setRelDados(dados);
             } else if(tipoRel==='colaboradores'){
-              let colabs = colabAPI;
+              let colabs = colabTodos;
               if(colabSetor) colabs = colabs.filter(c=>c.setor===colabSetor);
               if(colabFuncao) colabs = colabs.filter(c=>c.funcao===colabFuncao);
-              if(colabStatus==='ativo') colabs = colabs.filter(c=>!c.encerramento);
-              if(colabStatus==='desligado') colabs = colabs.filter(c=>c.encerramento);
+              if(colabStatus==='ativo') colabs = colabs.filter(c=>c.ativo);
+              if(colabStatus==='desligado') colabs = colabs.filter(c=>!c.ativo);
               if(colabAdmissaoIni) colabs = colabs.filter(c=>c.admissao>=colabAdmissaoIni);
               if(colabAdmissaoFim) colabs = colabs.filter(c=>c.admissao<=colabAdmissaoFim);
               if(colabPericulosidade==='sim') colabs = colabs.filter(c=>c.periculosidade);
@@ -3867,6 +3886,7 @@
               const dados = colabs.map(c=>{
                 const row = {};
                 if(colabCamposRelatorio.nome) row['Nome'] = c.nome;
+                if(colabCamposRelatorio.status) row['Status'] = c.ativo ? '🟢 Ativo' : '🔴 Inativo';
                 if(colabCamposRelatorio.funcao) row['Função'] = c.funcao||'—';
                 if(colabCamposRelatorio.setor) row['Setor'] = c.setor||'—';
                 if(colabCamposRelatorio.salario) row['Salário'] = fmtBRL(c.salario||0);
@@ -3984,9 +4004,9 @@
           }
         };
 
-        const setoresUnicos = [...new Set(colabAPI.map(c=>c.setor).filter(Boolean))].sort();
-        const funcoesUnicas = [...new Set(colabAPI.map(c=>c.funcao).filter(Boolean))].sort();
-        const colabsUnicos = [...new Set(colabAPI.map(c=>c.nome))].sort();
+        const setoresUnicos = [...new Set(colabTodos.map(c=>c.setor).filter(Boolean))].sort();
+        const funcoesUnicas = [...new Set(colabTodos.map(c=>c.funcao).filter(Boolean))].sort();
+        const colabsUnicos = [...new Set(colabTodos.map(c=>c.nome))].sort();
 
         return (
           <div>
@@ -4069,10 +4089,10 @@
                 <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginBottom:12}}>
                   <div style={{fontWeight:600,fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>Colunas do Relatório</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8}}>
-                    {['nome','funcao','setor','salario','telefone','email','admissao','encerramento','jornada','transporte','periculosidade'].map(c=>(
+                    {['nome','status','funcao','setor','salario','telefone','email','admissao','encerramento','jornada','transporte','periculosidade'].map(c=>(
                       <label key={c} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,cursor:"pointer"}}>
                         <input type="checkbox" checked={colabCamposRelatorio[c]} onChange={e=>setColabCamposRelatorio(p=>({...p,[c]:e.target.checked}))} style={{width:14,height:14}}/>
-                        <span>{c==='nome'?'Nome':c==='funcao'?'Função':c==='setor'?'Setor':c==='salario'?'Salário':c==='telefone'?'Telefone':c==='email'?'Email':c==='admissao'?'Data Admissão':c==='encerramento'?'Encerramento':c==='jornada'?'Jornada':c==='transporte'?'VT':c==='periculosidade'?'Periculosidade':c}</span>
+                        <span>{c==='nome'?'Nome':c==='status'?'Status':c==='funcao'?'Função':c==='setor'?'Setor':c==='salario'?'Salário':c==='telefone'?'Telefone':c==='email'?'Email':c==='admissao'?'Data Admissão':c==='encerramento'?'Encerramento':c==='jornada'?'Jornada':c==='transporte'?'VT':c==='periculosidade'?'Periculosidade':c}</span>
                       </label>
                     ))}
                   </div>
