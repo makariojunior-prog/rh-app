@@ -3807,7 +3807,7 @@
             .then(({data})=>{
               if(!data) return;
               setColabTodos(data.map(c=>({
-                nome:c.nome, setor:c.setor||'', funcao:c.funcao||'',
+                nome:c.nome, cpf:c.cpf||'', setor:c.setor||'', funcao:c.funcao||'',
                 telefone:c.telefone||'', email:c.email||'', admissao:c.admissao||'',
                 salario:Number(c.salario)||0, transporte:Number(c.transporte)||0,
                 periculosidade:!!c.periculosidade, jornada:c.jornada||'SEG-SAB',
@@ -3838,7 +3838,7 @@
         const [colabComEmail, setColabComEmail] = React.useState(false);
         const [colabComTelefone, setColabComTelefone] = React.useState(false);
         const [colabCamposRelatorio, setColabCamposRelatorio] = React.useState({
-          nome:true, status:true, funcao:true, setor:true, salario:true, telefone:true, email:true,
+          nome:true, status:true, cpf:false, funcao:true, setor:true, salario:true, telefone:true, email:true,
           admissao:true, encerramento:true, jornada:false, transporte:false, periculosidade:false
         });
 
@@ -3887,6 +3887,7 @@
                 const row = {};
                 if(colabCamposRelatorio.nome) row['Nome'] = c.nome;
                 if(colabCamposRelatorio.status) row['Status'] = c.ativo ? '🟢 Ativo' : '🔴 Inativo';
+                if(colabCamposRelatorio.cpf) row['CPF'] = c.cpf?maskCPF(c.cpf):'—';
                 if(colabCamposRelatorio.funcao) row['Função'] = c.funcao||'—';
                 if(colabCamposRelatorio.setor) row['Setor'] = c.setor||'—';
                 if(colabCamposRelatorio.salario) row['Salário'] = fmtBRL(c.salario||0);
@@ -4089,10 +4090,10 @@
                 <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginBottom:12}}>
                   <div style={{fontWeight:600,fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>Colunas do Relatório</div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8}}>
-                    {['nome','status','funcao','setor','salario','telefone','email','admissao','encerramento','jornada','transporte','periculosidade'].map(c=>(
+                    {['nome','status','cpf','funcao','setor','salario','telefone','email','admissao','encerramento','jornada','transporte','periculosidade'].map(c=>(
                       <label key={c} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,cursor:"pointer"}}>
                         <input type="checkbox" checked={colabCamposRelatorio[c]} onChange={e=>setColabCamposRelatorio(p=>({...p,[c]:e.target.checked}))} style={{width:14,height:14}}/>
-                        <span>{c==='nome'?'Nome':c==='status'?'Status':c==='funcao'?'Função':c==='setor'?'Setor':c==='salario'?'Salário':c==='telefone'?'Telefone':c==='email'?'Email':c==='admissao'?'Data Admissão':c==='encerramento'?'Encerramento':c==='jornada'?'Jornada':c==='transporte'?'VT':c==='periculosidade'?'Periculosidade':c}</span>
+                        <span>{c==='nome'?'Nome':c==='status'?'Status':c==='cpf'?'CPF':c==='funcao'?'Função':c==='setor'?'Setor':c==='salario'?'Salário':c==='telefone'?'Telefone':c==='email'?'Email':c==='admissao'?'Data Admissão':c==='encerramento'?'Encerramento':c==='jornada'?'Jornada':c==='transporte'?'VT':c==='periculosidade'?'Periculosidade':c}</span>
                       </label>
                     ))}
                   </div>
