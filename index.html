@@ -5131,6 +5131,17 @@
         const MESES_FULL = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
         const [aba, setAba] = React.useState('vencidos');
 
+        // O colabAPI global só traz colaboradores ATIVOS. Exames precisa também dos
+        // desligados: exame demissional é feito justamente após o desligamento, e
+        // Registros precisa continuar pesquisável mesmo depois que a pessoa sai.
+        const [colabTodos, setColabTodos] = React.useState(colabAPI);
+        React.useEffect(()=>{
+          if(!empresaId) return;
+          _supa.from('colaboradores').select('id,nome,funcao,ativo').eq('empresa_id',empresaId).order('nome')
+            .then(({data})=>{ if(data) setColabTodos(data.map(c=>({nome:c.nome, funcao:c.funcao||'', ativo:!!c.ativo, id_supa:c.id}))); })
+            .catch(()=>{});
+        },[empresaId]);
+
         // ── Tipos de exame ──
         const [tipos, setTipos] = React.useState([]);
         const [loadingTipos, setLoadingTipos] = React.useState(true);
@@ -5361,7 +5372,7 @@
             setStatusReg({ok:false,msg:'Preencha colaborador, tipo de exame e data.'}); return;
           }
           const tipo = tipos.find(t=>t.id===formReg.tipoExameId);
-          const colab = colabAPI.find(c=>c.nome===formReg.colaboradorNome);
+          const colab = colabTodos.find(c=>c.nome===formReg.colaboradorNome);
           const procsDoTipo = (procedimentosPorTipo[formReg.tipoExameId]||[]).filter(p=>procsSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome}));
           const procsAvulsos = procedimentos.filter(p=>procsAvulsosSelecionados.includes(p.id)).map(p=>({id:p.id, nome:p.nome, avulso:true}));
           const procsFeitos = [...procsDoTipo, ...procsAvulsos];
@@ -5748,7 +5759,7 @@
                   <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                     <select value={filtroColabReg} onChange={e=>setFiltroColabReg(e.target.value)} style={{...s.input,width:180,marginBottom:0}}>
                       <option value="">Todos os colaboradores</option>
-                      {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                      {[...colabTodos].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}{!c.ativo?' (inativo)':''}</option>))}
                     </select>
                     <select value={filtroTipoReg} onChange={e=>setFiltroTipoReg(e.target.value)} style={{...s.input,width:180,marginBottom:0}}>
                       <option value="">Todos os exames</option>
@@ -5778,7 +5789,7 @@
                         <label style={s.label}>Colaborador *</label>
                         <select value={formReg.colaboradorNome} onChange={e=>setFormReg(p=>({...p,colaboradorNome:e.target.value}))} style={s.input}>
                           <option value="">Selecione...</option>
-                          {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                          {[...colabTodos].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}{!c.ativo?' (inativo)':''}</option>))}
                         </select>
                       </div>
                       <div style={{marginBottom:14}}>
