@@ -1205,6 +1205,7 @@
       // (yyyy-mm-dd, o que o resto do app usa) só quando a data fica completa.
       function InputDataBR({ value, onChange, style }) {
         const [texto, setTexto] = React.useState(()=>fmtDate(value));
+        const refData = React.useRef(null);
         React.useEffect(()=>{ setTexto(fmtDate(value)); },[value]);
         const handleChange = e => {
           const digitos = e.target.value.replace(/\D/g,'').slice(0,8);
@@ -1219,9 +1220,28 @@
             }
           }
         };
+        // Botão de calendário: abre o seletor nativo (input type="date" escondido)
+        // — mantém a digitação sempre em dd/mm/aaaa, mas devolve o clique no
+        // calendário pra quem prefere escolher a data visualmente.
+        const abrirCalendario = () => {
+          const el = refData.current;
+          if(!el) return;
+          if(typeof el.showPicker === 'function'){ try{ el.showPicker(); return; }catch(e){} }
+          el.focus();
+        };
         return (
-          <input type="text" inputMode="numeric" placeholder="dd/mm/aaaa" maxLength={10}
-            value={texto} onChange={handleChange} onBlur={()=>setTexto(fmtDate(value))} style={style}/>
+          <div style={{position:'relative',display:'inline-block'}}>
+            <input type="text" inputMode="numeric" placeholder="dd/mm/aaaa" maxLength={10}
+              value={texto} onChange={handleChange} onBlur={()=>setTexto(fmtDate(value))}
+              style={{...style,paddingRight:30}}/>
+            <button type="button" onClick={abrirCalendario} title="Abrir calendário"
+              style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',fontSize:14,padding:2,lineHeight:1}}>
+              📅
+            </button>
+            <input ref={refData} type="date" value={value||''} tabIndex={-1} aria-hidden="true"
+              onChange={e=>onChange(e.target.value)}
+              style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:0,pointerEvents:'none',border:'none'}}/>
+          </div>
         );
       }
 
