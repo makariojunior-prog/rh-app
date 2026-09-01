@@ -1197,6 +1197,34 @@
         );
       }
 
+      // ---- InputDataBR: input de data no formato brasileiro (dd/mm/aaaa) ----
+      // input type="date" nativo mostra a data no formato do idioma do SO/navegador
+      // do usuário (não do atributo lang, que os navegadores ignoram para isso) —
+      // então em máquina com Windows/Chrome em inglês ele mostraria mm/dd/aaaa.
+      // Este componente digita e valida no formato BR, convertendo para ISO
+      // (yyyy-mm-dd, o que o resto do app usa) só quando a data fica completa.
+      function InputDataBR({ value, onChange, style }) {
+        const [texto, setTexto] = React.useState(()=>fmtDate(value));
+        React.useEffect(()=>{ setTexto(fmtDate(value)); },[value]);
+        const handleChange = e => {
+          const digitos = e.target.value.replace(/\D/g,'').slice(0,8);
+          let formatado = digitos;
+          if(digitos.length>4) formatado = digitos.slice(0,2)+'/'+digitos.slice(2,4)+'/'+digitos.slice(4);
+          else if(digitos.length>2) formatado = digitos.slice(0,2)+'/'+digitos.slice(2);
+          setTexto(formatado);
+          if(digitos.length===8){
+            const dd=+digitos.slice(0,2), mm=+digitos.slice(2,4), yyyy=+digitos.slice(4,8);
+            if(dd>=1&&dd<=31&&mm>=1&&mm<=12&&yyyy>=1900){
+              onChange(digitos.slice(4,8)+'-'+digitos.slice(2,4)+'-'+digitos.slice(0,2));
+            }
+          }
+        };
+        return (
+          <input type="text" inputMode="numeric" placeholder="dd/mm/aaaa" maxLength={10}
+            value={texto} onChange={handleChange} onBlur={()=>setTexto(fmtDate(value))} style={style}/>
+        );
+      }
+
       function ColaboradoresPage({ empresaId, setColabAPI }) {
         // Catálogo centralizado de funções (cadastro em 🧩 Funções) — usado como
         // dropdown aqui em vez de texto livre, para manter os dados consistentes.
@@ -8559,8 +8587,8 @@
           {aba==='comissoes'&&(
             <div>
               <div style={{...s.card,display:'flex',alignItems:'flex-end',gap:14,flexWrap:'wrap'}}>
-                <div><label style={s.label}>Data início (26 do mês anterior)</label><input type="date" value={dataIni} onChange={e=>setDataIni(e.target.value)} style={{...s.input,width:170}}/></div>
-                <div><label style={s.label}>Data fim (25 do mês atual)</label><input type="date" value={dataFim} onChange={e=>setDataFim(e.target.value)} style={{...s.input,width:170}}/></div>
+                <div><label style={s.label}>Data início (26 do mês anterior)</label><InputDataBR value={dataIni} onChange={setDataIni} style={{...s.input,width:170}}/></div>
+                <div><label style={s.label}>Data fim (25 do mês atual)</label><InputDataBR value={dataFim} onChange={setDataFim} style={{...s.input,width:170}}/></div>
                 <button onClick={calcular} disabled={loading} style={s.btn}>{loading?'⏳ Calculando...':'🔍 Calcular'}</button>
               </div>
               {msgBox&&<div style={msgBox.ok?s.successBox:s.warnBox}>{msgBox.txt}</div>}
