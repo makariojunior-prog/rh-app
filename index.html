@@ -2121,6 +2121,17 @@
           setForm(p=>({...p,paginas: p.paginas.includes(k) ? p.paginas.filter(x=>x!==k) : [...p.paginas,k]}));
         };
 
+        // Extrai a mensagem de erro de uma resposta de Edge Function
+        // (corpo JSON {error}, FunctionsHttpError com body, ou erro de rede).
+        const extrairErroFn = async (error, data) => {
+          if(data && data.error) return data.error;
+          if(error){
+            try { const j = await error.context.json(); if(j && j.error) return j.error; } catch(_){}
+            return error.message || 'Falha ao chamar o servidor.';
+          }
+          return null;
+        };
+
         const criarAcesso = async () => {
           if(!form.nome.trim()||!form.email.trim()||!form.senha.trim()){
             setStatus({ok:false,msg:'Preencha nome, email e senha.'}); return;
@@ -2130,58 +2141,20 @@
           }
           setLoading(true); setStatus(null);
           try {
-            // Cliente isolado: não afeta a sessão do admin
-            const tmpCliente = supabase.createClient(SUPA_URL, SUPA_KEY, {
-              auth: {
-                persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
-                storage: { getItem:()=>null, setItem:()=>{}, removeItem:()=>{} }
-              }
-            });
             const emailLimpo = form.email.trim().toLowerCase();
             const pagsFinal = form.role==='admin' ? TODAS_PAGINAS.map(p=>p.k) : form.paginas;
-            let userId = null;
-            const {data, error: signUpErr} = await tmpCliente.auth.signUp({
-              email: emailLimpo, password: form.senha
+            // Provisionamento no servidor (Edge Function rh-usuarios, com service_role):
+            // cria a conta OU revincula um email que já existe no Auth, (re)define a
+            // senha informada e grava o perfil — sem depender da senha antiga.
+            const {data, error} = await _supa.functions.invoke('rh-usuarios', {
+              body: {
+                acao:'criar', nome: form.nome.trim(), email: emailLimpo, senha: form.senha,
+                role: form.role, paginas: pagsFinal, empresa_id: empresaId
+              }
             });
-            if(signUpErr){
-              // Caso típico: usuário já existe no Auth (ex: foi removido apenas da tabela perfis).
-              // Tentamos autenticar com a senha informada para recuperar o id e recriar o perfil.
-              const {data:loginData, error:loginErr} = await tmpCliente.auth.signInWithPassword({
-                email: emailLimpo, password: form.senha
-              });
-              if(loginErr || !loginData?.user){
-                throw new Error(
-                  'Este email já existe no sistema de autenticação, mas a senha informada não confere. '+
-                  'Use a senha original do usuário OU peça para ele clicar em "Esqueci minha senha" na tela de login e tente novamente com a nova senha.'
-                );
-              }
-              userId = loginData.user.id;
-              await tmpCliente.auth.signOut();
-            } else if(data?.user){
-              userId = data.user.id;
-            } else {
-              // signUp sem erro mas sem user: significa email já registrado (Supabase devolve user:null por segurança).
-              // Tenta autenticar com a senha enviada para reaproveitar conta órfã.
-              const {data:loginData, error:loginErr} = await tmpCliente.auth.signInWithPassword({
-                email: emailLimpo, password: form.senha
-              });
-              if(loginErr || !loginData?.user){
-                throw new Error(
-                  'Este email já existe no sistema de autenticação, mas não foi possível validar com a senha informada. '+
-                  'Use a senha real do usuário, ou peça que ele use "Esqueci minha senha" na tela de login.'
-                );
-              }
-              userId = loginData.user.id;
-              await tmpCliente.auth.signOut();
-            }
-            if(!userId) throw new Error('Não foi possível obter o ID do usuário.');
-            // upsert no perfil (cria se não existir; se existir, atualiza dados)
-            const {error: perfilErr} = await _supa.from('perfis').upsert({
-              id: userId, nome: form.nome.trim(), email: emailLimpo,
-              empresa_id: empresaId, role: form.role, paginas: pagsFinal
-            }, {onConflict:'id'});
-            if(perfilErr) throw new Error('Conta validada, mas erro ao salvar permissões: ' + perfilErr.message);
-            setStatus({ok:true, msg:`✅ Acesso criado/vinculado!\n📧 Email: ${emailLimpo}\n🔑 Repasse a senha ao usuário por um canal seguro. Por segurança, ela não é exibida aqui.`});
+            const msgErro = await extrairErroFn(error, data);
+            if(msgErro) throw new Error(msgErro);
+            setStatus({ok:true, msg:`✅ Acesso ${data?.vinculado ? 'vinculado' : 'criado'}!\n📧 Email: ${emailLimpo}\n🔑 Repasse a senha ao usuário por um canal seguro. Por segurança, ela não é exibida aqui.`});
             setCriando(false); setForm(FORM_VAZIO); carregar();
           } catch(e) {
             setStatus({ok:false, msg:'❌ ' + e.message});
@@ -2247,11 +2220,17 @@
         };
 
         const removerAcesso = async (p) => {
-          if(!await confirmar(`Remover acesso de "${p.nome}"? Esta ação não pode ser desfeita.`,'Remover Acesso')) return;
-          setLoading(true);
-          const {error} = await _supa.from('perfis').delete().eq('id',p.id);
-          if(!error){ setStatus({ok:true,msg:`✅ Acesso de ${p.nome} removido.`}); carregar(); }
-          else setStatus({ok:false,msg:'❌ Erro: '+error.message});
+          if(!await confirmar(`Remover acesso de "${p.nome}"? Isso apaga também a conta de login e não pode ser desfeito.`,'Remover Acesso')) return;
+          setLoading(true); setStatus(null);
+          try {
+            const {data,error} = await _supa.functions.invoke('rh-usuarios', { body:{ acao:'remover', id:p.id } });
+            const msgErro = await extrairErroFn(error, data);
+            if(msgErro) throw new Error(msgErro);
+            setStatus({ok:true,msg:`✅ Acesso de ${p.nome} removido.` + (data?.obs ? '\n'+data.obs : '')});
+            carregar();
+          } catch(e){
+            setStatus({ok:false,msg:'❌ Erro: '+e.message});
+          }
           setLoading(false);
         };
 
