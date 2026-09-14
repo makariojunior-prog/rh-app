@@ -1246,7 +1246,7 @@
       }
 
       function ColaboradoresPage({ empresaId, setColabAPI }) {
-        // Catálogo centralizado de funções (cadastro em 🧩 Funções) — usado como
+        // Catálogo centralizado de funções (cadastro em 📋 Planos de Cargos) — usado como
         // dropdown aqui em vez de texto livre, para manter os dados consistentes.
         const [funcoesCat, setFuncoesCat] = useState([]);
         useEffect(()=>{
@@ -1727,7 +1727,7 @@
                       <option value={form.funcao}>{form.funcao} (fora do catálogo)</option>
                     )}
                   </select>
-                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 🧩 Funções, no menu lateral.</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 📋 Planos de Cargos, no menu lateral.</div>
                 </div>
                 <CampoForm label="Setor" campo="setor" placeholder="Ex: Produção" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Admissão" campo="admissao" type="date" form={form} setForm={setForm}/>
@@ -2153,7 +2153,7 @@
         const TODAS_PAGINAS = [
           {k:'dashboard',    l:'🏠 Início'},
           {k:'colaboradores',l:'👥 Colaboradores'},
-          {k:'funcoes',      l:'🧩 Funções'},
+          {k:'funcoes',      l:'📋 Planos de Cargos'},
           {k:'vt',           l:'🚌 Vale Transporte'},
           {k:'folha',        l:'💼 Folha de Pagamento'},
           {k:'ponto',        l:'📋 Banco de Ponto'},
@@ -3605,8 +3605,7 @@
             <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
               {[
                 {k:'avulsos', l:'💵 Avulsos', badge: lista.filter(a=>a.status==='pendente').length||null},
-                {k:'fixos',   l:'📌 Fixos Mensais', badge: fixosAtivos.length||null},
-                {k:'gratificacoes', l:'🏆 Gratificações', badge: null}
+                {k:'fixos',   l:'📌 Fixos Mensais', badge: fixosAtivos.length||null}
               ].map(t=>(
                 <button key={t.k} onClick={()=>setAba(t.k)} style={{
                   background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
@@ -3915,9 +3914,6 @@
                 )}
               </div>
             )}
-
-            {/* ───── ABA GRATIFICAÇÕES ───── */}
-            {aba==='gratificacoes'&&<GratificacoesTab colabAPI={colabAPI} empresaId={empresaId}/>}
           </div>
         );
       }
@@ -4936,6 +4932,7 @@
       // MÓDULO FUNÇÕES (CARGOS) — cadastro centralizado
       // ============================================================
       function FuncoesPage({ colabAPI, empresaId }) {
+        const [aba, setAba] = React.useState('cargos');
         const [funcoes, setFuncoes] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
         const VAZIO = {
@@ -5049,15 +5046,34 @@
           <div>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
               <div>
-                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🧩 Funções (Cargos)</div>
-                <div style={{fontSize:13,color:C.muted}}>Cadastro centralizado — usado em Colaboradores, Exames e demais módulos</div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📋 Planos de Cargos</div>
+                <div style={{fontSize:13,color:C.muted}}>Cadastro centralizado de funções/cargos e gratificações — usado em Colaboradores, Exames e demais módulos</div>
               </div>
-              <div style={{display:'flex',gap:8}}>
-                <button onClick={()=>setMostrarMesclar(p=>!p)} style={s.btnOutline}>🔀 Mesclar Funções</button>
-                <button onClick={abrirNovo} style={s.btn}>➕ Nova Função</button>
-              </div>
+              {aba==='cargos'&&(
+                <div style={{display:'flex',gap:8}}>
+                  <button onClick={()=>setMostrarMesclar(p=>!p)} style={s.btnOutline}>🔀 Mesclar Funções</button>
+                  <button onClick={abrirNovo} style={s.btn}>➕ Nova Função</button>
+                </div>
+              )}
             </div>
 
+            {/* Tabs */}
+            <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
+              {[
+                {k:'cargos',        l:'🧩 Cargos'},
+                {k:'gratificacoes', l:'🏆 Gratificações'}
+              ].map(t=>(
+                <button key={t.k} onClick={()=>setAba(t.k)} style={{
+                  background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                  marginBottom:-2,padding:"8px 20px",cursor:"pointer",fontWeight:aba===t.k?700:400,
+                  color:aba===t.k?C.acc:C.muted,fontSize:13
+                }}>{t.l}</button>
+              ))}
+            </div>
+
+            {aba==='gratificacoes'&&<GratificacoesTab colabAPI={colabAPI} empresaId={empresaId}/>}
+
+            {aba==='cargos'&&(<>
             {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13}}>{status.msg}</div>}
 
             {mostrarMesclar&&(
@@ -5261,6 +5277,7 @@
                 )}
               </div>
             </div>
+            </>)}
           </div>
         );
       }
@@ -5924,7 +5941,7 @@
         };
         React.useEffect(()=>{ carregarKits(); },[empresaId]);
 
-        // Lista de funções vem do catálogo centralizado (módulo 🧩 Funções), não mais
+        // Lista de funções vem do catálogo centralizado (módulo 📋 Planos de Cargos), não mais
         // de valores livres em colabAPI — garante nomes consistentes com o resto do app.
         const [funcoesCatalogo, setFuncoesCatalogo] = React.useState([]);
         React.useEffect(()=>{
@@ -10111,7 +10128,7 @@
       const navItems=[
         {k:'dashboard',l:'🏠 Início'},
         {k:'colaboradores',l:'👥 Colaboradores'},
-        {k:'funcoes',l:'🧩 Funções'},
+        {k:'funcoes',l:'📋 Planos de Cargos'},
         {k:'vt',l:'🚌 Vale Transporte'},
         {k:'folha',l:'💼 Folha de Pagto'},
         {k:'orcamento',l:'📊 Orçamento Folha'},
