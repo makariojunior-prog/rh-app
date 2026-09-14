@@ -1246,7 +1246,7 @@
       }
 
       function ColaboradoresPage({ empresaId, setColabAPI }) {
-        // Catálogo centralizado de funções (cadastro em 🧩 Funções) — usado como
+        // Catálogo centralizado de funções (cadastro em 📋 Planos de Cargos) — usado como
         // dropdown aqui em vez de texto livre, para manter os dados consistentes.
         const [funcoesCat, setFuncoesCat] = useState([]);
         useEffect(()=>{
@@ -1263,6 +1263,7 @@
         const [historicoSalario, setHistoricoSalario] = useState([]);
         const [historicoAdiantamentos, setHistoricoAdiantamentos] = useState([]);
         const [historicoAdiantamentosFixos, setHistoricoAdiantamentosFixos] = useState([]);
+        const [historicoGratificacoes, setHistoricoGratificacoes] = useState([]);
         const [historicoExames, setHistoricoExames] = useState([]);
         const [loadingHistorico, setLoadingHistorico] = useState(false);
         const [termosGlobais, setTermosGlobais] = useState([]);
@@ -1344,6 +1345,10 @@
             const {data:dataAdtF} = await _supa.from('adiantamentos_fixos').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('created_at',{ascending:false});
             setHistoricoAdiantamentosFixos(dataAdtF||[]);
           } catch(e) { setHistoricoAdiantamentosFixos([]); }
+          try {
+            const {data:dataGrat} = await _supa.from('gratificacao_colaborador').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').neq('status','cancelado').order('data_conclusao',{ascending:false});
+            setHistoricoGratificacoes(dataGrat||[]);
+          } catch(e) { setHistoricoGratificacoes([]); }
           try {
             const {data:dataExames} = await _supa.from('colaborador_exames').select('*').eq('empresa_id',empresaId).ilike('colaborador_nome','%'+colab.nome+'%').order('data_realizacao',{ascending:false});
             setHistoricoExames(dataExames||[]);
@@ -1450,7 +1455,7 @@
           document.body.removeChild(link);
         };
 
-        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoExames([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
+        const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoGratificacoes([]); setHistoricoExames([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
         const abrirEdicao = c => {
           setForm({
             nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
@@ -1472,7 +1477,7 @@
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
           setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]);
-          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoExames([]);
+          setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoGratificacoes([]); setHistoricoExames([]);
           // Carrega assinatura (SIM/NÃO) e valor livre (nº aditivo, nº armário, etc.) de todos os termos
           _supa.from('colaborador_termos').select('*').eq('colaborador_id',c.id)
             .then(({data})=>{
@@ -1722,7 +1727,7 @@
                       <option value={form.funcao}>{form.funcao} (fora do catálogo)</option>
                     )}
                   </select>
-                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 🧩 Funções, no menu lateral.</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 📋 Planos de Cargos, no menu lateral.</div>
                 </div>
                 <CampoForm label="Setor" campo="setor" placeholder="Ex: Produção" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Admissão" campo="admissao" type="date" form={form} setForm={setForm}/>
@@ -1840,7 +1845,7 @@
 
             <div style={s.card}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}}
-                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0&&historicoExames.length===0){ carregarHistorico(editando); if(!editando.novo&&editando.id) carregarHistoricoTermos(editando.id); } setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
+                onClick={()=>{ if(abaEditar!=='historico'&&!loadingHistorico&&historicoAtestados.length===0&&historicoFerias.length===0&&historicoSalario.length===0&&historicoAdiantamentos.length===0&&historicoAdiantamentosFixos.length===0&&historicoGratificacoes.length===0&&historicoExames.length===0){ carregarHistorico(editando); if(!editando.novo&&editando.id) carregarHistoricoTermos(editando.id); } setAbaEditar(p=>p==='historico'?'dados':'historico'); }}>
                 <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:"uppercase",letterSpacing:"0.05em"}}>🗂️ Histórico do Colaborador</div>
                 <span style={{color:C.muted,fontSize:12}}>{abaEditar==='historico'?"▲ Fechar":"▶ Abrir"}</span>
               </div>
@@ -1930,6 +1935,30 @@
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:f.ativo?"#EDE9FE":"#F1F5F9",color:f.ativo?"#6D28D9":"#64748B",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.ativo?'ativo':'pausado'}</span></td>
                             </tr>);
                           })}</tbody>
+                        </table>
+                      )}
+                      <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8,marginTop:16}}>🏆 Gratificações</div>
+                      {historicoGratificacoes.length===0?(
+                        <div style={{color:C.muted,fontSize:13,paddingBottom:16}}>Nenhuma gratificação concedida ainda.</div>
+                      ):(
+                        <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+                          <thead><tr style={{background:"var(--c-subtle)"}}>
+                            <th style={s.th}>Nível</th><th style={s.th}>Valor</th>
+                            <th style={s.th}>Concluído em</th><th style={s.th}>Obs</th>
+                          </tr></thead>
+                          <tbody>{historicoGratificacoes.map((g,i)=>(
+                            <tr key={i} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontSize:12,fontWeight:600}}>{g.nivel_nome}</td>
+                              <td style={{...s.td,fontSize:12,fontWeight:700,color:C.pri}}>R$ {Number(g.valor).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+                              <td style={{...s.td,fontSize:12}}>{g.data_conclusao?new Date(g.data_conclusao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{g.obs||'—'}</td>
+                            </tr>
+                          ))}</tbody>
+                          <tfoot><tr style={{borderTop:"2px solid "+C.border}}>
+                            <td style={{...s.td,fontSize:12,fontWeight:700}}>Total acumulado</td>
+                            <td style={{...s.td,fontSize:12,fontWeight:700,color:C.pri}}>R$ {historicoGratificacoes.reduce((sum,g)=>sum+Number(g.valor),0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+                            <td style={s.td}></td><td style={s.td}></td>
+                          </tr></tfoot>
                         </table>
                       )}
                       <div style={{fontWeight:700,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:8}}>🏖️ Férias</div>
@@ -2124,7 +2153,7 @@
         const TODAS_PAGINAS = [
           {k:'dashboard',    l:'🏠 Início'},
           {k:'colaboradores',l:'👥 Colaboradores'},
-          {k:'funcoes',      l:'🧩 Funções'},
+          {k:'funcoes',      l:'📋 Planos de Cargos'},
           {k:'vt',           l:'🚌 Vale Transporte'},
           {k:'folha',        l:'💼 Folha de Pagamento'},
           {k:'ponto',        l:'📋 Banco de Ponto'},
@@ -3417,9 +3446,10 @@
         const [loading, setLoading] = React.useState(true);
         const [status, setStatus] = React.useState(null);
         const [mostrarForm, setMostrarForm] = React.useState(false);
-        const VAZIO = {colaboradorNome:'',valor:'',dataConcessao:hoje,obs:''};
+        const VAZIO = {colaboradorNome:'',valor:'',dataConcessao:hoje,obs:'',formaDesconto:'folha_mensal'};
         const [form, setForm] = React.useState(VAZIO);
         const [editandoId, setEditandoId] = React.useState(null);
+        const formaDescontoLabel = {folha_mensal:'Folha do mês', '13_salario':'13º Salário', rescisao:'Rescisão', outro:'Outro (manual)'};
 
         const carregar = async () => {
           if(!empresaId) return;
@@ -3433,6 +3463,27 @@
         };
 
         React.useEffect(()=>{ carregar(); },[empresaId,mesRef]);
+
+        // Pendências com desconto especial (13º salário, rescisão, etc.) — ficam
+        // visíveis permanentemente, independente do mês de referência selecionado
+        // acima, e nunca entram no desconto automático da Folha.
+        const [pendEspeciais, setPendEspeciais] = React.useState([]);
+        const carregarPendEspeciais = async () => {
+          if(!empresaId) return;
+          const {data,error} = await _supa.from('adiantamentos')
+            .select('*').eq('empresa_id',empresaId).eq('status','pendente')
+            .neq('forma_desconto','folha_mensal')
+            .order('data_concessao',{ascending:false});
+          if(!error) setPendEspeciais(data||[]);
+        };
+        React.useEffect(()=>{ carregarPendEspeciais(); },[empresaId]);
+
+        const marcarDescontado = async (id) => {
+          if(!await confirmar('Marcar este adiantamento como descontado? Use apenas depois de aplicar o desconto manualmente (13º salário, rescisão, etc.).','Marcar como Descontado')) return;
+          await _supa.from('adiantamentos').update({status:'descontado'}).eq('id',id);
+          await carregarPendEspeciais();
+          await carregar();
+        };
 
         const salvar = async () => {
           if(!form.colaboradorNome||!form.valor||!form.dataConcessao){
@@ -3453,7 +3504,8 @@
             valor:val,
             data_concessao:form.dataConcessao,
             mes_referencia:mesR,
-            obs:form.obs||null
+            obs:form.obs||null,
+            forma_desconto:form.formaDesconto||'folha_mensal'
           };
           let error;
           if(editandoId){
@@ -3462,7 +3514,7 @@
             ({error} = await _supa.from('adiantamentos').insert({empresa_id:empresaId, ...dadosAdt, status:'pendente'}));
           }
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
-          else{ setStatus({ok:true,msg:editandoId?'✅ Adiantamento atualizado!':'✅ Adiantamento registrado!'}); setMostrarForm(false); setEditandoId(null); setForm(VAZIO); carregar(); }
+          else{ setStatus({ok:true,msg:editandoId?'✅ Adiantamento atualizado!':'✅ Adiantamento registrado!'}); setMostrarForm(false); setEditandoId(null); setForm(VAZIO); carregar(); carregarPendEspeciais(); }
           setLoading(false);
         };
 
@@ -3471,6 +3523,7 @@
           setLoading(true);
           await _supa.from('adiantamentos').update({status:'cancelado'}).eq('id',id);
           await carregar();
+          await carregarPendEspeciais();
         };
 
         const totalPendente = lista.filter(a=>a.status==='pendente').reduce((s,a)=>s+Number(a.valor),0);
@@ -3568,6 +3621,39 @@
             {/* ───── ABA AVULSOS ───── */}
             {aba==='avulsos'&&(
               <div>
+                {pendEspeciais.length>0&&(
+                  <div style={{...s.card,marginBottom:14,background:"#FEF2F2",border:"1px solid #FCA5A5"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#991B1B",marginBottom:4}}>
+                      📌 Pendências com desconto especial ({pendEspeciais.length})
+                    </div>
+                    <div style={{fontSize:12,color:"#991B1B",marginBottom:8}}>
+                      Ficam visíveis aqui permanentemente, independente do mês de referência escolhido abaixo, e <strong>não</strong> entram no desconto automático da Folha — baixe manualmente quando aplicar o desconto.
+                    </div>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"var(--c-subtle)"}}>
+                        <th style={s.th}>Colaborador</th><th style={s.th}>Valor</th>
+                        <th style={s.th}>Concedido em</th><th style={s.th}>Forma de Desconto</th>
+                        <th style={s.th}>Obs</th><th style={{...s.th,textAlign:"right"}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {pendEspeciais.map(a=>(
+                          <tr key={a.id} style={{borderTop:"1px solid "+C.border}}>
+                            <td style={{...s.td,fontWeight:600}}>{a.colaborador_nome}</td>
+                            <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(a.valor))}</td>
+                            <td style={{...s.td,fontSize:12}}>{a.data_concessao?new Date(a.data_concessao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                            <td style={{...s.td,fontSize:12}}>
+                              <span style={{background:"#FEE2E2",color:"#991B1B",padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{formaDescontoLabel[a.forma_desconto]||a.forma_desconto}</span>
+                            </td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
+                            <td style={{...s.td,textAlign:"right"}}>
+                              <button onClick={()=>marcarDescontado(a.id)} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✅ Marcar descontado</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 <div style={{...s.card,background:"#EFF6FF",border:"1px solid #BFDBFE",marginBottom:14,padding:"10px 14px",fontSize:12,color:"#1D4ED8"}}>
                   ℹ️ <strong>Avulsos + Fixos somados:</strong> Quando um colaborador tem tanto adiantamento avulso quanto fixo, ambos são somados e descontados juntos na Folha de Pagamento.
                 </div>
@@ -3606,6 +3692,16 @@
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Observações</label>
                         <input type="text" value={form.obs} onChange={e=>setForm(p=>({...p,obs:e.target.value}))} placeholder="Motivo, etc." style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                        <label style={s.label}>Forma de Desconto</label>
+                        <select value={form.formaDesconto||'folha_mensal'} onChange={e=>setForm(p=>({...p,formaDesconto:e.target.value}))} style={s.input}>
+                          <option value="folha_mensal">Folha do mês (automático)</option>
+                          <option value="13_salario">13º Salário</option>
+                          <option value="rescisao">Rescisão</option>
+                          <option value="outro">Outro (manual)</option>
+                        </select>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Diferente de "Folha do mês", este adiantamento não é descontado automaticamente — fica pendente e visível até ser baixado manualmente.</div>
                       </div>
                     </div>
                     <div style={{display:"flex",gap:10}}>
@@ -3663,12 +3759,17 @@
                               <td style={{...s.td,fontSize:12}}>{a.mes_referencia?a.mes_referencia.split('-').reverse().join('/'):'—'}</td>
                               <td style={{...s.td,textAlign:"center"}}>
                                 <span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{a.status}</span>
+                                {a.forma_desconto&&a.forma_desconto!=='folha_mensal'&&(
+                                  <div style={{marginTop:4}}>
+                                    <span style={{background:"#FEE2E2",color:"#991B1B",padding:"1px 6px",borderRadius:8,fontSize:10,fontWeight:700}}>{formaDescontoLabel[a.forma_desconto]||a.forma_desconto}</span>
+                                  </div>
+                                )}
                               </td>
                               <td style={{...s.td,fontSize:12,color:C.muted}}>{a.obs||'—'}</td>
                               <td style={{...s.td,textAlign:"right"}}>
                                 {a.status==='pendente'&&(
                                   <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-                                    <button onClick={()=>{setForm({colaboradorNome:a.colaborador_nome,valor:String(a.valor),dataConcessao:a.data_concessao,obs:a.obs||''});setEditandoId(a.id);setMostrarForm(true);setStatus(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
+                                    <button onClick={()=>{setForm({colaboradorNome:a.colaborador_nome,valor:String(a.valor),dataConcessao:a.data_concessao,obs:a.obs||'',formaDesconto:a.forma_desconto||'folha_mensal'});setEditandoId(a.id);setMostrarForm(true);setStatus(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
                                     <button onClick={()=>cancelarAdt(a.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
                                   </div>
                                 )}
@@ -3809,6 +3910,321 @@
                         📌 Total descontado automaticamente todo mês: <strong>{fmtBRL(totalFixosAtivos)}</strong> · {fixosAtivos.length} colaborador{fixosAtivos.length!==1?"es":""}
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MÓDULO GRATIFICAÇÕES POR NÍVEL
+      // ============================================================
+      function GratificacoesTab({ colabAPI, empresaId }) {
+        const hoje = new Date().toISOString().slice(0,10);
+        const [sub, setSub] = React.useState('concessoes');
+
+        // ── Níveis (catálogo) ──
+        const [niveis, setNiveis] = React.useState([]);
+        const [loadingNiveis, setLoadingNiveis] = React.useState(true);
+        const [statusNiv, setStatusNiv] = React.useState(null);
+        const [mostrarFormNiv, setMostrarFormNiv] = React.useState(false);
+        const VAZIO_NIV = {ordem:'',nome:'',criterio:'',valor:''};
+        const [formNiv, setFormNiv] = React.useState(VAZIO_NIV);
+        const [editandoNiv, setEditandoNiv] = React.useState(null);
+
+        const carregarNiveis = async () => {
+          if(!empresaId) return;
+          setLoadingNiveis(true);
+          const {data,error} = await _supa.from('gratificacao_niveis').select('*').eq('empresa_id',empresaId).order('ordem');
+          if(!error) setNiveis(data||[]);
+          setLoadingNiveis(false);
+        };
+        React.useEffect(()=>{ carregarNiveis(); },[empresaId]);
+
+        const salvarNivel = async () => {
+          if(!formNiv.ordem||!formNiv.nome||formNiv.valor===''){
+            setStatusNiv({ok:false,msg:'Preencha ordem, nome e valor.'}); return;
+          }
+          const val = parseFloat(String(formNiv.valor).replace(',','.'));
+          if(isNaN(val)||val<0){ setStatusNiv({ok:false,msg:'Valor inválido.'}); return; }
+          setLoadingNiveis(true);
+          const dados = {ordem:parseInt(formNiv.ordem,10), nome:formNiv.nome.trim(), criterio:formNiv.criterio||null, valor:val};
+          let error;
+          if(editandoNiv){
+            ({error} = await _supa.from('gratificacao_niveis').update(dados).eq('id',editandoNiv));
+          } else {
+            ({error} = await _supa.from('gratificacao_niveis').insert({empresa_id:empresaId, ...dados, ativo:true}));
+          }
+          if(error){ setStatusNiv({ok:false,msg:'❌ '+error.message}); }
+          else{ setStatusNiv({ok:true,msg:'✅ Nível salvo!'}); setMostrarFormNiv(false); setEditandoNiv(null); setFormNiv(VAZIO_NIV); carregarNiveis(); }
+          setLoadingNiveis(false);
+        };
+
+        const toggleAtivoNivel = async (id, ativo) => {
+          setLoadingNiveis(true);
+          await _supa.from('gratificacao_niveis').update({ativo:!ativo}).eq('id',id);
+          await carregarNiveis();
+        };
+
+        const excluirNivel = async (id, nome) => {
+          if(!await confirmar(`Excluir o nível "${nome}"? Concessões já registradas não são afetadas (mantêm o valor na data em que foram concedidas).`,'Excluir Nível')) return;
+          setLoadingNiveis(true);
+          await _supa.from('gratificacao_niveis').delete().eq('id',id);
+          await carregarNiveis();
+        };
+
+        const niveisOrdenados = [...niveis].sort((a,b)=>a.ordem-b.ordem);
+        let acumulado = 0;
+        const niveisComAcumulado = niveisOrdenados.map(n=>{ acumulado += Number(n.valor); return {...n, acumulado}; });
+
+        // ── Concessões por colaborador ──
+        const [concessoes, setConcessoes] = React.useState([]);
+        const [loadingConc, setLoadingConc] = React.useState(true);
+        const [statusConc, setStatusConc] = React.useState(null);
+        const [mostrarFormConc, setMostrarFormConc] = React.useState(false);
+        const VAZIO_CONC = {colaboradorNome:'',nivelId:'',dataConclusao:hoje,obs:''};
+        const [formConc, setFormConc] = React.useState(VAZIO_CONC);
+
+        const carregarConcessoes = async () => {
+          if(!empresaId) return;
+          setLoadingConc(true);
+          const {data,error} = await _supa.from('gratificacao_colaborador').select('*').eq('empresa_id',empresaId).order('data_conclusao',{ascending:false});
+          if(!error) setConcessoes(data||[]);
+          setLoadingConc(false);
+        };
+        React.useEffect(()=>{ carregarConcessoes(); },[empresaId]);
+
+        const salvarConcessao = async () => {
+          if(!formConc.colaboradorNome||!formConc.nivelId||!formConc.dataConclusao){
+            setStatusConc({ok:false,msg:'Preencha colaborador, nível e data de conclusão.'}); return;
+          }
+          const nivel = niveis.find(n=>n.id===formConc.nivelId);
+          if(!nivel){ setStatusConc({ok:false,msg:'Nível inválido.'}); return; }
+          setLoadingConc(true);
+          const colab = colabAPI.find(c=>c.nome===formConc.colaboradorNome);
+          const {error} = await _supa.from('gratificacao_colaborador').insert({
+            empresa_id:empresaId,
+            colaborador_id:colab?.id||null,
+            colaborador_nome:formConc.colaboradorNome.trim(),
+            nivel_id:nivel.id, nivel_ordem:nivel.ordem, nivel_nome:nivel.nome, valor:Number(nivel.valor),
+            data_conclusao:formConc.dataConclusao,
+            obs:formConc.obs||null,
+            status:'liberado'
+          });
+          if(error){ setStatusConc({ok:false,msg:'❌ '+error.message}); }
+          else{ setStatusConc({ok:true,msg:'✅ Gratificação registrada!'}); setMostrarFormConc(false); setFormConc(VAZIO_CONC); carregarConcessoes(); }
+          setLoadingConc(false);
+        };
+
+        const cancelarConcessao = async (id) => {
+          if(!await confirmar('Cancelar esta concessão de gratificação?','Cancelar Gratificação')) return;
+          setLoadingConc(true);
+          await _supa.from('gratificacao_colaborador').update({status:'cancelado'}).eq('id',id);
+          await carregarConcessoes();
+        };
+
+        const corStConc = {liberado:{bg:"#DBEAFE",c:"#1D4ED8"},pago:{bg:"#DCFCE7",c:"#166534"},cancelado:{bg:"#FEE2E2",c:"#991B1B"}};
+        const acumuladoPorColab = {};
+        concessoes.filter(c=>c.status!=='cancelado').forEach(c=>{
+          acumuladoPorColab[c.colaborador_nome] = (acumuladoPorColab[c.colaborador_nome]||0) + Number(c.valor);
+        });
+        const niveisDisponiveisParaColab = (nomeColab) => {
+          const jaConcedidos = new Set(concessoes.filter(c=>c.colaborador_nome===nomeColab&&c.status!=='cancelado').map(c=>c.nivel_id));
+          return niveisOrdenados.filter(n=>n.ativo&&!jaConcedidos.has(n.id));
+        };
+
+        return (
+          <div>
+            <div style={{...s.card,background:"#FFFBEB",border:"1px solid #FCD34D",marginBottom:16,padding:"10px 14px",fontSize:12,color:"#92400E"}}>
+              🏆 <strong>Gratificações por nível:</strong> cadastre os níveis (valor de cada um e, quando definido, o critério/meta) e registre aqui a liberação de cada colaborador conforme ele completar os níveis. O acumulado é a soma dos níveis já concedidos.
+            </div>
+
+            <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
+              {[
+                {k:'concessoes', l:'🎖️ Concessões por Colaborador'},
+                {k:'niveis',     l:'📋 Cadastro de Níveis'}
+              ].map(t=>(
+                <button key={t.k} onClick={()=>setSub(t.k)} style={{
+                  background:"none",border:"none",borderBottom:sub===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                  marginBottom:-2,padding:"8px 20px",cursor:"pointer",fontWeight:sub===t.k?700:400,
+                  color:sub===t.k?C.acc:C.muted,fontSize:13
+                }}>{t.l}</button>
+              ))}
+            </div>
+
+            {sub==='niveis'&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+                  <button onClick={()=>{setEditandoNiv(null);setFormNiv({...VAZIO_NIV,ordem:String(niveisOrdenados.length+1)});setMostrarFormNiv(true);setStatusNiv(null);}} style={s.btn}>+ Novo Nível</button>
+                </div>
+                {statusNiv&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:statusNiv.ok?"#DCFCE7":"#FEE2E2",color:statusNiv.ok?"#166534":"#991B1B",fontSize:13}}>{statusNiv.msg}</div>}
+                {mostrarFormNiv&&(
+                  <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>{editandoNiv?'Editar Nível':'Novo Nível de Gratificação'}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 3fr",gap:"0 20px"}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Ordem *</label>
+                        <input type="number" min="1" step="1" value={formNiv.ordem} onChange={e=>setFormNiv(p=>({...p,ordem:e.target.value}))} style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Nome *</label>
+                        <input type="text" value={formNiv.nome} onChange={e=>setFormNiv(p=>({...p,nome:e.target.value}))} placeholder="Ex: Nível 1" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14,gridColumn:"1/-1"}}>
+                        <label style={s.label}>Critério / Meta</label>
+                        <input type="text" value={formNiv.criterio} onChange={e=>setFormNiv(p=>({...p,criterio:e.target.value}))} placeholder="Ainda a definir — deixe em branco se preferir" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Valor do Nível (R$) *</label>
+                        <input type="number" step="0.01" min="0" value={formNiv.valor} onChange={e=>setFormNiv(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Valor incremental deste nível (não acumulado).</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={salvarNivel} style={s.btn} disabled={loadingNiveis}>💾 Salvar</button>
+                      <button onClick={()=>{setMostrarFormNiv(false);setStatusNiv(null);}} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+                {loadingNiveis?(
+                  <div style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
+                ):niveisComAcumulado.length===0?(
+                  <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
+                    <div style={{fontSize:32,marginBottom:8}}>🏆</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Nenhum nível cadastrado</div>
+                    <div style={{fontSize:12}}>Clique em "+ Novo Nível" para começar.</div>
+                  </div>
+                ):(
+                  <div style={s.card}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"var(--c-subtle)"}}>
+                        <th style={s.th}>Nível</th><th style={s.th}>Critério</th>
+                        <th style={s.th}>Valor da Gratificação</th><th style={s.th}>Gratificação Acumulada</th>
+                        <th style={{...s.th,textAlign:"center"}}>Status</th><th style={{...s.th,textAlign:"right"}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {niveisComAcumulado.map(n=>(
+                          <tr key={n.id} style={{borderTop:"1px solid "+C.border,opacity:n.ativo?1:0.55}}>
+                            <td style={{...s.td,fontWeight:600}}>{n.nome}</td>
+                            <td style={{...s.td,fontSize:12,color:C.muted}}>{n.criterio||'—'}</td>
+                            <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(n.valor))}</td>
+                            <td style={{...s.td,fontWeight:700}}>{fmtBRL(n.acumulado)}</td>
+                            <td style={{...s.td,textAlign:"center"}}>
+                              <span style={{background:n.ativo?"#EDE9FE":"#F3F4F6",color:n.ativo?"#5B21B6":C.muted,padding:"2px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{n.ativo?'✅ Ativo':'⏸ Inativo'}</span>
+                            </td>
+                            <td style={{...s.td,textAlign:"right"}}>
+                              <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                                <button onClick={()=>{setFormNiv({ordem:String(n.ordem),nome:n.nome,criterio:n.criterio||'',valor:String(n.valor)});setEditandoNiv(n.id);setMostrarFormNiv(true);setStatusNiv(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
+                                <button onClick={()=>toggleAtivoNivel(n.id,n.ativo)} style={{background:"none",border:`1px solid ${n.ativo?"#FCD34D":"#A78BFA"}`,color:n.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>{n.ativo?'⏸':'▶'}</button>
+                                <button onClick={()=>excluirNivel(n.id,n.nome)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {sub==='concessoes'&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+                  <button onClick={()=>{setMostrarFormConc(true);setStatusConc(null);setFormConc(VAZIO_CONC);}} style={s.btn} disabled={niveisOrdenados.length===0}>+ Registrar Nível Concluído</button>
+                </div>
+                {niveisOrdenados.length===0&&<div style={{fontSize:12,color:C.muted,marginBottom:14}}>Cadastre ao menos um nível na aba "Cadastro de Níveis" antes de registrar concessões.</div>}
+                {statusConc&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:statusConc.ok?"#DCFCE7":"#FEE2E2",color:statusConc.ok?"#166534":"#991B1B",fontSize:13}}>{statusConc.msg}</div>}
+
+                {mostrarFormConc&&(
+                  <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Nível Concluído</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Colaborador *</label>
+                        <select value={formConc.colaboradorNome} onChange={e=>setFormConc(p=>({...p,colaboradorNome:e.target.value,nivelId:''}))} style={s.input}>
+                          <option value="">Selecione...</option>
+                          {[...colabAPI].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt')).map(c=>(
+                            <option key={c.nome} value={c.nome}>{c.nome}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Nível Concluído *</label>
+                        <select value={formConc.nivelId} onChange={e=>setFormConc(p=>({...p,nivelId:e.target.value}))} style={s.input} disabled={!formConc.colaboradorNome}>
+                          <option value="">Selecione...</option>
+                          {niveisDisponiveisParaColab(formConc.colaboradorNome).map(n=>(
+                            <option key={n.id} value={n.id}>{n.nome} — {fmtBRL(Number(n.valor))}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Data de Conclusão *</label>
+                        <input type="date" value={formConc.dataConclusao} onChange={e=>setFormConc(p=>({...p,dataConclusao:e.target.value}))} style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Observações</label>
+                        <input type="text" value={formConc.obs} onChange={e=>setFormConc(p=>({...p,obs:e.target.value}))} placeholder="Opcional" style={s.input}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={salvarConcessao} style={s.btn} disabled={loadingConc}>💾 Salvar</button>
+                      <button onClick={()=>{setMostrarFormConc(false);setStatusConc(null);}} style={s.btnOutline}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                {Object.keys(acumuladoPorColab).length>0&&(
+                  <div style={{...s.card,marginBottom:14,background:"#F5F3FF",border:"1px solid #C4B5FD"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#5B21B6",marginBottom:8}}>🏆 Gratificação acumulada por colaborador</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                      {Object.entries(acumuladoPorColab).map(([nome,val])=>(
+                        <span key={nome} style={{background:"#EDE9FE",border:"1px solid #C4B5FD",borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:600,color:"#5B21B6"}}>
+                          {nome}: {fmtBRL(val)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {loadingConc?(
+                  <div style={{textAlign:"center",padding:"32px",color:C.muted}}>Carregando...</div>
+                ):concessoes.length===0?(
+                  <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
+                    <div style={{fontSize:32,marginBottom:8}}>🎖️</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Nenhuma gratificação concedida ainda</div>
+                  </div>
+                ):(
+                  <div style={s.card}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{background:"var(--c-subtle)"}}>
+                        <th style={s.th}>Colaborador</th><th style={s.th}>Nível</th>
+                        <th style={s.th}>Valor</th><th style={s.th}>Concluído em</th>
+                        <th style={{...s.th,textAlign:"center"}}>Status</th><th style={s.th}>Obs</th><th style={{...s.th,textAlign:"right"}}></th>
+                      </tr></thead>
+                      <tbody>
+                        {concessoes.map(c=>{
+                          const cor = corStConc[c.status]||corStConc.liberado;
+                          return(
+                            <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                              <td style={{...s.td,fontWeight:600}}>{c.colaborador_nome}</td>
+                              <td style={{...s.td,fontSize:12}}>{c.nivel_nome}</td>
+                              <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(c.valor))}</td>
+                              <td style={{...s.td,fontSize:12}}>{c.data_conclusao?new Date(c.data_conclusao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
+                              <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{c.status}</span></td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{c.obs||'—'}</td>
+                              <td style={{...s.td,textAlign:"right"}}>
+                                {c.status!=='cancelado'&&(
+                                  <button onClick={()=>cancelarConcessao(c.id)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -4516,6 +4932,7 @@
       // MÓDULO FUNÇÕES (CARGOS) — cadastro centralizado
       // ============================================================
       function FuncoesPage({ colabAPI, empresaId }) {
+        const [aba, setAba] = React.useState('cargos');
         const [funcoes, setFuncoes] = React.useState([]);
         const [loading, setLoading] = React.useState(true);
         const VAZIO = {
@@ -4629,15 +5046,34 @@
           <div>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
               <div>
-                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🧩 Funções (Cargos)</div>
-                <div style={{fontSize:13,color:C.muted}}>Cadastro centralizado — usado em Colaboradores, Exames e demais módulos</div>
+                <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📋 Planos de Cargos</div>
+                <div style={{fontSize:13,color:C.muted}}>Cadastro centralizado de funções/cargos e gratificações — usado em Colaboradores, Exames e demais módulos</div>
               </div>
-              <div style={{display:'flex',gap:8}}>
-                <button onClick={()=>setMostrarMesclar(p=>!p)} style={s.btnOutline}>🔀 Mesclar Funções</button>
-                <button onClick={abrirNovo} style={s.btn}>➕ Nova Função</button>
-              </div>
+              {aba==='cargos'&&(
+                <div style={{display:'flex',gap:8}}>
+                  <button onClick={()=>setMostrarMesclar(p=>!p)} style={s.btnOutline}>🔀 Mesclar Funções</button>
+                  <button onClick={abrirNovo} style={s.btn}>➕ Nova Função</button>
+                </div>
+              )}
             </div>
 
+            {/* Tabs */}
+            <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
+              {[
+                {k:'cargos',        l:'🧩 Cargos'},
+                {k:'gratificacoes', l:'🏆 Gratificações'}
+              ].map(t=>(
+                <button key={t.k} onClick={()=>setAba(t.k)} style={{
+                  background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                  marginBottom:-2,padding:"8px 20px",cursor:"pointer",fontWeight:aba===t.k?700:400,
+                  color:aba===t.k?C.acc:C.muted,fontSize:13
+                }}>{t.l}</button>
+              ))}
+            </div>
+
+            {aba==='gratificacoes'&&<GratificacoesTab colabAPI={colabAPI} empresaId={empresaId}/>}
+
+            {aba==='cargos'&&(<>
             {status&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',fontSize:13}}>{status.msg}</div>}
 
             {mostrarMesclar&&(
@@ -4841,6 +5277,7 @@
                 )}
               </div>
             </div>
+            </>)}
           </div>
         );
       }
@@ -5504,7 +5941,7 @@
         };
         React.useEffect(()=>{ carregarKits(); },[empresaId]);
 
-        // Lista de funções vem do catálogo centralizado (módulo 🧩 Funções), não mais
+        // Lista de funções vem do catálogo centralizado (módulo 📋 Planos de Cargos), não mais
         // de valores livres em colabAPI — garante nomes consistentes com o resto do app.
         const [funcoesCatalogo, setFuncoesCatalogo] = React.useState([]);
         React.useEffect(()=>{
@@ -7000,7 +7437,7 @@
           setAusenciasAuto({});
           const mesR = mesAno.split('/').reverse().join('-');
           const norm = (n)=>String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
-          _supa.from('adiantamentos').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').then(({data})=>{
+          _supa.from('adiantamentos').select('id,colaborador_nome,valor').eq('empresa_id',empresaId).eq('mes_referencia',mesR).eq('status','pendente').eq('forma_desconto','folha_mensal').then(({data})=>{
             const mapa = {};
             (data||[]).forEach(a=>{
               const k = norm(a.colaborador_nome);
@@ -9691,7 +10128,7 @@
       const navItems=[
         {k:'dashboard',l:'🏠 Início'},
         {k:'colaboradores',l:'👥 Colaboradores'},
-        {k:'funcoes',l:'🧩 Funções'},
+        {k:'funcoes',l:'📋 Planos de Cargos'},
         {k:'vt',l:'🚌 Vale Transporte'},
         {k:'folha',l:'💼 Folha de Pagto'},
         {k:'orcamento',l:'📊 Orçamento Folha'},
