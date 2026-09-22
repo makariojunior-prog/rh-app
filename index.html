@@ -6,7 +6,121 @@
   <script>
     const SUPA_URL = 'https://taicaxtjtikdajmhtsxc.supabase.co';
     const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhaWNheHRqdGlrZGFqbWh0c3hjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0MjgwNzcsImV4cCI6MjA5MzAwNDA3N30.G923g-1cmjrQZi7EoOcZcP1PieO9AKmk4mMMUgT4hbE';
-    const _supa = supabase.createClient(SUPA_URL, SUPA_KEY);
+    // Login único (piloto: Portal, Compras, Comercial). Em vez do localStorage padrão do
+    // supabase-js, a sessão é guardada num cookie no mesmo formato e nome que o
+    // @supabase/ssr usa nos outros apps (sb-<ref>-auth-token, valor com prefixo "base64-" +
+    // base64url do JSON, dividido em cookies .0/.1/... se passar de ~3180 bytes). Em
+    // produção (rh.cantinaemcasa.com) o cookie usa domain=.cantinaemcasa.com, o mesmo dos
+    // outros — logar em qualquer um vale nos demais. Em localhost/preview fica só do host,
+    // como sempre foi.
+    var RH_COOKIE_DOMAIN = location.hostname.endsWith('cantinaemcasa.com') ? '.cantinaemcasa.com' : undefined;
+    var RH_MAX_CHUNK = 3180;
+    var RH_BASE64_PREFIX = 'base64-';
+    var RH_MAX_AGE = 400 * 24 * 60 * 60; // mesmo padrão do @supabase/ssr
+
+    function rhToBase64Url(str) {
+      var bytes = new TextEncoder().encode(str);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function rhFromBase64Url(str) {
+      var b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var binary = atob(b64);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    }
+    function rhReadAllCookies() {
+      var out = {};
+      document.cookie.split(';').forEach(function (part) {
+        var eq = part.indexOf('=');
+        if (eq === -1) return;
+        var name = part.slice(0, eq).trim();
+        if (!name) return;
+        out[name] = decodeURIComponent(part.slice(eq + 1));
+      });
+      return out;
+    }
+    function rhWriteCookie(name, value, maxAgeSeconds) {
+      var attrs = name + '=' + encodeURIComponent(value) + '; Path=/; SameSite=Lax; Max-Age=' + maxAgeSeconds;
+      if (RH_COOKIE_DOMAIN) attrs += '; Domain=' + RH_COOKIE_DOMAIN;
+      if (location.protocol === 'https:') attrs += '; Secure';
+      document.cookie = attrs;
+    }
+    // Mesmo corte de tamanho do @supabase/ssr: se coubesse num cookie só, não fragmenta.
+    function rhCreateChunks(key, value) {
+      var encoded = encodeURIComponent(value);
+      if (encoded.length <= RH_MAX_CHUNK) return [{ name: key, value: value }];
+      var pieces = [];
+      while (encoded.length > 0) {
+        var head = encoded.slice(0, RH_MAX_CHUNK);
+        var lastPct = head.lastIndexOf('%');
+        if (lastPct > RH_MAX_CHUNK - 3) head = head.slice(0, lastPct);
+        var piece = '';
+        while (head.length > 0) {
+          try { piece = decodeURIComponent(head); break; }
+          catch (e) { head = head.slice(0, head.length - 3); }
+        }
+        pieces.push(piece);
+        encoded = encoded.slice(encodeURIComponent(piece).length);
+      }
+      return pieces.map(function (v, i) { return { name: key + '.' + i, value: v }; });
+    }
+
+    var rhCookieAuthStorage = {
+      isServer: false,
+      getItem: function (key) {
+        var cookies = rhReadAllCookies();
+        var combined;
+        if (typeof cookies[key] === 'string') {
+          combined = cookies[key];
+        } else {
+          var parts = [];
+          for (var i = 0; ; i++) {
+            var chunk = cookies[key + '.' + i];
+            if (typeof chunk !== 'string') break;
+            parts.push(chunk);
+          }
+          if (parts.length === 0) return null;
+          combined = parts.join('');
+        }
+        if (!combined) return null;
+        if (combined.slice(0, RH_BASE64_PREFIX.length) !== RH_BASE64_PREFIX) {
+          return combined;
+        }
+        try {
+          return rhFromBase64Url(combined.slice(RH_BASE64_PREFIX.length));
+        } catch (e) {
+          console.warn('[rh] cookie de sessão corrompido, ignorando:', e);
+          return null;
+        }
+      },
+      setItem: function (key, value) {
+        var cookies = rhReadAllCookies();
+        var staleChunkNames = Object.keys(cookies).filter(function (name) {
+          return name === key || name.indexOf(key + '.') === 0;
+        });
+        var encoded = RH_BASE64_PREFIX + rhToBase64Url(value);
+        var chunks = rhCreateChunks(key, encoded);
+        var keepNames = chunks.map(function (c) { return c.name; });
+        staleChunkNames
+          .filter(function (n) { return keepNames.indexOf(n) === -1; })
+          .forEach(function (n) { rhWriteCookie(n, '', 0); });
+        chunks.forEach(function (c) { rhWriteCookie(c.name, c.value, RH_MAX_AGE); });
+      },
+      removeItem: function (key) {
+        var cookies = rhReadAllCookies();
+        Object.keys(cookies)
+          .filter(function (name) { return name === key || name.indexOf(key + '.') === 0; })
+          .forEach(function (n) { rhWriteCookie(n, '', 0); });
+      },
+    };
+
+    const _supa = supabase.createClient(SUPA_URL, SUPA_KEY, {
+      auth: { storage: rhCookieAuthStorage },
+    });
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RH · Cantina em Casa / Lumar v2.9</title>
