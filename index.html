@@ -170,6 +170,8 @@
   <script type="text/babel">
     const { useState, useCallback, useEffect } = React;
 
+    // Lista padronizada de setores (📋 Planos de Cargos e cadastro de Colaboradores).
+    const SETORES_PADRAO = ["Produção","Logística","Administrativo","Comercial","Loja Cantina"];
     const DIAS_SF = ["SEG","TER","QUA","QUI","SEX"];
     const CAJU_VALOR_MENSAL = 200; // Caju (vale-alimentação) — valor cheio do mês, sujeito aos critérios de assiduidade
     const DIAS_SS = ["SEG","TER","QUA","QUI","SEX","SAB"];
@@ -1894,7 +1896,16 @@
                   </select>
                   <div style={{fontSize:11,color:C.muted,marginTop:4}}>Cadastre novas funções em 📋 Planos de Cargos, no menu lateral.</div>
                 </div>
-                <CampoForm label="Setor" campo="setor" placeholder="Ex: Produção" form={form} setForm={setForm}/>
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Setor</label>
+                  <select value={form.setor||''} onChange={e=>setForm(p=>({...p,setor:e.target.value}))} style={s.input}>
+                    <option value="">— Nenhum —</option>
+                    {SETORES_PADRAO.map(st=>(<option key={st} value={st}>{st}</option>))}
+                    {form.setor && !SETORES_PADRAO.includes(form.setor) && (
+                      <option value={form.setor}>{form.setor} (fora do padrão)</option>
+                    )}
+                  </select>
+                </div>
                 <CampoForm label="Data de Admissão" campo="admissao" type="date" form={form} setForm={setForm}/>
                 <CampoForm label="Data de Encerramento" campo="encerramento" type="date" form={form} setForm={setForm} hint={form.encerramento?"⚠️ Preencher esta data torna o colaborador inativo":undefined}/>
                 <CampoForm label="Fim Experiência 30d" campo="experiencia30" type="date" form={form} setForm={setForm}/>
@@ -2108,7 +2119,7 @@
                       ):(
                         <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
                           <thead><tr style={{background:"var(--c-subtle)"}}>
-                            <th style={s.th}>Nível</th><th style={s.th}>Valor</th>
+                            <th style={s.th}>Gratificação</th><th style={s.th}>Valor</th>
                             <th style={s.th}>Concluído em</th><th style={s.th}>Obs</th>
                           </tr></thead>
                           <tbody>{historicoGratificacoes.map((g,i)=>(
@@ -4084,18 +4095,18 @@
       }
 
       // ============================================================
-      // MÓDULO GRATIFICAÇÕES POR NÍVEL
+      // MÓDULO GRATIFICAÇÕES (por setor, algumas com caráter de nível)
       // ============================================================
       function GratificacoesTab({ colabAPI, empresaId }) {
         const hoje = new Date().toISOString().slice(0,10);
         const [sub, setSub] = React.useState('concessoes');
 
-        // ── Níveis (catálogo) ──
+        // ── Gratificações (catálogo) ──
         const [niveis, setNiveis] = React.useState([]);
         const [loadingNiveis, setLoadingNiveis] = React.useState(true);
         const [statusNiv, setStatusNiv] = React.useState(null);
         const [mostrarFormNiv, setMostrarFormNiv] = React.useState(false);
-        const VAZIO_NIV = {ordem:'',nome:'',criterio:'',valor:''};
+        const VAZIO_NIV = {ordem:'',nome:'',criterio:'',valor:'',setor:''};
         const [formNiv, setFormNiv] = React.useState(VAZIO_NIV);
         const [editandoNiv, setEditandoNiv] = React.useState(null);
 
@@ -4115,7 +4126,7 @@
           const val = parseFloat(String(formNiv.valor).replace(',','.'));
           if(isNaN(val)||val<0){ setStatusNiv({ok:false,msg:'Valor inválido.'}); return; }
           setLoadingNiveis(true);
-          const dados = {ordem:parseInt(formNiv.ordem,10), nome:formNiv.nome.trim(), criterio:formNiv.criterio||null, valor:val};
+          const dados = {ordem:parseInt(formNiv.ordem,10), nome:formNiv.nome.trim(), criterio:formNiv.criterio||null, valor:val, setor:formNiv.setor||null};
           let error;
           if(editandoNiv){
             ({error} = await _supa.from('gratificacao_niveis').update(dados).eq('id',editandoNiv));
@@ -4134,15 +4145,33 @@
         };
 
         const excluirNivel = async (id, nome) => {
-          if(!await confirmar(`Excluir o nível "${nome}"? Concessões já registradas não são afetadas (mantêm o valor na data em que foram concedidas).`,'Excluir Nível')) return;
+          if(!await confirmar(`Excluir a gratificação "${nome}"? Concessões já registradas não são afetadas (mantêm o valor na data em que foram concedidas).`,'Excluir Gratificação')) return;
           setLoadingNiveis(true);
           await _supa.from('gratificacao_niveis').delete().eq('id',id);
           await carregarNiveis();
         };
 
         const niveisOrdenados = [...niveis].sort((a,b)=>a.ordem-b.ordem);
-        let acumulado = 0;
-        const niveisComAcumulado = niveisOrdenados.map(n=>{ acumulado += Number(n.valor); return {...n, acumulado}; });
+        // Gratificações de setores diferentes não se somam — cada setor (e "Geral", para as
+        // que não têm setor definido) acumula separadamente, na ordem cadastrada.
+        const SETOR_GERAL = 'Geral (todos os setores)';
+        const gruposPorSetor = (()=>{
+          const porSetor = {};
+          niveisOrdenados.forEach(n=>{
+            const chave = n.setor || SETOR_GERAL;
+            if(!porSetor[chave]) porSetor[chave] = [];
+            porSetor[chave].push(n);
+          });
+          const ordemGrupo = [...SETORES_PADRAO, SETOR_GERAL];
+          return Object.keys(porSetor)
+            .sort((a,b)=>ordemGrupo.indexOf(a)-ordemGrupo.indexOf(b))
+            .map(setor=>{
+              let acumulado = 0;
+              const itens = porSetor[setor].map(n=>{ acumulado += Number(n.valor); return {...n, acumulado}; });
+              return {setor, itens};
+            });
+        })();
+        const niveisComAcumulado = gruposPorSetor.flatMap(g=>g.itens);
 
         // ── Concessões por colaborador ──
         const [concessoes, setConcessoes] = React.useState([]);
@@ -4166,14 +4195,14 @@
             setStatusConc({ok:false,msg:'Preencha colaborador, nível e data de conclusão.'}); return;
           }
           const nivel = niveis.find(n=>n.id===formConc.nivelId);
-          if(!nivel){ setStatusConc({ok:false,msg:'Nível inválido.'}); return; }
+          if(!nivel){ setStatusConc({ok:false,msg:'Gratificação inválida.'}); return; }
           setLoadingConc(true);
           const colab = colabAPI.find(c=>c.nome===formConc.colaboradorNome);
           const {error} = await _supa.from('gratificacao_colaborador').insert({
             empresa_id:empresaId,
             colaborador_id:colab?.id||null,
             colaborador_nome:formConc.colaboradorNome.trim(),
-            nivel_id:nivel.id, nivel_ordem:nivel.ordem, nivel_nome:nivel.nome, valor:Number(nivel.valor),
+            nivel_id:nivel.id, nivel_ordem:nivel.ordem, nivel_nome:nivel.nome, nivel_setor:nivel.setor||null, valor:Number(nivel.valor),
             data_conclusao:formConc.dataConclusao,
             obs:formConc.obs||null,
             status:'liberado'
@@ -4197,19 +4226,26 @@
         });
         const niveisDisponiveisParaColab = (nomeColab) => {
           const jaConcedidos = new Set(concessoes.filter(c=>c.colaborador_nome===nomeColab&&c.status!=='cancelado').map(c=>c.nivel_id));
-          return niveisOrdenados.filter(n=>n.ativo&&!jaConcedidos.has(n.id));
+          const disponiveis = niveisOrdenados.filter(n=>n.ativo&&!jaConcedidos.has(n.id));
+          // Prioriza gratificações do setor do colaborador (mais as "Geral", sem setor) — evita
+          // conceder por engano uma gratificação de outro setor. Se o colaborador não tem setor
+          // cadastrado, ou nenhuma bate com o dele, mostra todas para não travar o cadastro.
+          const colab = colabAPI.find(c=>c.nome===nomeColab);
+          if(!colab?.setor) return disponiveis;
+          const doSetor = disponiveis.filter(n=>!n.setor||n.setor===colab.setor);
+          return doSetor.length>0 ? doSetor : disponiveis;
         };
 
         return (
           <div>
             <div style={{...s.card,background:"#FFFBEB",border:"1px solid #FCD34D",marginBottom:16,padding:"10px 14px",fontSize:12,color:"#92400E"}}>
-              🏆 <strong>Gratificações por nível:</strong> cadastre os níveis (valor de cada um e, quando definido, o critério/meta) e registre aqui a liberação de cada colaborador conforme ele completar os níveis. O acumulado é a soma dos níveis já concedidos.
+              🏆 <strong>Gratificações:</strong> cadastre cada gratificação (valor e, quando fizer sentido, o critério/meta — nem todas são "níveis" sequenciais) e registre aqui a liberação para cada colaborador. Gratificações de setores diferentes <strong>não se somam</strong> — o acumulado é calculado separadamente por setor.
             </div>
 
             <div style={{display:"flex",gap:0,borderBottom:`2px solid ${C.border}`,marginBottom:18}}>
               {[
                 {k:'concessoes', l:'🎖️ Concessões por Colaborador'},
-                {k:'niveis',     l:'📋 Cadastro de Níveis'}
+                {k:'niveis',     l:'📋 Cadastro de Gratificações'}
               ].map(t=>(
                 <button key={t.k} onClick={()=>setSub(t.k)} style={{
                   background:"none",border:"none",borderBottom:sub===t.k?`2px solid ${C.acc}`:"2px solid transparent",
@@ -4222,12 +4258,12 @@
             {sub==='niveis'&&(
               <div>
                 <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-                  <button onClick={()=>{setEditandoNiv(null);setFormNiv({...VAZIO_NIV,ordem:String(niveisOrdenados.length+1)});setMostrarFormNiv(true);setStatusNiv(null);}} style={s.btn}>+ Novo Nível</button>
+                  <button onClick={()=>{setEditandoNiv(null);setFormNiv({...VAZIO_NIV,ordem:String(niveisOrdenados.length+1)});setMostrarFormNiv(true);setStatusNiv(null);}} style={s.btn}>+ Nova Gratificação</button>
                 </div>
                 {statusNiv&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:statusNiv.ok?"#DCFCE7":"#FEE2E2",color:statusNiv.ok?"#166534":"#991B1B",fontSize:13}}>{statusNiv.msg}</div>}
                 {mostrarFormNiv&&(
                   <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
-                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>{editandoNiv?'Editar Nível':'Novo Nível de Gratificação'}</div>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>{editandoNiv?'Editar Gratificação':'Nova Gratificação'}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 3fr",gap:"0 20px"}}>
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Ordem *</label>
@@ -4235,16 +4271,24 @@
                       </div>
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Nome *</label>
-                        <input type="text" value={formNiv.nome} onChange={e=>setFormNiv(p=>({...p,nome:e.target.value}))} placeholder="Ex: Nível 1" style={s.input}/>
+                        <input type="text" value={formNiv.nome} onChange={e=>setFormNiv(p=>({...p,nome:e.target.value}))} placeholder="Ex: Nível 1 - Pães e Roscas" style={s.input}/>
+                      </div>
+                      <div style={{marginBottom:14}}>
+                        <label style={s.label}>Setor</label>
+                        <select value={formNiv.setor} onChange={e=>setFormNiv(p=>({...p,setor:e.target.value}))} style={s.input}>
+                          <option value="">Geral (todos os setores)</option>
+                          {SETORES_PADRAO.map(st=>(<option key={st} value={st}>{st}</option>))}
+                        </select>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Gratificações de setores diferentes acumulam separadamente.</div>
                       </div>
                       <div style={{marginBottom:14,gridColumn:"1/-1"}}>
                         <label style={s.label}>Critério / Meta</label>
                         <input type="text" value={formNiv.criterio} onChange={e=>setFormNiv(p=>({...p,criterio:e.target.value}))} placeholder="Ainda a definir — deixe em branco se preferir" style={s.input}/>
                       </div>
                       <div style={{marginBottom:14}}>
-                        <label style={s.label}>Valor do Nível (R$) *</label>
+                        <label style={s.label}>Valor da Gratificação (R$) *</label>
                         <input type="number" step="0.01" min="0" value={formNiv.valor} onChange={e=>setFormNiv(p=>({...p,valor:e.target.value}))} placeholder="0,00" style={s.input}/>
-                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Valor incremental deste nível (não acumulado).</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:3}}>Valor incremental desta gratificação (não acumulado).</div>
                       </div>
                     </div>
                     <div style={{display:"flex",gap:10}}>
@@ -4258,38 +4302,43 @@
                 ):niveisComAcumulado.length===0?(
                   <div style={{...s.card,textAlign:"center",padding:"48px 20px",color:C.muted}}>
                     <div style={{fontSize:32,marginBottom:8}}>🏆</div>
-                    <div style={{fontWeight:700,marginBottom:4}}>Nenhum nível cadastrado</div>
-                    <div style={{fontSize:12}}>Clique em "+ Novo Nível" para começar.</div>
+                    <div style={{fontWeight:700,marginBottom:4}}>Nenhuma gratificação cadastrada</div>
+                    <div style={{fontSize:12}}>Clique em "+ Nova Gratificação" para começar.</div>
                   </div>
                 ):(
-                  <div style={s.card}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
-                      <thead><tr style={{background:"var(--c-subtle)"}}>
-                        <th style={s.th}>Nível</th><th style={s.th}>Critério</th>
-                        <th style={s.th}>Valor da Gratificação</th><th style={s.th}>Gratificação Acumulada</th>
-                        <th style={{...s.th,textAlign:"center"}}>Status</th><th style={{...s.th,textAlign:"right"}}></th>
-                      </tr></thead>
-                      <tbody>
-                        {niveisComAcumulado.map(n=>(
-                          <tr key={n.id} style={{borderTop:"1px solid "+C.border,opacity:n.ativo?1:0.55}}>
-                            <td style={{...s.td,fontWeight:600}}>{n.nome}</td>
-                            <td style={{...s.td,fontSize:12,color:C.muted}}>{n.criterio||'—'}</td>
-                            <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(n.valor))}</td>
-                            <td style={{...s.td,fontWeight:700}}>{fmtBRL(n.acumulado)}</td>
-                            <td style={{...s.td,textAlign:"center"}}>
-                              <span style={{background:n.ativo?"#EDE9FE":"#F3F4F6",color:n.ativo?"#5B21B6":C.muted,padding:"2px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{n.ativo?'✅ Ativo':'⏸ Inativo'}</span>
-                            </td>
-                            <td style={{...s.td,textAlign:"right"}}>
-                              <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-                                <button onClick={()=>{setFormNiv({ordem:String(n.ordem),nome:n.nome,criterio:n.criterio||'',valor:String(n.valor)});setEditandoNiv(n.id);setMostrarFormNiv(true);setStatusNiv(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
-                                <button onClick={()=>toggleAtivoNivel(n.id,n.ativo)} style={{background:"none",border:`1px solid ${n.ativo?"#FCD34D":"#A78BFA"}`,color:n.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>{n.ativo?'⏸':'▶'}</button>
-                                <button onClick={()=>excluirNivel(n.id,n.nome)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div>
+                    {gruposPorSetor.map(grupo=>(
+                      <div key={grupo.setor} style={{...s.card,marginBottom:14,padding:0,overflow:"hidden"}}>
+                        <div style={{background:C.pri,color:"#fff",padding:"8px 14px",fontWeight:700,fontSize:12}}>🏭 {grupo.setor}</div>
+                        <table style={{width:"100%",borderCollapse:"collapse"}}>
+                          <thead><tr style={{background:"var(--c-subtle)"}}>
+                            <th style={s.th}>Gratificação</th><th style={s.th}>Critério</th>
+                            <th style={s.th}>Valor</th><th style={s.th}>Acumulado no setor</th>
+                            <th style={{...s.th,textAlign:"center"}}>Status</th><th style={{...s.th,textAlign:"right"}}></th>
+                          </tr></thead>
+                          <tbody>
+                            {grupo.itens.map(n=>(
+                              <tr key={n.id} style={{borderTop:"1px solid "+C.border,opacity:n.ativo?1:0.55}}>
+                                <td style={{...s.td,fontWeight:600}}>{n.nome}</td>
+                                <td style={{...s.td,fontSize:12,color:C.muted}}>{n.criterio||'—'}</td>
+                                <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(n.valor))}</td>
+                                <td style={{...s.td,fontWeight:700}}>{fmtBRL(n.acumulado)}</td>
+                                <td style={{...s.td,textAlign:"center"}}>
+                                  <span style={{background:n.ativo?"#EDE9FE":"#F3F4F6",color:n.ativo?"#5B21B6":C.muted,padding:"2px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{n.ativo?'✅ Ativo':'⏸ Inativo'}</span>
+                                </td>
+                                <td style={{...s.td,textAlign:"right"}}>
+                                  <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                                    <button onClick={()=>{setFormNiv({ordem:String(n.ordem),nome:n.nome,criterio:n.criterio||'',valor:String(n.valor),setor:n.setor||''});setEditandoNiv(n.id);setMostrarFormNiv(true);setStatusNiv(null);}} style={{background:"none",border:"1px solid "+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✏️</button>
+                                    <button onClick={()=>toggleAtivoNivel(n.id,n.ativo)} style={{background:"none",border:`1px solid ${n.ativo?"#FCD34D":"#A78BFA"}`,color:n.ativo?"#92400E":"#5B21B6",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>{n.ativo?'⏸':'▶'}</button>
+                                    <button onClick={()=>excluirNivel(n.id,n.nome)} style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:5,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>🗑</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -4298,14 +4347,14 @@
             {sub==='concessoes'&&(
               <div>
                 <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
-                  <button onClick={()=>{setMostrarFormConc(true);setStatusConc(null);setFormConc(VAZIO_CONC);}} style={s.btn} disabled={niveisOrdenados.length===0}>+ Registrar Nível Concluído</button>
+                  <button onClick={()=>{setMostrarFormConc(true);setStatusConc(null);setFormConc(VAZIO_CONC);}} style={s.btn} disabled={niveisOrdenados.length===0}>+ Registrar Gratificação</button>
                 </div>
-                {niveisOrdenados.length===0&&<div style={{fontSize:12,color:C.muted,marginBottom:14}}>Cadastre ao menos um nível na aba "Cadastro de Níveis" antes de registrar concessões.</div>}
+                {niveisOrdenados.length===0&&<div style={{fontSize:12,color:C.muted,marginBottom:14}}>Cadastre ao menos uma gratificação na aba "Cadastro de Gratificações" antes de registrar concessões.</div>}
                 {statusConc&&<div style={{padding:"10px 14px",borderRadius:6,marginBottom:14,background:statusConc.ok?"#DCFCE7":"#FEE2E2",color:statusConc.ok?"#166534":"#991B1B",fontSize:13}}>{statusConc.msg}</div>}
 
                 {mostrarFormConc&&(
                   <div style={{...s.card,marginBottom:16,border:"1px solid "+C.pri}}>
-                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Nível Concluído</div>
+                    <div style={{fontWeight:700,color:C.pri,marginBottom:14,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registrar Gratificação Concedida</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
                       <div style={{marginBottom:14}}>
                         <label style={s.label}>Colaborador *</label>
@@ -4317,11 +4366,11 @@
                         </select>
                       </div>
                       <div style={{marginBottom:14}}>
-                        <label style={s.label}>Nível Concluído *</label>
+                        <label style={s.label}>Gratificação *</label>
                         <select value={formConc.nivelId} onChange={e=>setFormConc(p=>({...p,nivelId:e.target.value}))} style={s.input} disabled={!formConc.colaboradorNome}>
                           <option value="">Selecione...</option>
                           {niveisDisponiveisParaColab(formConc.colaboradorNome).map(n=>(
-                            <option key={n.id} value={n.id}>{n.nome} — {fmtBRL(Number(n.valor))}</option>
+                            <option key={n.id} value={n.id}>{n.nome}{n.setor?` (${n.setor})`:''} — {fmtBRL(Number(n.valor))}</option>
                           ))}
                         </select>
                       </div>
@@ -4365,7 +4414,7 @@
                   <div style={s.card}>
                     <table style={{width:"100%",borderCollapse:"collapse"}}>
                       <thead><tr style={{background:"var(--c-subtle)"}}>
-                        <th style={s.th}>Colaborador</th><th style={s.th}>Nível</th>
+                        <th style={s.th}>Colaborador</th><th style={s.th}>Gratificação</th><th style={s.th}>Setor</th>
                         <th style={s.th}>Valor</th><th style={s.th}>Concluído em</th>
                         <th style={{...s.th,textAlign:"center"}}>Status</th><th style={s.th}>Obs</th><th style={{...s.th,textAlign:"right"}}></th>
                       </tr></thead>
@@ -4376,6 +4425,7 @@
                             <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
                               <td style={{...s.td,fontWeight:600}}>{c.colaborador_nome}</td>
                               <td style={{...s.td,fontSize:12}}>{c.nivel_nome}</td>
+                              <td style={{...s.td,fontSize:12,color:C.muted}}>{c.nivel_setor||'Geral'}</td>
                               <td style={{...s.td,fontWeight:700,color:C.pri}}>{fmtBRL(Number(c.valor))}</td>
                               <td style={{...s.td,fontSize:12}}>{c.data_conclusao?new Date(c.data_conclusao+'T12:00:00').toLocaleDateString('pt-BR'):'—'}</td>
                               <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{c.status}</span></td>
@@ -5109,7 +5159,11 @@
         const [mostrarForm, setMostrarForm] = React.useState(false);
         const [editandoId, setEditandoId] = React.useState(null);
         const [status, setStatus] = React.useState(null);
-        const [funcaoSel, setFuncaoSel] = React.useState(null);
+        // Guarda só o id selecionado e deriva o objeto de `funcoes` a cada render — assim o
+        // painel de detalhes nunca fica com uma cópia velha depois de editar/salvar (o Setor
+        // padrão "sumia" porque o painel ainda mostrava o objeto de antes do salvar).
+        const [funcaoSelId, setFuncaoSelId] = React.useState(null);
+        const funcaoSel = React.useMemo(()=>funcoes.find(f=>f.id===funcaoSelId)||null,[funcoes,funcaoSelId]);
         const [busca, setBusca] = React.useState('');
 
         // ── Mesclar funções (para o usuário unificar variações que ele confirmar serem o mesmo cargo) ──
@@ -5185,7 +5239,7 @@
           const aviso = qtd>0 ? ` ${qtd} colaborador(es) usam esta função hoje — eles não serão alterados, mas a função some do catálogo.` : '';
           if(!await confirmar(`Excluir a função "${f.nome}"?${aviso}`,'Excluir Função')) return;
           await _supa.from('funcoes').delete().eq('id',f.id);
-          if(funcaoSel?.id===f.id) setFuncaoSel(null);
+          if(funcaoSel?.id===f.id) setFuncaoSelId(null);
           carregar();
         };
 
@@ -5280,7 +5334,13 @@
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Setor padrão</label>
-                    <input type="text" value={form.setor_padrao} onChange={e=>setForm(p=>({...p,setor_padrao:e.target.value}))} placeholder="Ex: Produção" style={s.input}/>
+                    <select value={form.setor_padrao} onChange={e=>setForm(p=>({...p,setor_padrao:e.target.value}))} style={s.input}>
+                      <option value="">— Nenhum —</option>
+                      {SETORES_PADRAO.map(st=>(<option key={st} value={st}>{st}</option>))}
+                      {form.setor_padrao && !SETORES_PADRAO.includes(form.setor_padrao) && (
+                        <option value={form.setor_padrao}>{form.setor_padrao} (fora do padrão)</option>
+                      )}
+                    </select>
                   </div>
                   <div style={{marginBottom:14}}>
                     <label style={s.label}>Nível</label>
@@ -5345,7 +5405,7 @@
                   const sel = funcaoSel?.id===f.id;
                   const qtd = contagemPorFuncao[f.nome]||0;
                   return (
-                    <div key={f.id} onClick={()=>setFuncaoSel(f)} style={{padding:'9px 12px',borderRadius:7,cursor:'pointer',marginBottom:3,opacity:f.ativo?1:0.55,
+                    <div key={f.id} onClick={()=>setFuncaoSelId(f.id)} style={{padding:'9px 12px',borderRadius:7,cursor:'pointer',marginBottom:3,opacity:f.ativo?1:0.55,
                       background:sel?'var(--c-cream)':'transparent',border:'1px solid '+(sel?C.acc:'transparent')}}>
                       <div style={{fontWeight:sel?700:500,fontSize:13,color:sel?C.pri:C.text}}>{f.nome}</div>
                       <div style={{fontSize:10,color:C.muted,marginTop:1}}>{qtd} colaborador{qtd!==1?'es':''}{!f.ativo?' · pausada':''}</div>
