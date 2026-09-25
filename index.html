@@ -169,6 +169,7 @@
     const { useState, useCallback, useEffect } = React;
 
     const DIAS_SF = ["SEG","TER","QUA","QUI","SEX"];
+    const CAJU_VALOR_MENSAL = 200; // Caju (vale-alimentação) — valor cheio do mês, sujeito aos critérios de assiduidade
     const DIAS_SS = ["SEG","TER","QUA","QUI","SEX","SAB"];
     const DIA_LABEL = {SEG:"Seg",TER:"Ter",QUA:"Qua",QUI:"Qui",SEX:"Sex",SAB:"Sáb"};
     const DIA_LABEL_FULL = {SEG:"Segunda",TER:"Terça",QUA:"Quarta",QUI:"Quinta",SEX:"Sexta",SAB:"Sábado"};
@@ -1107,7 +1108,7 @@
                   {t:"Período", d:"Dia 26 do mês anterior ao dia 25 do mês de referência"},
                   {t:"DSR (Descanso Semanal)", d:"Perdido quando há pelo menos 1 falta injustificada na semana"},
                   {t:"Feriado em semana com falta", d:"O feriado também é perdido na semana em que há falta"},
-                  {t:"CAJU (vale-alimentação)", d:"R$ 5,00 por dia trabalhado, em atestado ou férias. Não conta durante os 90 dias de experiência"},
+                  {t:"CAJU (vale-alimentação)", d:"R$ 200,00 por mês. Reduz para 50% ou é perdido conforme atrasos, saídas antecipadas, faltas e esquecimentos de ponto (tabela completa na Folha → ❓ Regras). Atestado médico válido não reduz. Não é pago nos dias de experiência (90 dias)"},
                   {t:"Horas Extras", d:"Lidas diretamente do campo 'Hora Extra' do CSV do ponto"},
                   {t:"Prêmio Assiduidade", d:"Marcado automaticamente se não houver faltas. Pode ser ajustado manualmente"},
                   {t:"Desconto VT", d:"Ativado automaticamente se o colaborador tiver valor de transporte cadastrado"},
@@ -7049,7 +7050,7 @@
         const [feriados, setFeriados] = React.useState(()=>{ try{return JSON.parse(localStorage.getItem("rh_feriados")||"[]");}catch(e){return [];} });
         const [showFeriados, setShowFeriados] = React.useState(false);
         const [novoFeriado, setNovoFeriado] = React.useState("");
-        const [atestadosMapa, setAtestadosMapa] = React.useState({}); // atestados do módulo 🏥 → status automático por dia
+        const [atestadosMapa, setAtestadosMapa] = React.useState({}); // atestados (🏥) e férias (🏖️) dos módulos → status automático por dia
 
         const hhmmToMin = str => { if(!str||str==="00:00") return 0; const [h,m]=str.split(":"); return parseInt(h)*60+parseInt(m||0); };
         const horVal = h => h && h !== "" && h !== "00:00";
@@ -7077,12 +7078,17 @@
             fim = _fim ?? dataFim;
             if(!ini||!fim){ setLoading(false); return; }
           }
-          const [{data, error}, mapaAt] = await Promise.all([
+          const [{data, error}, mapaAt, mapaFe] = await Promise.all([
             _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',ini).lte('data',fim).order('colaborador_nome').order('data'),
-            carregarMapaAtestados(empresaId, ini, fim).catch(err=>{ console.error('atestados (ponto) load error:',err); return {}; })
+            carregarMapaAtestados(empresaId, ini, fim).catch(err=>{ console.error('atestados (ponto) load error:',err); return {}; }),
+            carregarMapaFerias(empresaId, ini, fim).catch(err=>{ console.error('ferias (ponto) load error:',err); return {}; })
           ]);
           if(!error) setLista(data||[]);
-          setAtestadosMapa(mapaAt);
+          // Atestado tem prioridade sobre férias no mesmo dia (mesma regra da Folha).
+          const mapaAus = {};
+          Object.entries(mapaFe).forEach(([k,d])=>{ mapaAus[k]={...d}; });
+          Object.entries(mapaAt).forEach(([k,d])=>{ mapaAus[k]={...(mapaAus[k]||{}),...d}; });
+          setAtestadosMapa(mapaAus);
           setLoading(false);
         };
 
@@ -7259,17 +7265,18 @@
               </div>
             ):(
               Object.entries(porColab).map(([nome, dias])=>{
-                // Status efetivo do dia: marcação manual do Banco de Ponto > atestado do módulo 🏥 Atestados.
+                // Status efetivo do dia: marcação manual do Banco de Ponto > atestado (🏥) > férias (🏖️) dos módulos.
                 const atColab = atestadosMapa[normNome(nome)] || {};
                 const statusDia = r => r.status_manual || atColab[r.data] || "";
                 const temBat = r => horVal(r.real_b1)||horVal(r.real_b2)||horVal(r.real_b3)||horVal(r.real_b4);
                 const nAtest = dias.filter(r=>statusDia(r)==="atestado").length;
+                const nFerias = dias.filter(r=>statusDia(r)==="ferias").length;
                 const nTrab = dias.filter(r=>temBat(r)&&!["atestado","ferias","folga","abono"].includes(statusDia(r))).length;
                 return (
                 <div key={nome} style={{...s.card,padding:0,overflow:"hidden",marginBottom:12}}>
                   <div style={{background:C.pri,color:"#fff",padding:"10px 16px",fontWeight:700,fontSize:13}}>
                     👤 {nome} — {dias.length} dias
-                    <span style={{fontWeight:400,fontSize:12,opacity:0.85}}> · {nTrab} trabalhado{nTrab!==1?"s":""}{nAtest>0?` · ${nAtest} em atestado`:""}</span>
+                    <span style={{fontWeight:400,fontSize:12,opacity:0.85}}> · {nTrab} trabalhado{nTrab!==1?"s":""}{nAtest>0?` · ${nAtest} em atestado`:""}{nFerias>0?` · ${nFerias} em férias`:""}</span>
                   </div>
                   <div style={{overflowX:"auto"}}>
                     <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -7294,7 +7301,7 @@
                           const isFolga = jornada === 'SEG-SEX' && ehSabado;
                           const atAuto = !r.status_manual ? atColab[r.data] : undefined;
                           const stEf = statusDia(r);
-                          const emAtestado = stEf==="atestado" || stEf==="atestado_meio";
+                          const emAtestado = stEf==="atestado" || stEf==="atestado_meio" || stEf==="ferias";
                           const isFalta = temPrev && !temBatida && !stEf && !isFeriado && !isFolga;
                           // Apuração POR INTERVALO (manhã/tarde) — mesma lógica de calcularColab,
                           // para que H.Extra/H.Falta da linha batam com os totais do colaborador.
@@ -7307,7 +7314,7 @@
                           const previstoMin   = (isFolga||isFeriado) ? 0 : Math.max(0,_p1) + Math.max(0,_p2);
                           const trabalhadoMin = Math.max(0,_r1) + Math.max(0,_r2);
                           let calcExtraMin = 0, calcFaltaMin = 0;
-                          // Dia em atestado não é dia trabalhado: não apura H.Extra/H.Falta (igual à Folha).
+                          // Dia em atestado/férias não é dia trabalhado: não apura H.Extra/H.Falta (igual à Folha).
                           if (!isFolga && !isFeriado && !emAtestado && temBatida) {
                             const liq = trabalhadoMin - previstoMin;
                             if (liq > 0) calcExtraMin = liq;
@@ -7339,7 +7346,7 @@
                             );
                           };
                           return (
-                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:foiEditado?"#FFFBEB":stEf==="atestado"?"#FFF7ED":isFeriado?C.feriado:isFolga?"var(--c-subtle)":isFalta?"#FFF0F0":i%2===0?"var(--c-card)":"var(--c-subtle)"}}>
+                            <tr key={r.id} style={{borderTop:`1px solid ${C.border}`,background:foiEditado?"#FFFBEB":stEf==="atestado"?"#FFF7ED":stEf==="ferias"?"#EFF6FF":isFeriado?C.feriado:isFolga?"var(--c-subtle)":isFalta?"#FFF0F0":i%2===0?"var(--c-card)":"var(--c-subtle)"}}>
                               <td style={{...s.td,fontWeight:600}}>
                                 {dt.toLocaleDateString('pt-BR')} <span style={{fontSize:10,color:C.muted}}>{dow}</span>
                                 {isFeriado&&<div style={{fontSize:9,fontWeight:700,color:"var(--c-feriado-text)",marginTop:1}}>{feriadoNomeMap[r.data]||"Feriado"}</div>}
@@ -7360,7 +7367,8 @@
                                     background:r.status_manual==="atestado"?"#FFF7ED":r.status_manual==="atestado_meio"?"#FEF3C7":r.status_manual==="abono"?"#EFF6FF":r.status_manual?"#F0FFF4":"#fff"}}>
                                   {STATUS_OPTS.map(o=>(<option key={o.v} value={o.v}>{o.l}</option>))}
                                 </select>
-                                {atAuto&&<span title="Puxado do módulo 🏥 Atestados — não conta como dia trabalhado. Escolha outro status para sobrescrever." style={{marginLeft:4,fontSize:10,color:"#B45309",fontWeight:700}}>🏥 {atAuto==="atestado"?"ATESTADO":"½ ATESTADO"}</span>}
+                                {atAuto==="ferias"&&<span title="Puxado do módulo 🏖️ Férias — não conta como dia trabalhado. Escolha outro status para sobrescrever." style={{marginLeft:4,fontSize:10,color:"#1D4ED8",fontWeight:700}}>🏖️ FÉRIAS</span>}
+                                {atAuto&&atAuto!=="ferias"&&<span title="Puxado do módulo 🏥 Atestados — não conta como dia trabalhado. Escolha outro status para sobrescrever." style={{marginLeft:4,fontSize:10,color:"#B45309",fontWeight:700}}>🏥 {atAuto==="atestado"?"ATESTADO":"½ ATESTADO"}</span>}
                                 {isFalta&&<span style={{marginLeft:4,fontSize:10,color:C.danger,fontWeight:700}}>FALTA</span>}
                                 {isFolga&&<span style={{marginLeft:4,fontSize:10,color:C.muted,fontWeight:700}}>FOLGA</span>}
                               </td>
@@ -7892,6 +7900,7 @@
           let diasTrabalhados=0, faltas=0, atestados=0, atestadosMeio=0, ferias=0, folgas=0, abonos=0;
           let horasExtrasMin=0, horasFaltasMin=0;
           let atrasosInjustificados=0;
+          let saidasAntecipadas=0, esquecimentosPonto=0; // critérios do Caju R$ 200
           const diasFaltas = [];
           // Data de fim da experiência (col I = EXPERIÊNCIA 90 DIAS)
           const fimExperiencia = colabInfo?.experiencia90 ? new Date(colabInfo.experiencia90 + "T12:00:00") : null;
@@ -7927,6 +7936,16 @@
                 const prevE1 = hhmmToMin(diaDados.previsto.e1);
                 const realB1 = hhmmToMin(diaDados.real.b1);
                 if (prevE1 > 0 && realB1 > 0 && realB1 > prevE1 + 10) atrasosInjustificados++;
+                // Caju — saída antecipada injustificada: última batida mais de 10 min antes do previsto.
+                const hv = h => h && h !== "" && h !== "00:00";
+                const P = diaDados.previsto, R = diaDados.real;
+                const saidaPrev = hv(P.s2) ? P.s2 : P.s1;
+                const saidaReal = hv(P.s2) ? R.b4 : R.b2;
+                if (hv(saidaPrev) && hv(saidaReal) && hhmmToMin(saidaReal) < hhmmToMin(saidaPrev) - 10) saidasAntecipadas++;
+                // Caju — esquecimento de ponto não regularizado: dia trabalhado com batida prevista faltando.
+                // (Batida corrigida no 📋 Banco de Ponto conta como regularizada.)
+                const faltaBatida = (hv(P.e1)&&!hv(R.b1)) || (hv(P.s1)&&!hv(R.b2)) || (hv(P.e2)&&!hv(R.b3)) || (hv(P.s2)&&!hv(R.b4));
+                if (faltaBatida) esquecimentosPonto++;
               }
             } else if (a.status === "falta") {
               faltas++;
@@ -7965,9 +7984,15 @@
             // abono não gera perda de DSR (já tratado pelo status diferente de "falta")
           });
 
-          // CAJU: R$5 por dia trabalhado no período — faltas e atestados completos não contam
+          // CAJU R$ 200,00/mês — percentual pela tabela de critérios (vale o critério MAIS restritivo):
+          //   Atrasos > 10 min: até 1 → 100% | 2 → 50% | 3+ → perde
+          //   Saída antecipada injustificada: 1 → 50% | 2+ → perde
+          //   Falta injustificada: qualquer → perde
+          //   Esquecimento de ponto não regularizado: até 1 → 100% | 2 → 50% | 3+ → perde
+          //   Atestado médico válido: não reduz
+          // Experiência (até Experiência 90 dias): não recebe nesses dias (valor proporcional ao restante do período).
           let diasUteisPrevistos = 0;
-          let cajuDias = 0;
+          let cajuDias = 0; // dias do período fora da experiência (base da proporcionalidade)
           let diasEmExperiencia = 0;
           datasPeriodo.forEach(iso=>{
             const diaDadosC = dados?.dias?.[iso];
@@ -7977,28 +8002,19 @@
             const dtDia = new Date(iso+"T12:00:00");
             const emExp = fimExperiencia && dtDia <= fimExperiencia;
             if (emExp && temPrevC) diasEmExperiencia++;
-
-            // Dias que nunca contam para Caju
-            const dow = dtDia.getDay();
-            const jornada = colabInfo?.jornada || "SEG-SAB";
-            if (dow === 0) return; // Domingo
-            if (jornada === "SEG-SEX" && dow === 6) return; // Sábado fora da escala
-            if (feriados.includes(iso)) return; // Feriado
-
-            // Período de experiência (até experiencia90): CAJU cortado, mesmo em dia trabalhado.
-            if (emExp) return;
-
-            const aCaju = analisarDia(nomeKey, iso, diaDadosC, colabInfo);
-            // Conta: trabalhou, atestado_meio
-            if (aCaju.status === "trabalhou" || aCaju.status === "atestado_meio") {
-              cajuDias++;
-            }
-            // Sem dados de ponto num dia útil → presume presença (não falta/atestado/férias explícita)
-            else if (aCaju.status === "nao_previsto") {
-              cajuDias++;
-            }
+            if (!emExp) cajuDias++;
           });
-          const cajuValor = cajuDias * 5;
+          const faixa = (n, cheio, meio) => n <= cheio ? 1 : n <= meio ? 0.5 : 0;
+          const cajuCriterios = [
+            {k:"atrasos",      l:"Atrasos > 10 min",            n:atrasosInjustificados, pct:faixa(atrasosInjustificados,1,2)},
+            {k:"saidas",       l:"Saídas antecipadas",          n:saidasAntecipadas,     pct:faixa(saidasAntecipadas,0,1)},
+            {k:"faltas",       l:"Faltas injustificadas",       n:faltas,                pct:faltas>0?0:1},
+            {k:"esquecimentos",l:"Esquecimentos de ponto",      n:esquecimentosPonto,    pct:faixa(esquecimentosPonto,1,2)},
+          ];
+          const cajuPct = Math.min(...cajuCriterios.map(c=>c.pct));
+          const cajuMotivo = cajuCriterios.filter(c=>c.pct<1).map(c=>`${c.l}: ${c.n}`).join(" · ");
+          const cajuProp = datasPeriodo.length ? cajuDias / datasPeriodo.length : 0;
+          const cajuValor = Math.round(CAJU_VALOR_MENSAL * cajuPct * cajuProp * 100) / 100;
 
           const aj = ajustes[nomeKey] || {};
           const produtos = parseFloat(String(aj.produtos||"").replace(",","."))||(comprasSupa[nomeKey]?.valor||0);
@@ -8024,7 +8040,7 @@
             horasFaltas: minToHHMM(horasFaltasMin),
             horasFaltasMin,
             dsrPerdidos, diasUteisPrevistos, diasEmExperiencia,
-            cajuDias, cajuValor,
+            cajuDias, cajuValor, cajuPct, cajuMotivo, cajuCriterios, saidasAntecipadas, esquecimentosPonto,
             premioAssiduidade, premioAssiduidadeDias, atrasosInjustificados, descontarVT, bancoHoras,
             produtos, adiantamento, adiantAvulso, adiantFixo, adiantAuto, totalDesconto,
             diasFaltas, observacoes: aj.observacoes||"",
@@ -8167,12 +8183,12 @@
         };
 
         const exportarCSVFolha = () => {
-          const header = ["Período","Colaborador","Função","Dias Trab.","Faltas","Atestados","Férias","H.Extras","H.Faltas Parcial","DSR Perd.","Caju Dias","Caju R$","Produtos R$","Adiant. R$","Total Desc. R$","Banco Horas","Dias Faltas"];
+          const header = ["Período","Colaborador","Função","Dias Trab.","Faltas","Atestados","Férias","H.Extras","H.Faltas Parcial","DSR Perd.","Caju %","Caju R$","Caju Motivo","Produtos R$","Adiant. R$","Total Desc. R$","Banco Horas","Dias Faltas"];
           const rows = resultados.map(r=>[
             periodoLabel, r.nome, r.funcao,
             r.calc.diasTrabalhados, r.calc.faltas, r.calc.atestados, r.calc.ferias,
             r.calc.horasExtras, r.calc.horasFaltasMin>0?r.calc.horasFaltas:"", r.calc.dsrPerdidos,
-            r.calc.cajuDias, r.calc.cajuValor.toFixed(2).replace(".",","),
+            Math.round((r.calc.cajuPct||0)*100)+"%", r.calc.cajuValor.toFixed(2).replace(".",","), r.calc.cajuMotivo||"",
             r.calc.produtos.toFixed(2).replace(".",","),
             r.calc.adiantamento.toFixed(2).replace(".",","),
             r.calc.totalDesconto.toFixed(2).replace(".",","),
@@ -8237,9 +8253,9 @@
                         {[
                           {s:"trabalhou",l:"Trabalhado",c:C.green,bg:"#E8F5EE",d:"Dia com registro de ponto (batida) dentro do horário previsto."},
                           {s:"falta",l:"Falta",c:C.danger,bg:"#FEE2E2",d:"Dia previsto sem batida e sem justificativa. Gera perda de DSR na semana."},
-                          {s:"atestado",l:"Atestado",c:C.amber,bg:"#FFF8E7",d:"Afastamento médico justificado (dia todo). Conta para CAJU, não gera falta nem perde DSR. Desconta 1 dia do prêmio assiduidade."},
-                          {s:"atestado_meio",l:"Atestado ½ Per.",c:"#D97706",bg:"#FEF3C7",d:"Atestado de meio período (manhã ou tarde). Conta como dia trabalhado: não desconta assiduidade, não perde VT e conta para CAJU."},
-                          {s:"ferias",l:"Férias",c:"#3b82f6",bg:"#DBEAFE",d:"Período de férias. Conta para CAJU. Não gera falta."},
+                          {s:"atestado",l:"Atestado",c:C.amber,bg:"#FFF8E7",d:"Afastamento médico justificado (dia todo). Não reduz o CAJU, não gera falta nem perde DSR. Desconta 1 dia do prêmio assiduidade."},
+                          {s:"atestado_meio",l:"Atestado ½ Per.",c:"#D97706",bg:"#FEF3C7",d:"Atestado de meio período (manhã ou tarde). Conta como dia trabalhado: não desconta assiduidade, não perde VT e não reduz o CAJU."},
+                          {s:"ferias",l:"Férias",c:"#3b82f6",bg:"#DBEAFE",d:"Período de férias. Não reduz o CAJU. Não gera falta."},
                           {s:"folga",l:"Folga",c:"#8b5cf6",bg:"#EDE9FE",d:"Folga compensatória ou escala. Não conta como falta nem como dia trabalhado."},
                           {s:"feriado",l:"Feriado",c:"#D4972A",bg:"#FFF8E7",d:"Feriado nacional, estadual ou municipal marcado. Não conta como falta. Se houver falta na mesma semana, o feriado também é perdido."},
                         ].map((it,i)=>(
@@ -8279,10 +8295,43 @@
                       <div style={{fontWeight:800,color:C.pri,fontSize:13,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>🍱 CAJU — Vale Alimentação</div>
                       <div style={{background:C.rowAlt,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,lineHeight:1.8}}>
                         <ul style={{paddingLeft:18,lineHeight:2.1}}>
-                          <li>Valor: <strong>R$ 5,00 por dia</strong> trabalhado ou com <strong>atestado de meio período</strong>.</li>
-                          <li><strong>Descontado</strong> (não gera crédito) em: falta, atestado de <strong>dia todo</strong>, férias, folga, feriado e abono.</li>
-                          <li>Atestado de meio período é a <strong>exceção</strong>: como o colaborador trabalha a outra metade do dia, o CAJU não é descontado.</li>
-                          <li>Colaboradores em <strong>período de experiência</strong> (até a data de Experiência 90 dias) <strong>não recebem CAJU</strong> nesse período, mesmo em dia trabalhado.</li>
+                          <li>Valor cheio: <strong>R$ 200,00 por mês</strong>. O app calcula automaticamente quanto cada colaborador recebe, olhando o ponto do período (26 a 25).</li>
+                          <li>Veja na tabela abaixo o que acontece em cada situação:</li>
+                        </ul>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,margin:"6px 0 10px"}}>
+                          <thead><tr>
+                            <th style={{textAlign:"left",padding:"5px 8px",borderBottom:`2px solid ${C.border}`}}>Situação no mês</th>
+                            <th style={{textAlign:"center",padding:"5px 8px",borderBottom:`2px solid ${C.border}`}}>Recebe</th>
+                          </tr></thead>
+                          <tbody>
+                            {[
+                              ["Até 1 atraso superior a 10 minutos","100%"],
+                              ["2 atrasos","50%"],
+                              ["3 ou mais atrasos","Perde"],
+                              ["1 saída antecipada injustificada","50%"],
+                              ["2 ou mais saídas antecipadas","Perde"],
+                              ["Qualquer falta injustificada","Perde"],
+                              ["Até 1 esquecimento de ponto não regularizado","100%"],
+                              ["2 esquecimentos não regularizados","50%"],
+                              ["3 ou mais esquecimentos não regularizados","Perde"],
+                              ["Atestado médico válido","Não reduz"],
+                            ].map(([sit,rec],i)=>(
+                              <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
+                                <td style={{padding:"4px 8px"}}>{sit}</td>
+                                <td style={{padding:"4px 8px",textAlign:"center",fontWeight:800,color:rec==="Perde"?C.danger:rec==="50%"?C.amber:C.green}}>{rec}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <ul style={{paddingLeft:18,lineHeight:2.1}}>
+                          <li><strong>Mais de uma ocorrência?</strong> Vale a regra mais rígida. Ex.: 2 atrasos (50%) + 1 falta (perde) → <strong>perde</strong>. 2 atrasos (50%) + 1 saída antecipada (50%) → <strong>50%</strong> (R$ 100,00).</li>
+                          <li><strong>Atraso:</strong> primeira batida do dia mais de 10 minutos depois do horário previsto de entrada.</li>
+                          <li><strong>Saída antecipada:</strong> última batida do dia mais de 10 minutos antes do horário previsto de saída.</li>
+                          <li><strong>Esquecimento de ponto:</strong> dia trabalhado em que falta alguma das batidas previstas. Para <strong>regularizar</strong>, lance a batida em 📋 Banco de Ponto — aí o dia deixa de contar como esquecimento.</li>
+                          <li><strong>Falta injustificada:</strong> dia previsto sem batida e sem justificativa (atestado, férias, abono ou folga).</li>
+                          <li><strong>Atestado, férias, abono e folga</strong> não reduzem o CAJU.</li>
+                          <li>Colaboradores em <strong>período de experiência</strong> (até a data de Experiência 90 dias) não recebem CAJU nesses dias — se a experiência termina no meio do período, o valor é proporcional aos dias restantes.</li>
+                          <li>Para conferir o motivo de uma redução, passe o mouse sobre o valor na coluna <strong>Caju R$</strong> ou clique no colaborador para abrir o painel com as ocorrências.</li>
                         </ul>
                       </div>
                     </div>
@@ -8295,7 +8344,7 @@
                           <li><strong>Horas Extras:</strong> parte positiva do líquido do dia — o mesmo número da coluna <em>Total hora extra</em> do relógio de ponto.</li>
                           <li><strong>Horas Falta Parcial:</strong> parte negativa (trabalhou menos que o previsto no dia), contabilizada apenas em dias com as <strong>quatro batidas</strong> registradas. Meio período sem batida é tratado pelo status do dia (falta/atestado), não aqui.</li>
                           <li>Não se apura por intervalo separado: extra de um turno não é mais somado contra falta de outro (isso inflava os dois e causava a divergência histórica com a fábrica).</li>
-                          <li>Formato exibido: <strong>HH:MM</strong>. A tolerância de 10 min continua valendo só para o atraso que afeta o prêmio assiduidade.</li>
+                          <li>Formato exibido: <strong>HH:MM</strong>. A tolerância de 10 min vale para atrasos e saídas antecipadas que afetam o prêmio assiduidade e o CAJU.</li>
                         </ul>
                       </div>
                     </div>
@@ -8307,7 +8356,7 @@
                           <li>Base: <strong>30 dias fixos</strong> por mês (independente do mês).</li>
                           <li>Qualquer <strong>atraso injustificado superior a 10 minutos</strong> → perde <strong>todo</strong> o prêmio (0 dias).</li>
                           <li>Dia com <strong>atestado (dia todo)</strong> ou <strong>abono</strong> → desconta apenas aquele dia (30 − dias atestado/abono).</li>
-                          <li><strong>Atestado de meio período</strong> (manhã ou tarde) → <strong>não desconta</strong> o prêmio assiduidade. Também não perde VT nem CAJU.</li>
+                          <li><strong>Atestado de meio período</strong> (manhã ou tarde) → <strong>não desconta</strong> o prêmio assiduidade. Também não perde VT nem reduz o CAJU.</li>
                           <li>Sem nenhuma ocorrência → <strong>30 dias</strong> completos.</li>
                           <li><strong>Abono:</strong> Status definido manualmente em 📋 Banco de Ponto. Ausência justificada sem atestado — não perde DSR mas perde o dia do prêmio.</li>
                         </ul>
@@ -8525,7 +8574,10 @@
                                 )}
                               </td>
                               <td style={{...s.tdC,color:r.calc.horasFaltasMin>0?C.amber:C.muted,fontWeight:600}}>{r.calc.horasFaltasMin>0?r.calc.horasFaltas:"—"}</td>
-                              <td style={{...s.tdC,color:r.calc.cajuDias>0?C.green:C.muted,fontWeight:600}}>{r.calc.cajuDias>0?fmtBRL(r.calc.cajuValor):"—"}</td>
+                              <td style={{...s.tdC,color:r.calc.cajuValor>0?C.green:C.danger,fontWeight:600}} title={r.calc.cajuMotivo||"Sem ocorrências — Caju integral"}>
+                                {r.calc.cajuValor>0?fmtBRL(r.calc.cajuValor):"Perde"}
+                                {r.calc.cajuPct<1&&<div style={{fontSize:9,color:C.danger,fontWeight:700}}>{Math.round(r.calc.cajuPct*100)}%</div>}
+                              </td>
                               <td style={{...s.tdC,fontWeight:600,color:r.calc.adiantamento>0?C.danger:C.muted}}>
                                 {r.calc.adiantamento>0?fmtBRL(r.calc.adiantamento):"—"}
                                 {r.calc.adiantFixo>0&&<div style={{fontSize:9,color:"#7C3AED",marginTop:1}}>📌 {fmtBRL(r.calc.adiantFixo)} fixo</div>}
@@ -8607,8 +8659,9 @@
                             <td style={{...s.tdC,color:r.calc.dsrPerdidos>0?C.danger:C.muted}}>
                               {r.calc.dsrPerdidos}{r.calc.feriadosPerdidos>0&&`+${r.calc.feriadosPerdidos}f`}
                             </td>
-                            <td style={{...s.tdC,color:r.calc.cajuDias>0?C.green:C.muted,fontWeight:600,fontSize:11}}>
+                            <td style={{...s.tdC,color:r.calc.cajuValor>0?C.green:C.danger,fontWeight:600,fontSize:11}} title={r.calc.cajuMotivo||"Sem ocorrências — Caju integral"}>
                               {fmtBRL(r.calc.cajuValor)}
+                              {r.calc.cajuPct<1&&<div style={{fontSize:9,color:C.danger,fontWeight:700}}>{r.calc.cajuPct>0?"50%":"perde"}</div>}
                               {r.calc.emExperiencia && <div style={{fontSize:9,color:"#8b5cf6",fontWeight:700}}>(exp.)</div>}
                             </td>
                             <td style={s.tdC} onClick={e=>e.stopPropagation()}>
@@ -8783,7 +8836,7 @@
                     {l:"Férias",v:colab.calc.ferias,c:"#3b82f6"},
                     {l:"H.Extras",v:colab.calc.horasExtras,c:C.green},
                     {l:"DSR",v:`${colab.calc.dsrPerdidos}${colab.calc.feriadosPerdidos>0?`+${colab.calc.feriadosPerdidos}f`:""}`,c:C.danger},
-                    {l:"Caju dias",v:colab.calc.cajuDias,c:C.pri},
+                    {l:"Caju %",v:Math.round((colab.calc.cajuPct||0)*100)+"%",c:colab.calc.cajuPct<1?C.danger:C.pri},
                     {l:"Caju R$",v:fmtBRL(colab.calc.cajuValor),c:C.green}
                   ].map((it,i)=>(
                     <div key={i} style={{background:"#fff",borderRadius:7,padding:"7px 9px",border:`1px solid ${C.border}`}}>
@@ -8792,6 +8845,18 @@
                     </div>
                   ))}
                 </div>
+                {colab.calc.cajuCriterios&&(
+                  <div style={{marginTop:10,background:"#fff",borderRadius:7,padding:"8px 10px",border:`1px solid ${C.border}`,fontSize:11}}>
+                    <div style={{fontWeight:800,color:C.pri,marginBottom:4}}>🍱 Caju R$ 200 — ocorrências no período</div>
+                    {colab.calc.cajuCriterios.map(c=>(
+                      <div key={c.k} style={{display:"flex",justifyContent:"space-between",color:c.pct<1?C.danger:C.text}}>
+                        <span>{c.l}: <strong>{c.n}</strong></span>
+                        <span style={{fontWeight:700}}>{c.pct===1?"100%":c.pct>0?"50%":"perde"}</span>
+                      </div>
+                    ))}
+                    <div style={{color:C.muted,marginTop:4}}>Vale o critério mais restritivo. Atestado médico válido não reduz.{colab.calc.emExperiencia?" Proporcional: dias em experiência não recebem.":""}</div>
+                  </div>
+                )}
               </div>
 
               <div style={{padding:"16px 22px"}}>
