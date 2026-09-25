@@ -321,6 +321,27 @@
       return mapa;
     }
 
+    // Férias do módulo 🏖️ Férias (não canceladas) que cruzam [ini, fim], por dia.
+    // Retorna { NOME_NORMALIZADO: { 'AAAA-MM-DD': 'ferias' } }.
+    async function carregarMapaFerias(empresaId, ini, fim) {
+      if (!empresaId || !ini || !fim) return {};
+      const { data, error } = await _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status')
+        .eq('empresa_id', empresaId).neq('status', 'cancelado').lte('gozo_inicio', fim).gte('gozo_fim', ini);
+      if (error) throw error;
+      const mapa = {};
+      (data || []).forEach(f => {
+        const k = normNomeRH(f.nome);
+        if (!k || !f.gozo_inicio || !f.gozo_fim) return;
+        const dd = new Date(f.gozo_inicio + 'T12:00:00'), end = new Date(f.gozo_fim + 'T12:00:00');
+        while (dd <= end) {
+          if (!mapa[k]) mapa[k] = {};
+          mapa[k][toISO(dd)] = 'ferias';
+          dd.setDate(dd.getDate() + 1);
+        }
+      });
+      return mapa;
+    }
+
     // INSS progressivo 2025
     function calcINSS(salario) {
       const s = Number(salario) || 0;
@@ -938,7 +959,7 @@
               <ul style={{fontSize:13,lineHeight:2,paddingLeft:20}}>
                 <li>Dias feriados marcados <strong>não</strong> contam como dias trabalhados</li>
                 <li>Colaboradores afastados recebem R$ 0,00</li>
-                <li>Dias com <strong>atestado de dia todo</strong> lançado no módulo 🏥 Atestados são descontados automaticamente (atestado de meio período mantém o VT)</li>
+                <li>Dias com <strong>atestado de dia todo</strong> lançado no módulo 🏥 Atestados ou em <strong>férias</strong> (módulo 🏖️ Férias) são descontados automaticamente (atestado de meio período mantém o VT)</li>
                 <li>O valor por passagem é configurável nas configurações (padrão: R$ 4,30)</li>
                 <li>Se um valor manual for inserido na coluna "Valor Pago", ele sobrescreve o cálculo</li>
               </ul>
@@ -9466,16 +9487,24 @@
 
       const valorPassagem=parseFloat(passagemStr.replace(",","."))||0;
 
-      // ── Atestados do módulo 🏥 Atestados na semana do VT ──
-      // Dia com atestado (dia todo) não gera VT, mesmo que esteja marcado como presente.
+      // ── Atestados (🏥) e Férias (🏖️) dos módulos na semana do VT ──
+      // Dia com atestado (dia todo) ou em férias não gera VT, mesmo que esteja marcado como presente.
       // Atestado de meio período mantém o VT (o colaborador se desloca no outro turno).
       const [atestadosVT,setAtestadosVT]=useState({});
       useEffect(()=>{
         if(!usuario||!semanaIni||!semanaFim){ setAtestadosVT({}); return; }
         let cancel=false;
-        carregarMapaAtestados(empresaId,semanaIni,semanaFim)
-          .then(m=>{ if(!cancel) setAtestadosVT(m); })
-          .catch(err=>console.error('atestados (VT) load error:',err));
+        Promise.all([
+          carregarMapaAtestados(empresaId,semanaIni,semanaFim).catch(err=>{ console.error('atestados (VT) load error:',err); return {}; }),
+          carregarMapaFerias(empresaId,semanaIni,semanaFim).catch(err=>{ console.error('ferias (VT) load error:',err); return {}; })
+        ]).then(([mAt,mFe])=>{
+          if(cancel) return;
+          // Atestado tem prioridade sobre férias no mesmo dia (mesma regra da Folha).
+          const m={};
+          Object.entries(mFe).forEach(([k,dias])=>{ m[k]={...dias}; });
+          Object.entries(mAt).forEach(([k,dias])=>{ m[k]={...(m[k]||{}),...dias}; });
+          setAtestadosVT(m);
+        });
         return ()=>{ cancel=true; };
       },[empresaId,semanaIni,semanaFim,usuario]);
       // Dia da semana (SEG..SAB) → data ISO dentro da semana selecionada
@@ -9487,17 +9516,20 @@
         return m;
       },[semanaIni,semanaFim]);
       const atestadoVT=(emp,d)=>{ const iso=isoPorDiaVT[d]; return iso?atestadosVT[normNomeRH(emp.nome)]?.[iso]:undefined; };
-      const diasAtestadoVT=(emp)=>{
+      const descontaVT=st=>st==='atestado'||st==='ferias';
+      const diasAusenciaVT=(emp,tipo)=>{
         if(emp.afastado) return [];
         const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-        return dias.filter(d=>!feriadosDia[d]&&atestadoVT(emp,d)==='atestado');
+        return dias.filter(d=>!feriadosDia[d]&&atestadoVT(emp,d)===tipo);
       };
+      const diasAtestadoVT=emp=>diasAusenciaVT(emp,'atestado');
+      const diasFeriasVT=emp=>diasAusenciaVT(emp,'ferias');
 
-      // getDias respeita feriados, afastamento e atestados (dia todo)
+      // getDias respeita feriados, afastamento, atestados (dia todo) e férias
       const getDias=(emp)=>{
         if(emp.afastado) return 0;
         const dias=emp.escala==="SEG-SAB"?DIAS_SS:DIAS_SF;
-        return dias.filter(d=>emp.presente?.[d]&&!feriadosDia[d]&&atestadoVT(emp,d)!=='atestado').length;
+        return dias.filter(d=>emp.presente?.[d]&&!feriadosDia[d]&&!descontaVT(atestadoVT(emp,d))).length;
       };
 
       // getValorFinal usa valorPago se preenchido, senão calcula
@@ -9556,6 +9588,7 @@
               valorPago:e.valorPago||'',
               dias:getDias(e),
               dias_atestado:diasAtestadoVT(e).map(d=>isoPorDiaVT[d]),
+              dias_ferias:diasFeriasVT(e).map(d=>isoPorDiaVT[d]),
               valor_final:getValorFinal(e)
             })),
             total_valor:total,
@@ -9678,10 +9711,10 @@
       // Exportar CSV para download
       const exportarCSV=useCallback(()=>{
         if(employees.length===0) return;
-        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias Trabalhados","Dias Atestado","Passagens","Valor Calculado","Valor Pago","Afastado"];
+        const header=["Semana Início","Semana Fim","Colaborador","Escala","Dias Trabalhados","Dias Atestado","Dias Férias","Passagens","Valor Calculado","Valor Pago","Afastado"];
         const rows=employees.map(emp=>[
           semanaIni,semanaFim,emp.nome,emp.escala,
-          getDias(emp),diasAtestadoVT(emp).length,getDias(emp)*2,
+          getDias(emp),diasAtestadoVT(emp).length,diasFeriasVT(emp).length,getDias(emp)*2,
           (getDias(emp)*2*valorPassagem).toFixed(2).replace(".",","),
           getValorFinal(emp).toFixed(2).replace(".",","),
           emp.afastado?"Sim":"Não"
@@ -9734,7 +9767,7 @@
           const afastadoStyle=emp.afastado?"opacity:0.5;text-decoration:line-through;":"";
           return `<tr style="background:${i%2===0?"#fff":"#f9f9f9"};${afastadoStyle}">
             <td style="text-align:center;color:#888;width:20px">${i+1}</td>
-            <td style="font-weight:600;font-size:7.5pt">${esc(emp.nome)}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}${(()=>{const n=diasAtestadoVT(emp).length;return n?` <span style='color:#B45309;font-size:7pt'>(${n} dia${n>1?"s":""} atestado)</span>`:"";})()}</td>
+            <td style="font-weight:600;font-size:7.5pt">${esc(emp.nome)}${emp.afastado?" <span style='color:#A93226;font-size:7pt'>(Afastado)</span>":""}${(()=>{const n=diasAtestadoVT(emp).length;return n?` <span style='color:#B45309;font-size:7pt'>(${n} dia${n>1?"s":""} atestado)</span>`:"";})()}${(()=>{const n=diasFeriasVT(emp).length;return n?` <span style='color:#1D4ED8;font-size:7pt'>(${n} dia${n>1?"s":""} férias)</span>`:"";})()}</td>
             <td style="text-align:center;width:56px"><span style="padding:2px 5px;border-radius:20px;font-size:7pt;font-weight:700;${badge}">${emp.escala}</span></td>
             <td style="text-align:center;font-weight:700;width:36px">${d}</td>
             <td style="text-align:center;color:#666;width:36px">${d*2}</td>
@@ -9949,10 +9982,10 @@
                   {/* Legenda das novas colunas */}
                   <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
                     <div style={{fontSize:11,background:"#FEF3F2",border:"1px solid #FECACA",borderRadius:6,padding:"4px 10px",color:"#991B1B"}}>
-                      🏖️ <strong>Afastado</strong>: férias / licença → zera o VT da semana
+                      🚫 <strong>Afastado</strong>: licença / outros → zera o VT da semana
                     </div>
                     <div style={{fontSize:11,background:"#FFF7ED",border:"1px solid #FDBA74",borderRadius:6,padding:"4px 10px",color:"#9A3412"}}>
-                      🏥 <strong>Atestado</strong>: puxado do módulo Atestados → dia descontado automaticamente (½ período mantém o VT)
+                      🏥 <strong>Atestado</strong> / 🏖️ <strong>Férias</strong>: puxados dos módulos → dia descontado automaticamente (atestado ½ período mantém o VT)
                     </div>
                     <div style={{fontSize:11,background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:6,padding:"4px 10px",color:"#6E4C1E"}}>
                       🎯 <strong>Pago R$</strong>: valor ajustado (ex: arredondamento) — substitui o calculado
@@ -10014,11 +10047,13 @@
                                 const checked=emp.presente?.[d]||false;
                                 const isFeriado=feriadosDia[d];
                                 const atest=works&&!isFeriado&&!emp.afastado?atestadoVT(emp,d):undefined;
-                                const bgCell=isFeriado?"#F5EFDF":!works?"#F0ECE8":atest==="atestado"?"#FFF7ED":checked&&!emp.afastado?"#E6F5EC":undefined;
+                                const bgCell=isFeriado?"#F5EFDF":!works?"#F0ECE8":atest==="atestado"?"#FFF7ED":atest==="ferias"?"#DBEAFE":checked&&!emp.afastado?"#E6F5EC":undefined;
                                 return(
                                   <td key={d} style={{...s.tdC,background:bgCell,transition:"background 0.15s"}}>
                                     {atest==="atestado"?(
                                       <span title="Atestado (dia todo) — VT descontado automaticamente" style={{fontSize:13}}>🏥</span>
+                                    ):atest==="ferias"?(
+                                      <span title="Férias — VT descontado automaticamente" style={{fontSize:13}}>🏖️</span>
                                     ):works&&!isFeriado&&!emp.afastado?(
                                       <>
                                         <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
@@ -10035,6 +10070,7 @@
                               <td style={{...s.tdC,fontWeight:700,color:dias>0&&!emp.afastado?C.pri:C.muted}}>
                                 {dias}
                                 {diasAtestadoVT(emp).length>0&&<div style={{fontSize:9,color:"#B45309",fontWeight:700}}>−{diasAtestadoVT(emp).length} atest.</div>}
+                                {diasFeriasVT(emp).length>0&&<div style={{fontSize:9,color:"#1D4ED8",fontWeight:700}}>−{diasFeriasVT(emp).length} férias</div>}
                               </td>
                               <td style={{...s.tdC,fontSize:12,color:emp.afastado?C.muted:C.muted,textDecoration:temAjuste?"line-through":"none"}}>
                                 {fmtBRL(calcVal)}
@@ -10064,7 +10100,7 @@
                                   checked={emp.afastado||false}
                                   onChange={()=>toggleAfastado(emp.id)}
                                   style={{width:16,height:16,cursor:"pointer",accentColor:"#A93226"}}
-                                  title="Marcar como afastado (férias, atestado ou licença)"
+                                  title="Marcar como afastado a semana toda (licença etc.) — atestados e férias já são descontados automaticamente"
                                 />
                               </td>
                             </tr>
