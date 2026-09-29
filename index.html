@@ -7674,9 +7674,10 @@
           async function _loadComissoes(){
             const [m,a]=mesAno.split('/').map(Number);
             const fim=new Date(a,m-1,25).toISOString().split('T')[0];
-            const {data}=await _supa.from('comissoes_mensais').select('colaborador_nome,valor_total').eq('empresa_id',empresaId).eq('data_fim',fim);
+            // Soma as fontes (VAREJO + POSITIVACAO) e só conta o que o RH já confirmou
+            const {data}=await _supa.from('comissoes_mensais').select('colaborador_nome,valor_total').eq('empresa_id',empresaId).eq('data_fim',fim).eq('confirmado',true);
             const map={};
-            (data||[]).forEach(c=>{map[normalizarNome(c.colaborador_nome)]=(c.valor_total||0);});
+            (data||[]).forEach(c=>{const k=normalizarNome(c.colaborador_nome);map[k]=(map[k]||0)+(Number(c.valor_total)||0);});
             setComissoesMap(map);
           }
           _loadComissoes();
@@ -9275,11 +9276,60 @@
       const [loadingHist,setLoadingHist]=useState(false);
       const [editandoId,setEditandoId]=useState(null);
       const [editValor,setEditValor]=useState('');
+      const [pos,setPos]=useState([]);
+      const [loadingPos,setLoadingPos]=useState(false);
+      const [posExp,setPosExp]=useState(null);
+      const [posMsg,setPosMsg]=useState(null);
+      const [posCfg,setPosCfg]=useState(null);
+      const [histExp,setHistExp]=useState(null);
 
       useEffect(()=>{
         if(aba==='vincular') carregarCrm();
         if(aba==='historico') carregarHist();
+        if(aba==='positivacoes') carregarPos();
       },[aba]);
+
+      const _normNome=n=>String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+
+      // Positivações Atacado enviadas pelo App Comercial e ainda não confirmadas pelo RH
+      async function carregarPos(){
+        setLoadingPos(true);
+        const {data}=await _supa.from('comissoes_mensais').select('*').eq('empresa_id',empresaId).eq('fonte','POSITIVACAO').eq('confirmado',false).order('data_fim',{ascending:true});
+        setPos(data||[]);
+        const {data:cfg}=await _supa.from('positivacao_config').select('meta_pedidos,meta_valor,valor_comissao,janela_dias').maybeSingle();
+        setPosCfg(cfg||null);
+        setLoadingPos(false);
+      }
+
+      // Recusa (positivação aguardando) ou estorno (já paga) de um cliente, sempre com motivo
+      async function decidirPos(d,acao,h,onDone){
+        if(!d.client_id){alert('Este item não tem identificador do cliente (enviado antes desta versão).');return;}
+        const rotulo=acao==='recusar'?'recusar':'estornar';
+        const motivo=prompt(`Motivo para ${rotulo} a positivação de "${d.cliente}" (${fm(d.valor)}):`);
+        if(motivo===null) return;
+        if(!motivo.trim()){alert('Informe o motivo.');return;}
+        if(acao==='estornar'&&!confirm(`Estornar ${fm(Math.abs(d.valor))} de ${h.colaborador_nome}?\n\nÉ lançado um ajuste negativo na Folha do período atual.`)) return;
+        const {error}=await _supa.rpc('rh_positivacao_decidir',{p_client_id:d.client_id,p_acao:acao,p_motivo:motivo.trim()});
+        if(error){alert('Erro: '+error.message);return;}
+        onDone();
+      }
+
+      async function confirmarPos(h){
+        if(!confirm(`Confirmar ${h.pedidos_count} positivação(ões) de ${h.colaborador_nome}, total ${fm(h.valor_total)}?\n\nO valor entra na Folha do período ${h.data_inicio} → ${h.data_fim} e o App Comercial marca como pago.`)) return;
+        const {data:au}=await _supa.auth.getUser();
+        const {error}=await _supa.from('comissoes_mensais').update({confirmado:true,confirmado_em:new Date().toISOString(),confirmado_por:au?.user?.email||null}).eq('id',h.id);
+        if(error){setPosMsg({ok:false,txt:'Erro ao confirmar: '+error.message});return;}
+        setPosMsg({ok:true,txt:'✅ Positivações de '+h.colaborador_nome+' confirmadas e lançadas na Folha.'});
+        carregarPos();
+      }
+
+      async function devolverPos(h){
+        if(!confirm(`Devolver ao App Comercial as positivações de ${h.colaborador_nome} (${h.data_inicio} → ${h.data_fim})?\n\nElas voltam para "aguardando confirmação" no CRM.`)) return;
+        const {error}=await _supa.from('comissoes_mensais').delete().eq('id',h.id);
+        if(error){setPosMsg({ok:false,txt:'Erro ao devolver: '+error.message});return;}
+        setPosMsg({ok:true,txt:'↩ Positivações de '+h.colaborador_nome+' devolvidas ao App Comercial.'});
+        carregarPos();
+      }
 
       async function carregarCrm(){
         setLoadingCrm(true);
@@ -9349,7 +9399,7 @@
 
       async function carregarHist(){
         setLoadingHist(true);
-        const {data}=await _supa.from('comissoes_mensais').select('*').eq('empresa_id',empresaId).order('data_fim',{ascending:false}).limit(60);
+        const {data}=await _supa.from('comissoes_mensais').select('*').eq('empresa_id',empresaId).eq('confirmado',true).order('data_fim',{ascending:false}).limit(60);
         setHistorico(data||[]);
         setLoadingHist(false);
       }
@@ -9358,17 +9408,23 @@
         const novoValor=parseFloat(String(editValor).replace(',','.'))||0;
         const {error}=await _supa.from('comissoes_mensais').update({valor_total:novoValor,confirmado_em:new Date().toISOString()}).eq('id',h.id);
         if(error){alert('Erro ao salvar: '+error.message);return;}
-        const periodo=h.data_fim.substring(0,7);
-        await _supa.from('folha_mensal').update({comissao_varejo:novoValor}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        // folha_mensal.comissao_varejo é só do Varejo; positivação não pode sobrescrevê-lo
+        if(!h.fonte||h.fonte==='VAREJO'){
+          const periodo=h.data_fim.substring(0,7);
+          await _supa.from('folha_mensal').update({comissao_varejo:novoValor}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        }
         setEditandoId(null);
         carregarHist();
       }
 
       async function cancelarComissao(h){
-        if(!confirm(`Cancelar a comissão de ${h.colaborador_nome} (${h.data_inicio} → ${h.data_fim})?\n\nO valor na folha será zerado.`)) return;
+        const ehVarejo=!h.fonte||h.fonte==='VAREJO';
+        if(!confirm(`Cancelar a comissão de ${h.colaborador_nome} (${h.data_inicio} → ${h.data_fim})?\n\n`+(ehVarejo?'O valor na folha será zerado.':'O valor sai da folha e as positivações voltam para "aguardando confirmação" no App Comercial.'))) return;
         await _supa.from('comissoes_mensais').delete().eq('id',h.id);
-        const periodo=h.data_fim.substring(0,7);
-        await _supa.from('folha_mensal').update({comissao_varejo:0}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        if(ehVarejo){
+          const periodo=h.data_fim.substring(0,7);
+          await _supa.from('folha_mensal').update({comissao_varejo:0}).eq('empresa_id',empresaId).eq('periodo',periodo).eq('colaborador_nome',h.colaborador_nome);
+        }
         carregarHist();
       }
 
@@ -9380,7 +9436,7 @@
         <div>
           <div style={{fontWeight:700,fontSize:18,color:C.pri,marginBottom:20}}>💰 Comissionamento</div>
           <div style={{display:'flex',gap:4,marginBottom:20,borderBottom:`1px solid ${C.border}`}}>
-            {[['comissoes','📊 Comissões'],['vincular','🔗 Vincular Usuários'],['historico','📋 Histórico']].map(([k,l])=>(
+            {[['comissoes','📊 Comissões'],['positivacoes','★ Positivações'],['vincular','🔗 Vincular Usuários'],['historico','📋 Histórico']].map(([k,l])=>(
               <button key={k} onClick={()=>setAba(k)} style={tabSt(k)}>{l}</button>
             ))}
           </div>
@@ -9463,6 +9519,86 @@
             </div>
           )}
 
+          {aba==='positivacoes'&&(
+            <div style={s.card}>
+              <div style={s.cardTitle}>★ Positivações Atacado — aguardando confirmação do RH</div>
+              <div style={{...s.infoBox,marginBottom:16}}>
+                Comissões de positivação confirmadas pelo Administrador no App Comercial{posCfg?` (${fm(posCfg.valor_comissao)} por cliente que atingiu ${posCfg.meta_pedidos} pedidos + ${fm(posCfg.meta_valor)}${posCfg.janela_dias?`, em até ${posCfg.janela_dias} dias do 1º pedido`:', todo o histórico'})`:''}.
+                <br/>Você decide o que pagar: abra a linha (▼) e use <strong>Recusar</strong>, com motivo, nos clientes que não devem receber; depois <strong>Confirmar</strong> para lançar o restante na Folha e o App Comercial marcar como pago. <strong>Devolver ao CRM</strong> desfaz a linha inteira (os clientes voltam a aguardar o Administrador).
+              </div>
+              {posMsg&&<div style={{...s.infoBox,marginBottom:12,color:posMsg.ok?C.acc:'#dc2626'}}>{posMsg.txt}</div>}
+              {loadingPos?<div style={{color:C.muted,fontSize:13}}>Carregando...</div>:pos.length===0?
+                <div style={{color:C.muted,fontSize:13}}>Nenhuma positivação aguardando confirmação.</div>:(
+                <table style={s.table}>
+                  <thead><tr>
+                    <th style={s.th}>Colaborador</th>
+                    <th style={s.th}>Período (Folha)</th>
+                    <th style={{...s.th,textAlign:'right'}}>Positivações</th>
+                    <th style={{...s.th,textAlign:'right'}}>Comissão</th>
+                    <th style={s.th}>Ações</th>
+                  </tr></thead>
+                  <tbody>
+                    {pos.map((h,i)=>{
+                      const vinc=(colabAPI||[]).some(c=>_normNome(c.nome)===_normNome(h.colaborador_nome));
+                      const det=Array.isArray(h.detalhes)?h.detalhes:[];
+                      return(
+                        <React.Fragment key={h.id}>
+                          <tr style={s.row(i)}>
+                            <td style={s.td}>
+                              <strong>{h.colaborador_nome}</strong>
+                              {!vinc&&<span title="Este nome não consta na lista de colaboradores do RH. Confira o vínculo em Vincular Usuários antes de lançar." style={{marginLeft:8,background:C.amberBg,color:C.amber,fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:10}}>⚠ sem vínculo RH</span>}
+                            </td>
+                            <td style={{...s.td,fontSize:12}}>{h.data_inicio} → {h.data_fim}</td>
+                            <td style={{...s.td,textAlign:'right'}}>
+                              <button onClick={()=>setPosExp(posExp===h.id?null:h.id)} style={{background:'none',border:'none',color:C.acc,cursor:'pointer',fontSize:13,fontWeight:600}}>{h.pedidos_count} {posExp===h.id?'▲':'▼'}</button>
+                            </td>
+                            <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>{fm(h.valor_total)}</td>
+                            <td style={{...s.td,whiteSpace:'nowrap'}}>
+                              <span style={{display:'flex',gap:4}}>
+                                <button onClick={()=>confirmarPos(h)} style={{fontSize:11,padding:'3px 10px',background:C.acc,color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>✔ Confirmar</button>
+                                <button onClick={()=>devolverPos(h)} style={{fontSize:11,padding:'3px 10px',background:'#fee2e2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:4,cursor:'pointer'}}>↩ Devolver ao CRM</button>
+                              </span>
+                            </td>
+                          </tr>
+                          {posExp===h.id&&(
+                            <tr>
+                              <td colSpan={5} style={{padding:'8px 16px 14px',background:'#fafafa'}}>
+                                <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
+                                  <thead><tr style={{color:C.muted,textAlign:'left'}}>
+                                    <th style={{padding:'4px 8px'}}>Cliente</th>
+                                    <th style={{padding:'4px 8px'}}>Confirmada em</th>
+                                    <th style={{padding:'4px 8px',textAlign:'right'}}>Pedidos</th>
+                                    <th style={{padding:'4px 8px',textAlign:'right'}}>Total compras</th>
+                                    <th style={{padding:'4px 8px',textAlign:'right'}}>Comissão</th>
+                                    <th style={{padding:'4px 8px'}}></th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {det.map((d,j)=>(
+                                      <tr key={j} style={{borderTop:'1px solid #eee'}}>
+                                        <td style={{padding:'4px 8px'}}>{d.cliente}</td>
+                                        <td style={{padding:'4px 8px'}}>{d.positivado_em?String(d.positivado_em).split('-').reverse().join('/'):'—'}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right'}}>{d.pedidos??'—'}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right'}}>{d.total!=null?fm(d.total):'—'}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right',fontWeight:600}}>{fm(d.valor)}</td>
+                                        <td style={{padding:'4px 8px',textAlign:'right'}}>
+                                          <button onClick={()=>decidirPos(d,'recusar',h,()=>{setPosMsg({ok:true,txt:'✖ Positivação de '+d.cliente+' recusada. O motivo ficou registrado no App Comercial.'});carregarPos();})} style={{fontSize:11,padding:'2px 8px',background:'#fee2e2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:4,cursor:'pointer'}}>Recusar</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
           {aba==='vincular'&&(
             <div style={s.card}>
               <div style={s.cardTitle}>🔗 Vincular usuários do CRM → colaboradores do RH</div>
@@ -9501,13 +9637,22 @@
                     <th style={s.th}>Ações</th>
                   </tr></thead>
                   <tbody>
-                    {historico.map((h,i)=>(
-                      <tr key={h.id} style={s.row(i)}>
+                    {historico.map((h,i)=>{
+                      const ehPos=h.fonte==='POSITIVACAO';
+                      const ehEst=h.fonte==='POSITIVACAO_ESTORNO';
+                      const detH=Array.isArray(h.detalhes)?h.detalhes:[];
+                      return(
+                      <React.Fragment key={h.id}>
+                      <tr style={s.row(i)}>
                         <td style={s.td}><strong>{h.colaborador_nome}</strong></td>
                         <td style={{...s.td,fontSize:12}}>{h.data_inicio} → {h.data_fim}</td>
                         <td style={s.td}><span style={{background:C.amberBg,color:C.amber,fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:10}}>{h.fonte}</span></td>
-                        <td style={{...s.td,textAlign:'right'}}>{h.pedidos_count}</td>
-                        <td style={{...s.td,textAlign:'right',fontWeight:700,color:C.acc}}>
+                        <td style={{...s.td,textAlign:'right'}}>
+                          {(ehPos||ehEst)&&detH.length>0
+                            ? <button onClick={()=>setHistExp(histExp===h.id?null:h.id)} style={{background:'none',border:'none',color:C.acc,cursor:'pointer',fontSize:13,fontWeight:600}}>{h.pedidos_count} {histExp===h.id?'▲':'▼'}</button>
+                            : h.pedidos_count}
+                        </td>
+                        <td style={{...s.td,textAlign:'right',fontWeight:700,color:h.valor_total<0?'#dc2626':C.acc}}>
                           {editandoId===h.id
                             ? <input type="number" step="0.01" value={editValor} onChange={e=>setEditValor(e.target.value)}
                                 style={{width:90,padding:'2px 6px',border:'1px solid #ccc',borderRadius:4,fontSize:13}} autoFocus />
@@ -9515,7 +9660,9 @@
                         </td>
                         <td style={{...s.td,fontSize:11,color:C.muted}}>{h.confirmado_em?new Date(h.confirmado_em).toLocaleString('pt-BR'):'—'}</td>
                         <td style={{...s.td,whiteSpace:'nowrap'}}>
-                          {editandoId===h.id ? (
+                          {ehEst ? (
+                            <span style={{fontSize:11,color:C.muted}}>ajuste da folha</span>
+                          ) : editandoId===h.id ? (
                             <span style={{display:'flex',gap:4}}>
                               <button onClick={()=>salvarEdicao(h)} style={{fontSize:11,padding:'2px 8px',background:C.acc,color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>✔ Salvar</button>
                               <button onClick={()=>setEditandoId(null)} style={{fontSize:11,padding:'2px 8px',background:'#eee',border:'none',borderRadius:4,cursor:'pointer'}}>✕</button>
@@ -9528,7 +9675,37 @@
                           )}
                         </td>
                       </tr>
-                    ))}
+                      {histExp===h.id&&detH.length>0&&(
+                        <tr>
+                          <td colSpan={7} style={{padding:'8px 16px 14px',background:'#fafafa'}}>
+                            <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
+                              <thead><tr style={{color:C.muted,textAlign:'left'}}>
+                                <th style={{padding:'4px 8px'}}>Cliente</th>
+                                <th style={{padding:'4px 8px',textAlign:'right'}}>Comissão</th>
+                                <th style={{padding:'4px 8px'}}>{ehEst?'Motivo':''}</th>
+                                <th style={{padding:'4px 8px'}}></th>
+                              </tr></thead>
+                              <tbody>
+                                {detH.map((d,j)=>(
+                                  <tr key={j} style={{borderTop:'1px solid #eee'}}>
+                                    <td style={{padding:'4px 8px'}}>{d.cliente}</td>
+                                    <td style={{padding:'4px 8px',textAlign:'right',fontWeight:600,color:d.valor<0?'#dc2626':'inherit'}}>{fm(d.valor)}</td>
+                                    <td style={{padding:'4px 8px',color:C.muted}}>{ehEst?d.motivo:''}</td>
+                                    <td style={{padding:'4px 8px',textAlign:'right'}}>
+                                      {ehPos&&(
+                                        <button onClick={()=>decidirPos(d,'estornar',h,carregarHist)} style={{fontSize:11,padding:'2px 8px',background:'#fef3c7',color:'#b45309',border:'1px solid #fcd34d',borderRadius:4,cursor:'pointer'}}>Estornar</button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
