@@ -479,7 +479,7 @@
             setRecrutInfo({novos:novRes.count||0,entrevistas:entRes.data||[]});
           }).catch(()=>{});
           // Campanhas de divulgação de vagas ativas (sincronizadas do app de Marketing)
-          _supa.rpc('rh_campanhas_recrutamento',{p_empresa:empresaId})
+          _supa.rpc('rh_campanhas_recrutamento')
             .then(({data,error})=>{ if(!error) setCampanhasRecrut(data||[]); })
             .catch(()=>{});
         },[empresaId]);
