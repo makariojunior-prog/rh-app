@@ -429,6 +429,7 @@
 
         const [ausencias, setAusencias] = React.useState({atestados:[],ferias:[],retornandoHoje:[]});
         const [recrutInfo, setRecrutInfo] = React.useState({novos:0,entrevistas:[]});
+        const [campanhasRecrut, setCampanhasRecrut] = React.useState([]);
         const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0});
 
         React.useEffect(()=>{
@@ -477,6 +478,10 @@
           ]).then(([novRes,entRes])=>{
             setRecrutInfo({novos:novRes.count||0,entrevistas:entRes.data||[]});
           }).catch(()=>{});
+          // Campanhas de divulgação de vagas ativas (sincronizadas do app de Marketing)
+          _supa.rpc('rh_campanhas_recrutamento',{p_empresa:empresaId})
+            .then(({data,error})=>{ if(!error) setCampanhasRecrut(data||[]); })
+            .catch(()=>{});
         },[empresaId]);
 
         // KPIs adicionais
@@ -703,6 +708,25 @@
                   <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>🧑‍💼 Recrutamento</div>
                   <button onClick={()=>onNavegar('recrutamento')} style={{background:'none',border:'none',color:C.pri,fontSize:12,cursor:'pointer',fontWeight:600}}>Ver tudo →</button>
                 </div>
+                {campanhasRecrut.map(c=>{
+                  const d = c.dias_restantes;
+                  const urgente = d!==null && d<=2;
+                  const cor = urgente ? C.amber : C.green;
+                  const txtPrazo = d===null ? 'sem data de término' : d<=0 ? 'termina hoje' : d===1 ? 'falta 1 dia' : `faltam ${d} dias`;
+                  return (
+                    <div key={c.id} style={{background:urgente?C.amberBg:C.greenBg,border:`1px solid ${cor}`,borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
+                      <span style={{fontSize:20}}>📢</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:13,color:C.pri}}>Divulgação de vaga no ar</div>
+                        <div style={{fontSize:12,color:C.muted,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={c.nome}>{c.nome}</div>
+                      </div>
+                      <div style={{textAlign:'right',flexShrink:0}}>
+                        <div style={{fontWeight:800,fontSize:13,color:cor}}>{txtPrazo}</div>
+                        {c.fim&&<div style={{fontSize:11,color:C.muted}}>até {new Date(c.fim).toLocaleDateString('pt-BR')}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
                 {recrutInfo.novos>0&&(
                   <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
                     <span style={{fontSize:20}}>📋</span>
@@ -727,7 +751,7 @@
                     </div>
                   </div>
                 )}
-                {recrutInfo.novos===0&&recrutInfo.entrevistas.length===0&&(
+                {recrutInfo.novos===0&&recrutInfo.entrevistas.length===0&&campanhasRecrut.length===0&&(
                   <div style={{color:C.muted,fontSize:13}}>Nenhum currículo novo ou entrevista nos próximos 7 dias.</div>
                 )}
               </div>
