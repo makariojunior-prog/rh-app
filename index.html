@@ -431,6 +431,7 @@
         const [recrutInfo, setRecrutInfo] = React.useState({novos:0,entrevistas:[]});
         const [campanhasRecrut, setCampanhasRecrut] = React.useState([]);
         const [curriculosPorVaga, setCurriculosPorVaga] = React.useState([]);
+        const [curriculosPorDia, setCurriculosPorDia] = React.useState([]);
         const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0});
 
         React.useEffect(()=>{
@@ -484,10 +485,18 @@
             .then(({data,error})=>{ if(!error) setCampanhasRecrut(data||[]); })
             .catch(()=>{});
           // Currículos recebidos por vaga nos últimos 7 dias (o nome da campanha não diz qual vaga é)
-          const ha6dias = new Date(Date.now()-6*86400000).toISOString().slice(0,10);
-          _supa.from('candidatos').select('vaga').eq('empresa_id',empresaId).gte('data_inscricao',ha6dias)
+          const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          const dias7 = Array.from({length:7},(_,i)=>{ const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()-(6-i)); return d; });
+          const ha6dias = isoLocal(dias7[0]);
+          _supa.from('candidatos').select('vaga,data_inscricao').eq('empresa_id',empresaId).gte('data_inscricao',ha6dias)
             .then(({data,error})=>{
               if(error) return;
+              const porDia = {};
+              (data||[]).forEach(r=>{ if(r.data_inscricao) porDia[r.data_inscricao]=(porDia[r.data_inscricao]||0)+1; });
+              setCurriculosPorDia(dias7.map((d,i)=>({
+                iso:isoLocal(d), hoje:i===6, n:porDia[isoLocal(d)]||0,
+                rotulo:d.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')+' '+d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})
+              })));
               const cont = {};
               (data||[]).forEach(r=>{
                 const bruto = (r.vaga||'').trim();
@@ -751,11 +760,27 @@
                     <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:6}}>Currículos recebidos · últimos 7 dias</div>
                     <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                       {curriculosPorVaga.slice(0,6).map(v=>(
-                        <span key={v.nome} style={{background:'var(--c-subtle)',borderRadius:20,padding:'3px 10px',fontSize:12,color:C.pri}}>
+                        <span key={v.nome} style={{background:'var(--c-subtle)',borderRadius:20,padding:'3px 10px',fontSize:12,color:C.text}}>
                           {v.nome} <strong>{v.n}</strong>
                         </span>
                       ))}
                     </div>
+                    {(()=>{
+                      const max = Math.max(1,...curriculosPorDia.map(d=>d.n));
+                      return (
+                        <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:10}}>
+                          {curriculosPorDia.map(d=>(
+                            <div key={d.iso} style={{display:'flex',alignItems:'center',gap:8}} title={`${d.n} currículo${d.n!==1?'s':''} em ${d.rotulo}`}>
+                              <span style={{width:74,flexShrink:0,fontSize:11,color:d.hoje?C.text:C.muted,fontWeight:d.hoje?800:500,textTransform:'capitalize'}}>{d.hoje?'Hoje':d.rotulo}</span>
+                              <div style={{flex:1,height:12,background:'var(--c-subtle)',borderRadius:6,overflow:'hidden'}}>
+                                <div style={{width:`${(d.n/max)*100}%`,height:'100%',background:d.hoje?C.acc:C.green,borderRadius:6,minWidth:d.n>0?4:0}}/>
+                              </div>
+                              <span style={{width:22,textAlign:'right',fontSize:11,fontWeight:700,color:d.n>0?C.text:C.muted}}>{d.n}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 {recrutInfo.novos>0&&(
