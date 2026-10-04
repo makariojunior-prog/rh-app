@@ -430,6 +430,7 @@
         const [ausencias, setAusencias] = React.useState({atestados:[],ferias:[],retornandoHoje:[]});
         const [recrutInfo, setRecrutInfo] = React.useState({novos:0,entrevistas:[]});
         const [campanhasRecrut, setCampanhasRecrut] = React.useState([]);
+        const [curriculosPorVaga, setCurriculosPorVaga] = React.useState([]);
         const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0});
 
         React.useEffect(()=>{
@@ -481,6 +482,24 @@
           // Campanhas de divulgação de vagas ativas (sincronizadas do app de Marketing)
           _supa.rpc('rh_campanhas_recrutamento')
             .then(({data,error})=>{ if(!error) setCampanhasRecrut(data||[]); })
+            .catch(()=>{});
+          // Currículos recebidos por vaga nos últimos 7 dias (o nome da campanha não diz qual vaga é)
+          const ha6dias = new Date(Date.now()-6*86400000).toISOString().slice(0,10);
+          _supa.from('candidatos').select('vaga').eq('empresa_id',empresaId).gte('data_inscricao',ha6dias)
+            .then(({data,error})=>{
+              if(error) return;
+              const cont = {};
+              (data||[]).forEach(r=>{
+                const bruto = (r.vaga||'').trim();
+                if(!bruto) return;
+                const outra = /^outro/i.test(bruto);
+                const nome = outra ? 'Outras vagas' : bruto.replace(/\s*-\s*/g,'-');
+                const k = nome.toLowerCase();
+                cont[k] = cont[k] || {nome, n:0};
+                cont[k].n++;
+              });
+              setCurriculosPorVaga(Object.values(cont).sort((a,b)=>b.n-a.n));
+            })
             .catch(()=>{});
         },[empresaId]);
 
@@ -717,8 +736,8 @@
                     <div key={c.id} style={{background:urgente?C.amberBg:C.greenBg,border:`1px solid ${cor}`,borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
                       <span style={{fontSize:20}}>📢</span>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontWeight:700,fontSize:13,color:C.pri}}>Divulgação de vaga no ar</div>
-                        <div style={{fontSize:12,color:C.muted,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={c.nome}>{c.nome}</div>
+                        <div style={{fontWeight:700,fontSize:13,color:C.pri}} title={c.nome}>Divulgação de vagas no ar</div>
+                        <div style={{fontSize:12,color:C.muted}}>{c.plataforma==='google'?'Anúncio no Google':'Anúncio no Instagram/Facebook'}</div>
                       </div>
                       <div style={{textAlign:'right',flexShrink:0}}>
                         <div style={{fontWeight:800,fontSize:13,color:cor}}>{txtPrazo}</div>
@@ -727,6 +746,18 @@
                     </div>
                   );
                 })}
+                {campanhasRecrut.length>0&&curriculosPorVaga.length>0&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:6}}>Currículos recebidos · últimos 7 dias</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                      {curriculosPorVaga.slice(0,6).map(v=>(
+                        <span key={v.nome} style={{background:'var(--c-subtle)',borderRadius:20,padding:'3px 10px',fontSize:12,color:C.pri}}>
+                          {v.nome} <strong>{v.n}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {recrutInfo.novos>0&&(
                   <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:8,padding:'10px 14px',marginBottom:10,display:'flex',alignItems:'center',gap:10}}>
                     <span style={{fontSize:20}}>📋</span>
