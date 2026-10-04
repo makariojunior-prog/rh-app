@@ -641,7 +641,7 @@
                   { icon:"👥", valor:colabAPI.length, label:"Colaboradores ativos", cor:C.pri, bg:"var(--c-cream)" },
                   { icon:"🏥", valor:(ausencias.atestados.length+ausencias.ferias.length), label:"Ausentes hoje", cor:ausencias.atestados.length+ausencias.ferias.length>0?C.danger:C.green, bg:ausencias.atestados.length+ausencias.ferias.length>0?"#FEF2F2":"#F0FDF4" },
                   { icon:"📋", valor:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length, label:"Experiências vencendo", cor:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length>0?C.amber:C.green, bg:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length>0?C.amberBg:"#F0FDF4" },
-                  { icon:"💵", valor:kpis.adiantPendente, label:"Adiant. pendentes", cor:kpis.adiantPendente>0?C.amber:C.green, bg:kpis.adiantPendente>0?C.amberBg:"#F0FDF4" },
+                  { icon:"📥", valor:curriculosPorDia.reduce((t,d)=>t+d.n,0), label:"Currículos novos (7 dias)", cor:C.green, bg:C.greenBg },
                 ].map((k,i)=>(
                   <div key={i} style={{background:k.bg,borderRadius:10,padding:"14px 16px",border:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12}}>
                     <div style={{fontSize:24,lineHeight:1}}>{k.icon}</div>
