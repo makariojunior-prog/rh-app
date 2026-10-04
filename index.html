@@ -430,7 +430,7 @@
         const [ausencias, setAusencias] = React.useState({atestados:[],ferias:[],retornandoHoje:[]});
         const [recrutInfo, setRecrutInfo] = React.useState({novos:0,entrevistas:[]});
         const [campanhasRecrut, setCampanhasRecrut] = React.useState([]);
-        const [curriculosPorVaga, setCurriculosPorVaga] = React.useState([]);
+        const [curriculosPorVaga, setCurriculosPorVaga] = React.useState([]); // [{nome,total,porDia:[7]}]
         const [curriculosPorDia, setCurriculosPorDia] = React.useState([]);
         const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0});
 
@@ -497,17 +497,21 @@
                 iso:isoLocal(d), hoje:i===6, n:porDia[isoLocal(d)]||0,
                 rotulo:d.toLocaleDateString('pt-BR',{weekday:'short'}).replace('.','')+' '+d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})
               })));
+              const idxDia = {};
+              dias7.forEach((d,i)=>{ idxDia[isoLocal(d)] = i; });
               const cont = {};
               (data||[]).forEach(r=>{
                 const bruto = (r.vaga||'').trim();
-                if(!bruto) return;
+                const i = idxDia[r.data_inscricao];
+                if(!bruto || i===undefined) return;
                 const outra = /^outro/i.test(bruto);
                 const nome = outra ? 'Outras vagas' : bruto.replace(/\s*-\s*/g,'-');
                 const k = nome.toLowerCase();
-                cont[k] = cont[k] || {nome, n:0};
-                cont[k].n++;
+                cont[k] = cont[k] || {nome, total:0, porDia:Array(7).fill(0)};
+                cont[k].total++;
+                cont[k].porDia[i]++;
               });
-              setCurriculosPorVaga(Object.values(cont).sort((a,b)=>b.n-a.n));
+              setCurriculosPorVaga(Object.values(cont).sort((a,b)=>b.total-a.total));
             })
             .catch(()=>{});
         },[empresaId]);
@@ -758,26 +762,35 @@
                 {campanhasRecrut.length>0&&curriculosPorVaga.length>0&&(
                   <div style={{marginBottom:12}}>
                     <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:6}}>Currículos recebidos · últimos 7 dias</div>
-                    <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                      {curriculosPorVaga.slice(0,6).map(v=>(
-                        <span key={v.nome} style={{background:'var(--c-subtle)',borderRadius:20,padding:'3px 10px',fontSize:12,color:C.text}}>
-                          {v.nome} <strong>{v.n}</strong>
-                        </span>
-                      ))}
-                    </div>
                     {(()=>{
-                      const max = Math.max(1,...curriculosPorDia.map(d=>d.n));
+                      // vagas nas linhas (vertical) × dias nas colunas (horizontal); barra de cada dia com o total em cima
+                      const linhas = curriculosPorVaga.slice(0,6);
+                      const max = Math.max(1,...linhas.flatMap(v=>v.porDia));
+                      const grade = '132px repeat(7,minmax(0,1fr)) 34px';
                       return (
-                        <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:10}}>
-                          {curriculosPorDia.map(d=>(
-                            <div key={d.iso} style={{display:'flex',alignItems:'center',gap:8}} title={`${d.n} currículo${d.n!==1?'s':''} em ${d.rotulo}`}>
-                              <span style={{width:74,flexShrink:0,fontSize:11,color:d.hoje?C.text:C.muted,fontWeight:d.hoje?800:500,textTransform:'capitalize'}}>{d.hoje?'Hoje':d.rotulo}</span>
-                              <div style={{flex:1,height:12,background:'var(--c-subtle)',borderRadius:6,overflow:'hidden'}}>
-                                <div style={{width:`${(d.n/max)*100}%`,height:'100%',background:d.hoje?C.acc:C.green,borderRadius:6,minWidth:d.n>0?4:0}}/>
+                        <div style={{overflowX:'auto'}}>
+                          <div style={{display:'grid',gridTemplateColumns:grade,gap:'0 4px',alignItems:'end',minWidth:330}}>
+                            <span/>
+                            {curriculosPorDia.map(d=>(
+                              <div key={d.iso} style={{textAlign:'center',fontSize:10,lineHeight:1.2,color:d.hoje?C.text:C.muted,fontWeight:d.hoje?800:500,paddingBottom:4}}>
+                                {d.hoje?'Hoje':d.rotulo.split(' ')[1]}
+                                <div style={{fontSize:9,textTransform:'capitalize',opacity:0.8}}>{d.hoje?'':d.rotulo.split(' ')[0]}</div>
                               </div>
-                              <span style={{width:22,textAlign:'right',fontSize:11,fontWeight:700,color:d.n>0?C.text:C.muted}}>{d.n}</span>
-                            </div>
-                          ))}
+                            ))}
+                            <span style={{textAlign:'right',fontSize:10,color:C.muted,paddingBottom:4}}>Total</span>
+                            {linhas.map(v=>(
+                              <React.Fragment key={v.nome}>
+                                <span style={{fontSize:12,color:C.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',alignSelf:'center',borderTop:`1px solid ${C.border}`,padding:'6px 0'}} title={v.nome}>{v.nome}</span>
+                                {v.porDia.map((n,i)=>(
+                                  <div key={i} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-end',height:40,borderTop:`1px solid ${C.border}`,padding:'3px 0'}} title={`${v.nome}: ${n} currículo${n!==1?'s':''} em ${curriculosPorDia[i]?.rotulo||''}`}>
+                                    <span style={{fontSize:10,fontWeight:700,color:n>0?C.text:C.muted,lineHeight:1,marginBottom:2}}>{n>0?n:'·'}</span>
+                                    {n>0&&<div style={{width:'60%',maxWidth:18,height:Math.max(3,Math.round((n/max)*22)),background:i===6?C.acc:C.green,borderRadius:3}}/>}
+                                  </div>
+                                ))}
+                                <span style={{textAlign:'right',fontSize:12,fontWeight:800,color:C.text,alignSelf:'center',borderTop:`1px solid ${C.border}`,padding:'6px 0'}}>{v.total}</span>
+                              </React.Fragment>
+                            ))}
+                          </div>
                         </div>
                       );
                     })()}
