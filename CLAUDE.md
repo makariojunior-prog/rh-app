@@ -1,44 +1,58 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index.html`
+(~10.900 linhas, 780 KB). Interface e lógica em português (BR).
 
-## Project Overview
+## ⚠️ Como trabalhar no index.html
 
-Single-file React SPA for HR management at **Cantina em Casa / Lumar Alimentos** (Brazilian food company). Modules: Dashboard, Colaboradores, Vale Transporte (VT), Folha de Pagamento (payroll), Banco de Ponto, Férias, Atestados, Adiantamentos/Antecipações, Compras, Recrutamento, Relatórios, Orçamento, Comissões, Termos de Assinatura, Acessos e Configurações. All UI and logic is in Portuguese (Brazilian).
+**Nunca leia o arquivo inteiro** (passa de 200k tokens). Localize com Grep e leia com
+`offset`/`limit`:
 
-## Running the App
+- Componente: `Grep "function NomePage"`.
+- Linhas abaixo são aproximadas (o arquivo cresce) — confirme com Grep antes de ler.
+- Edições: faça `Edit` pontual; não reescreva blocos grandes.
 
-No build step — open `index.html` directly in a browser (`file://` works) or serve statically. React 18, ReactDOM, Babel (in-browser transpile), jsPDF and the Supabase JS client are loaded from CDN. `package.json` exists but only pins helper deps; the app runs without `npm install`.
+Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 184–380 (`fmtBRL`, `fmtDate`,
+`maskCPF`, `validateCPF`, `parseCSV` 211, `parsePontoDetalhado` 248, `upsertRegistrosPonto` 274,
+`calcINSS` 353, `calcFGTS`, `calcPericulosidade`) · `DashboardPage` 426 · `AjudaPage` 1015 ·
+`LoginPage` 1264 · `ColaboradoresPage` 1519 · `AcessosPage` 2432 · `AtestadosPage` 2775 ·
+`FeriasPage` 2991 · `RecrutamentoPage` 3145 · `AdiantamentosPage` 3716 · `GratificacoesTab` 4204 ·
+`RelatoriosPage` 4558 · `ComprasPage` 4945 · `FuncoesPage` 5253 · `NormasPage` 5620 ·
+`ExamesPage` 5922 · `PontoPage` 7201 · `TermosPage` 7561 · `FolhaPage` 7741
+(`calcularColab` ~8066) · `PainelColaborador` 8994 · `OrcamentoPage` 9136 ·
+`ConfiguracoesPage` 9308 · `ComissoesPage` 9362 · `App()` 9819 (login, sidebar, roteamento, VT).
 
-## Architecture
+Vagas públicas: `vagas/index.html` (candidatos anônimos → tabela `candidatos` + bucket
+`curriculos`). Migrations SQL do RH em `sql/`; edge function em `supabase/functions/rh-usuarios`.
+Backup do Supabase: scripts em `backup/`, documentação em `docs/backup/`.
 
-The whole app is one large file: `index.html` (~7,100 lines). Structure inside the `<script type="text/babel">`:
+## Executar
 
-- **Utility functions** (top) — `parseCSV()`, `parsePontoDetalhado()`, `upsertRegistrosPonto()`, `calcINSS()`, `calcFGTS()`, `calcPericulosidade()`, `calcularFeriadosBR()`, `fmtBRL()`, `fmtDate()`, `maskCPF()`, `validateCPF()`.
-- **`App()`** — root component: auth gate, sidebar, per-page routing, VT module, and most shared state.
-- **Page components** — `DashboardPage`, `ColaboradoresPage`, `FolhaPage` (+ `PainelColaborador`), `PontoPage`, `FeriasPage`, `AtestadosPage`, `AdiantamentosPage`, `ComprasPage`, `RecrutamentoPage`, `RelatoriosPage`, `OrcamentoPage`, `ComissoesPage`, `TermosPage`, `AcessosPage`, `ConfiguracoesPage`, `AjudaPage`, `LoginPage`, `NovaSenhaPage`.
-- A separate public jobs form lives in `vagas/index.html` (candidates insert into `candidatos` + upload résumés to the `curriculos` storage bucket, as anon).
+Sem build: abra `index.html` (ou `python3 -m http.server 4599`). React 18, ReactDOM, Babel
+(transpila no navegador), jsPDF e supabase-js vêm de CDN. O `package.json` só fixa
+`@supabase/supabase-js` para as scripts de backup — `node_modules` não é versionado.
 
-## Backend — Supabase
+## Backend — Supabase compartilhado
 
-The app uses **Supabase** (Postgres + Auth + Storage) as its backend, not Google Sheets. Client is created at the top of `index.html` with `SUPA_URL` + the public `anon` key. Auth is email/password via `_supa.auth`. After login, `perfis` holds the user's `role` (admin/usuario), `empresa_id`, allowed `paginas`, and `dark_mode`.
+Projeto `taicaxtjtikdajmhtsxc`, também usado pelo CRM (`crm_*`, `varejo_*`, `atacado_*`, `deals`,
+`visits`…) e pelo Compras (`compras_*`) — **não altere tabelas/políticas desses domínios**.
+(`compras` e `compras_alertas` são do RH: compras de funcionários descontadas em folha.)
 
-- **Multi-tenant** via `empresa_id` (values `cantina` / `lumar`). The same Supabase project also hosts a separate CRM app (`crm_*`, `varejo_*`, `atacado_*`, `deals`, `visits`, …) — do not change those tables/policies when working on RH.
-- **Security note:** page-level permissions (admin vs usuario, `paginas`) are enforced only in the React client. Real isolation must come from Row Level Security. RH tables are restricted to the `authenticated` role; per-`empresa_id` isolation is a recommended follow-up.
+- Auth e-mail/senha (`_supa.auth`). `perfis` guarda `role` (admin/usuario), `empresa_id`
+  (`cantina`/`lumar`), `paginas` permitidas e `dark_mode`.
+- Permissão por página é só no cliente; o isolamento real deve vir de RLS. Tabelas do RH estão
+  restritas ao role `authenticated`; isolamento por `empresa_id` é pendência.
+- `localStorage` (`rh_*`) só para cache/UI: `rh_feriados`, `rh_folha_marc`, `rh_folha_ajustes`,
+  `rh_colab_api`.
 
-## State & Persistence
+## Fluxo Ponto → Folha
 
-Primary data lives in Supabase. `localStorage` (`rh_` prefixed keys) is used for UI/session cache and for a few client-only settings — notably feriados (`rh_feriados`), folha marcações/ajustes (`rh_folha_marc`, `rh_folha_ajustes`), and a colaborador cache (`rh_colab_api`).
+1. CSV do relógio de ponto (Cracha, Nome, Data, batidas, Hora Extra) importado em Banco de Ponto
+   ou VT → `parsePontoDetalhado()` → `upsertRegistrosPonto()` grava em `registros_ponto`.
+2. `FolhaPage` lê o período (dia 26 do mês anterior a 25 do mês de referência). Status por dia:
+   trabalhou / falta / atestado / atestado_meio / férias / folga / abono.
+3. Feriados BR via `calcularFeriadosBR` (Páscoa por Meeus/Jones/Butcher).
+4. `calcularColab()` calcula perda de DSR, dias CAJU, horas extras, assiduidade e descontos.
+5. Exporta CSV (`;`, para Excel) e PDF; a folha pode ser salva em `folha_mensal`.
 
-## Data Flow (Folha / Ponto)
-
-1. User imports the punch-clock CSV (columns: Cracha, Nome, Data, Entrada/Saída, batidas, Hora Extra) in **Banco de Ponto** or VT.
-2. `parsePontoDetalhado()` maps batidas per employee/day; `upsertRegistrosPonto()` persists to `registros_ponto`.
-3. **Folha de Pagamento** reads `registros_ponto` for the period (26th of prev month → 25th of ref month). Statuses can be adjusted: trabalhou / falta / atestado / atestado_meio / férias / folga / abono.
-4. Brazilian public holidays auto-calculated via Meeus/Jones/Butcher Easter algorithm (`calcularFeriadosBR`).
-5. `calcularColab()` computes payroll metrics: DSR loss, CAJU days, extra hours, assiduidade, descontos.
-6. Export: CSV (semicolon-delimited for Excel) and PDF (jsPDF / browser print). Folha can be saved to `folha_mensal`.
-
-## Key Constants
-
-- Company name / VT passage value / DSR value are stored in `App` state and editable in ⚙️ Configurações (VT default `R$ 4,30`, DSR default `R$ 7,20`).
+Padrões (editáveis em ⚙️ Configurações): passagem VT `R$ 4,30`, DSR `R$ 7,20`.

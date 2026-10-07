@@ -18,3 +18,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Rascunho local
+RegistroVT (Backup)
