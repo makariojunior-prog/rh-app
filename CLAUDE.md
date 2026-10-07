@@ -56,3 +56,11 @@ Projeto `taicaxtjtikdajmhtsxc`, também usado pelo CRM (`crm_*`, `varejo_*`, `at
 5. Exporta CSV (`;`, para Excel) e PDF; a folha pode ser salva em `folha_mensal`.
 
 Padrões (editáveis em ⚙️ Configurações): passagem VT `R$ 4,30`, DSR `R$ 7,20`.
+
+## Manutenção deste arquivo (lembrete ao usuário)
+
+O mapa de linhas acima envelhece. **Ao terminar uma tarefa que criou uma nova `...Page`, ou que
+adicionou/removeu mais de ~100 linhas no `index.html`, rode** `Grep "^\s*function [A-Z]\w+\("` em
+`index.html`, compare com o mapa e, se alguma âncora estiver a mais de ~150 linhas do valor
+registrado, **avise o usuário** (uma frase) e ofereça atualizar o mapa e o total de linhas.
+Se este arquivo passar de ~80 linhas, avise também.
