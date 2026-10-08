@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index.html`
-(~10.900 linhas, 780 KB). Interface e lógica em português (BR).
+(~11.250 linhas, 798 KB). Interface e lógica em português (BR).
 
 ## ⚠️ Como trabalhar no index.html
 
@@ -12,15 +12,16 @@ SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index
 - Linhas abaixo são aproximadas (o arquivo cresce) — confirme com Grep antes de ler.
 - Edições: faça `Edit` pontual; não reescreva blocos grandes.
 
-Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 184–380 (`fmtBRL`, `fmtDate`,
-`maskCPF`, `validateCPF`, `parseCSV` 211, `parsePontoDetalhado` 248, `upsertRegistrosPonto` 274,
-`calcINSS` 353, `calcFGTS`, `calcPericulosidade`) · `DashboardPage` 426 · `AjudaPage` 1015 ·
-`LoginPage` 1264 · `ColaboradoresPage` 1519 · `AcessosPage` 2432 · `AtestadosPage` 2775 ·
-`FeriasPage` 2991 · `RecrutamentoPage` 3145 · `AdiantamentosPage` 3716 · `GratificacoesTab` 4204 ·
-`RelatoriosPage` 4558 · `ComprasPage` 4945 · `FuncoesPage` 5253 · `NormasPage` 5620 ·
-`ExamesPage` 5922 · `PontoPage` 7201 · `TermosPage` 7561 · `FolhaPage` 7741
-(`calcularColab` ~8066) · `PainelColaborador` 8994 · `OrcamentoPage` 9136 ·
-`ConfiguracoesPage` 9308 · `ComissoesPage` 9362 · `App()` 9819 (login, sidebar, roteamento, VT).
+Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 184–440 (`fmtBRL`, `fmtDate`,
+`maskCPF`, `validateCPF`, helpers de documentos/termos `enviarArquivoRH`/`preencherTermo` ~200–260,
+`parseCSV` 266, `parsePontoDetalhado` 303, `upsertRegistrosPonto` 329, `calcINSS` 408, `calcFGTS`,
+`calcPericulosidade`) · `DashboardPage` 481 · `AjudaPage` 1107 · `LoginPage` 1356 ·
+`DocumentosColaborador` 1612 · `ColaboradoresPage` 1752 · `AcessosPage` 2717 · `AtestadosPage` 3060 ·
+`FeriasPage` 3276 · `RecrutamentoPage` 3430 · `AdiantamentosPage` 4001 · `GratificacoesTab` 4489 ·
+`RelatoriosPage` 4843 · `ComprasPage` 5230 · `FuncoesPage` 5538 · `NormasPage` 5905 ·
+`ExamesPage` 6207 · `PontoPage` 7486 · `TermosPage` 7846 · `FolhaPage` 8106
+(`calcularColab` ~8431) · `PainelColaborador` 9359 · `OrcamentoPage` 9501 ·
+`ConfiguracoesPage` 9673 · `ComissoesPage` 9727 · `App()` 10184 (login, sidebar, roteamento, VT).
 
 Vagas públicas: `vagas/index.html` (candidatos anônimos → tabela `candidatos` + bucket
 `curriculos`). Migrations SQL do RH em `sql/`; edge function em `supabase/functions/rh-usuarios`.
