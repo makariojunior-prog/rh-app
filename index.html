@@ -216,18 +216,23 @@
     const CAMPOS_TERMO = [
       ['nome','Nome'],['cpf','CPF'],['rg','RG'],['endereco','Endereço'],['funcao','Função'],['setor','Setor'],
       ['admissao','Data de admissão'],['nascimento','Nascimento'],['telefone','Telefone'],['email','E-mail'],
-      ['salario','Salário'],['banco','Banco'],['agencia','Agência'],['conta','Conta'],['empresa','Empresa'],['data_hoje','Data de hoje'],
+      ['salario','Salário'],['atribuicoes','Atribuições da função'],['banco','Banco'],['agencia','Agência'],['conta','Conta'],['empresa','Empresa (razão social)'],['empresa_cnpj','CNPJ da empresa'],['empresa_endereco','Endereço da empresa'],['data_hoje','Data de hoje'],
     ];
-    const NOME_EMPRESA = {cantina:'Cantina em Casa', lumar:'Lumar Alimentos'};
+    const ENDERECO_EMPRESA = 'Rua 11, Quadra 33, Lote 01, nº 91, Setor Jardim Santo Antônio, Goiânia-GO';
+    const DADOS_EMPRESA = {
+      cantina:{razao:'CANTINA EM CASA LTDA', cnpj:'37.798.843/0001-95', endereco:ENDERECO_EMPRESA},
+      lumar:{razao:'LUMAR ALIMENTOS LTDA', cnpj:'08.530.410/0001-56', endereco:ENDERECO_EMPRESA},
+    };
     const LINHA_BRANCO = '________________';
-    function preencherTermo(texto, c, empresaId){
+    function preencherTermo(texto, c, empresaId, atribuicoesFuncao){
       const fd = v => v ? fmtDate(String(v).slice(0,10)) : '';
       const v = {
         nome:c.nome, cpf:c.cpf, rg:c.rg, endereco:c.endereco, funcao:c.funcao, setor:c.setor,
         admissao:fd(c.admissao), nascimento:fd(c.nascimento), telefone:c.telefone, email:c.email,
         salario:Number(String(c.salario||'').replace(',','.'))>0 ? fmtBRL(Number(String(c.salario).replace(',','.'))) : '',
         banco:c.bancoNome, agencia:c.bancoAgencia, conta:c.bancoConta,
-        empresa:NOME_EMPRESA[empresaId]||'', data_hoje:new Date().toLocaleDateString('pt-BR'),
+        atribuicoes:String(atribuicoesFuncao||'').split('\n').map(l=>l.replace(/^\s*[•\-*]\s*/,'').trim()).filter(Boolean).map(l=>'• '+l).join('\n'),
+        empresa:DADOS_EMPRESA[empresaId]?.razao||'', empresa_cnpj:DADOS_EMPRESA[empresaId]?.cnpj||'', empresa_endereco:DADOS_EMPRESA[empresaId]?.endereco||'', data_hoje:new Date().toLocaleDateString('pt-BR'),
       };
       // Campo desconhecido/vazio (ex.: dados do aparelho) vira linha em branco para preencher à mão.
       return String(texto||'').replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=> (v[k]!=null && String(v[k]).trim()) ? String(v[k]) : LINHA_BRANCO);
@@ -2015,7 +2020,7 @@
         };
         const gerarTermo = (t) => {
           if(!t.modelo_texto){ toast('Este termo não tem texto-modelo. Cadastre em 📝 Termos.','error'); return; }
-          imprimirTermoHTML(t.nome, preencherTermo(t.modelo_texto, form, empresaId));
+          imprimirTermoHTML(t.nome, preencherTermo(t.modelo_texto, form, empresaId, funcoesCat.find(f=>f.nome===form.funcao)?.atribuicoes));
         };
         const carregarHistoricoTermos = async (colabId) => {
           try {
@@ -7851,6 +7856,10 @@
         const [textoModelo, setTextoModelo] = React.useState('');
         const [colabGerar, setColabGerar] = React.useState('');
         const [subindoModelo, setSubindoModelo] = React.useState(false);
+        const [funcoesCat, setFuncoesCat] = React.useState([]);
+        React.useEffect(()=>{
+          _supa.from('funcoes').select('nome,atribuicoes').eq('empresa_id',empresaId).then(({data})=>setFuncoesCat(data||[])).catch(()=>{});
+        },[empresaId]);
         const sel = termos.find(t=>t.id===selId);
 
         const abrirTermo = t => { setSelId(t.id); setTextoModelo(t.modelo_texto||''); setColabGerar(''); };
@@ -7879,7 +7888,7 @@
         const gerarPara = () => {
           const c = (colabAPI||[]).find(x=>x.nome===colabGerar);
           if(!c){ setStatus({ok:false,msg:'Escolha um colaborador.'}); return; }
-          imprimirTermoHTML(sel.nome, preencherTermo(textoModelo, c, empresaId));
+          imprimirTermoHTML(sel.nome, preencherTermo(textoModelo, c, empresaId, funcoesCat.find(f=>f.nome===c.funcao)?.atribuicoes));
         };
 
         const carregar = async () => {
