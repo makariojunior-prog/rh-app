@@ -197,6 +197,56 @@
     let _addToast=null;
     function toast(msg,tipo='success'){ _addToast?.({id:Date.now()+Math.random(),msg,tipo}); }
 
+    // ---- Documentos / modelos de termos (bucket privado 'rh-documentos') ----
+    const DOCS_BUCKET = 'rh-documentos';
+    async function enviarArquivoRH(path, file){
+      const {error} = await _supa.storage.from(DOCS_BUCKET).upload(path, file, {contentType:file.type||undefined, upsert:true});
+      return error;
+    }
+    async function abrirArquivoRH(path){
+      const win = window.open('', '_blank'); // abre antes do await para não ser bloqueado como popup
+      const {data,error} = await _supa.storage.from(DOCS_BUCKET).createSignedUrl(path, 120);
+      if(error||!data?.signedUrl){ win?.close(); toast('Não foi possível abrir o arquivo: '+(error?.message||''),'error'); return; }
+      if(win) win.location.href = data.signedUrl; else window.location.href = data.signedUrl;
+    }
+    async function removerArquivoRH(path){ if(path) await _supa.storage.from(DOCS_BUCKET).remove([path]); }
+    function nomeArquivoSeguro(name){ return String(name||'arquivo').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zA-Z0-9._-]+/g,'_'); }
+
+    // Campos {{...}} do modelo de texto do termo, preenchidos com o cadastro do colaborador.
+    const CAMPOS_TERMO = [
+      ['nome','Nome'],['cpf','CPF'],['rg','RG'],['endereco','Endereço'],['funcao','Função'],['setor','Setor'],
+      ['admissao','Data de admissão'],['nascimento','Nascimento'],['telefone','Telefone'],['email','E-mail'],
+      ['salario','Salário'],['banco','Banco'],['agencia','Agência'],['conta','Conta'],['empresa','Empresa'],['data_hoje','Data de hoje'],
+    ];
+    const NOME_EMPRESA = {cantina:'Cantina em Casa', lumar:'Lumar Alimentos'};
+    const LINHA_BRANCO = '________________';
+    function preencherTermo(texto, c, empresaId){
+      const fd = v => v ? fmtDate(String(v).slice(0,10)) : '';
+      const v = {
+        nome:c.nome, cpf:c.cpf, rg:c.rg, endereco:c.endereco, funcao:c.funcao, setor:c.setor,
+        admissao:fd(c.admissao), nascimento:fd(c.nascimento), telefone:c.telefone, email:c.email,
+        salario:Number(String(c.salario||'').replace(',','.'))>0 ? fmtBRL(Number(String(c.salario).replace(',','.'))) : '',
+        banco:c.bancoNome, agencia:c.bancoAgencia, conta:c.bancoConta,
+        empresa:NOME_EMPRESA[empresaId]||'', data_hoje:new Date().toLocaleDateString('pt-BR'),
+      };
+      // Campo desconhecido/vazio (ex.: dados do aparelho) vira linha em branco para preencher à mão.
+      return String(texto||'').replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=> (v[k]!=null && String(v[k]).trim()) ? String(v[k]) : LINHA_BRANCO);
+    }
+    function imprimirTermoHTML(titulo, texto){
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const w = window.open('', '_blank');
+      if(!w){ toast('Permita pop-ups para gerar o documento.','error'); return; }
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(titulo)}</title>
+        <style>body{font-family:Arial,sans-serif;max-width:760px;margin:32px auto;line-height:1.6;font-size:14px;color:#111}
+        h1{font-size:18px;text-align:center;text-transform:uppercase}pre{white-space:pre-wrap;font-family:inherit}
+        .ass{margin-top:60px;display:flex;gap:40px}.ass div{flex:1;border-top:1px solid #000;text-align:center;padding-top:4px;font-size:12px}
+        @media print{.no-print{display:none}}</style></head><body>
+        <button class="no-print" onclick="window.print()">🖨️ Imprimir</button>
+        <h1>${esc(titulo)}</h1><pre>${esc(texto)}</pre>
+        <div class="ass"><div>Colaborador</div><div>Empresa</div></div></body></html>`);
+      w.document.close();
+    }
+
     function parseDDMMYYYY(str){
       const[d,m,y]=str.split("/");
       return new Date(parseInt(y),parseInt(m)-1,parseInt(d));
@@ -1516,6 +1566,147 @@
         );
       }
 
+      // Documentos pessoais + check-list de admissão (tipos editáveis) do colaborador
+      function DocumentosColaborador({ empresaId, colab }) {
+        const [tipos, setTipos] = useState([]);
+        const [docs, setDocs] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [subindo, setSubindo] = useState(null);
+        const [gerenciar, setGerenciar] = useState(false);
+        const [novoTipo, setNovoTipo] = useState({nome:'',condicao:'',obrigatorio:true});
+        const [erroSql, setErroSql] = useState(null);
+
+        const carregar = async () => {
+          setLoading(true);
+          const t = await _supa.from('tipos_documento_colab').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('ordem').order('nome');
+          const d = await _supa.from('colaborador_documentos').select('*').eq('colaborador_id',colab.id).order('created_at',{ascending:false});
+          const err = t.error||d.error;
+          setErroSql(err ? err.message : null);
+          setTipos(t.data||[]); setDocs(d.data||[]); setLoading(false);
+        };
+        useEffect(()=>{ carregar(); },[colab.id,empresaId]);
+
+        const anexar = async (tipo, file) => {
+          if(!file) return;
+          const chave = tipo?.id||'outro';
+          const nome = tipo ? tipo.nome : (window.prompt('Nome do documento (ex: CNH, Comprovante de escolaridade):','')||'Outro documento');
+          setSubindo(chave);
+          const path = `${empresaId}/docs/${colab.id}/${Date.now()}_${nomeArquivoSeguro(file.name)}`;
+          const err = await enviarArquivoRH(path, file);
+          if(err){ setSubindo(null); toast('Erro ao enviar: '+err.message,'error'); return; }
+          const {error} = await _supa.from('colaborador_documentos').insert({
+            empresa_id:empresaId, colaborador_id:colab.id, tipo_id:tipo?.id||null, tipo_nome:nome, arquivo_path:path, arquivo_nome:file.name,
+          });
+          setSubindo(null);
+          if(error){ await removerArquivoRH(path); toast('Erro ao registrar: '+error.message,'error'); return; }
+          toast('Documento salvo.'); carregar();
+        };
+        const remover = async (d) => {
+          if(!await confirmar(`Remover "${d.arquivo_nome||d.tipo_nome}"?`,'Remover documento')) return;
+          await _supa.from('colaborador_documentos').delete().eq('id',d.id);
+          await removerArquivoRH(d.arquivo_path); carregar();
+        };
+        const addTipo = async () => {
+          if(!novoTipo.nome.trim()) return;
+          const {error} = await _supa.from('tipos_documento_colab').insert({
+            empresa_id:empresaId, nome:novoTipo.nome.trim(), condicao:novoTipo.condicao.trim()||null,
+            obrigatorio:novoTipo.obrigatorio, ordem:tipos.length+1,
+          });
+          if(error){ toast(error.message,'error'); return; }
+          setNovoTipo({nome:'',condicao:'',obrigatorio:true}); carregar();
+        };
+        const editarTipo = async (t) => {
+          const nome = window.prompt('Nome do tipo de documento:', t.nome); if(nome===null||!nome.trim()) return;
+          const condicao = window.prompt('Condição (opcional, ex: Homens):', t.condicao||''); if(condicao===null) return;
+          await _supa.from('tipos_documento_colab').update({nome:nome.trim(),condicao:condicao.trim()||null}).eq('id',t.id); carregar();
+        };
+        const toggleObrig = async (t) => { await _supa.from('tipos_documento_colab').update({obrigatorio:!t.obrigatorio}).eq('id',t.id); carregar(); };
+        const removerTipo = async (t) => {
+          if(!await confirmar(`Remover o tipo "${t.nome}" do check-list? Documentos já anexados são mantidos.`,'Remover tipo')) return;
+          await _supa.from('tipos_documento_colab').update({ativo:false}).eq('id',t.id); carregar();
+        };
+
+        const docsDoTipo = t => docs.filter(d=>d.tipo_id===t.id);
+        const avulsos = docs.filter(d=>!d.tipo_id || !tipos.some(t=>t.id===d.tipo_id));
+        const obrig = tipos.filter(t=>t.obrigatorio);
+        const okObrig = obrig.filter(t=>docsDoTipo(t).length>0).length;
+        const btnMini = {...s.btnOutline,padding:"2px 10px",fontSize:11};
+        const LinhaArq = ({d}) => (
+          <span style={{display:"inline-flex",gap:4,alignItems:"center",marginRight:8}}>
+            <button type="button" style={{...btnMini,color:"#166534"}} onClick={()=>abrirArquivoRH(d.arquivo_path)}>📎 {d.arquivo_nome||d.tipo_nome}</button>
+            <button type="button" style={{...btnMini,padding:"2px 7px",color:"#991B1B"}} onClick={()=>remover(d)}>✕</button>
+          </span>
+        );
+
+        return (
+          <div style={s.card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:"uppercase",letterSpacing:"0.05em"}}>📁 Documentos Pessoais / Check-list de Admissão</div>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                {obrig.length>0 && <span style={{fontSize:11,fontWeight:700,color:okObrig===obrig.length?"#16A34A":"#B45309"}}>{okObrig}/{obrig.length} obrigatórios</span>}
+                <button type="button" style={btnMini} onClick={()=>setGerenciar(g=>!g)}>{gerenciar?'Fechar':'⚙️ Tipos de documento'}</button>
+              </div>
+            </div>
+            {erroSql && <div style={{padding:"8px 12px",borderRadius:6,background:"#FEE2E2",color:"#991B1B",fontSize:12,marginBottom:10}}>❌ {erroSql} — rode a migration <code>sql/2026-10-08_documentos_colaborador_e_modelos_termos.sql</code> no Supabase.</div>}
+            {loading ? <div style={{color:C.muted,fontSize:12}}>Carregando...</div> : (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {tipos.map(t=>{
+                  const arqs = docsDoTipo(t);
+                  return (
+                    <div key={t.id} style={{padding:"8px 12px",borderRadius:7,background:arqs.length?"#F0FDF4":"var(--c-subtle)",border:"1px solid "+(arqs.length?C.green:C.border)}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:500,color:"#374151"}}>
+                          {arqs.length?'✅':'⬜'} {t.nome}
+                          {t.condicao && <span style={{fontSize:11,color:C.muted,marginLeft:6}}>({t.condicao})</span>}
+                          {!t.obrigatorio && <span style={{fontSize:10,color:C.muted,marginLeft:6}}>opcional</span>}
+                        </span>
+                        <label style={{...btnMini,cursor:"pointer"}}>
+                          {subindo===t.id?'Enviando...':'⬆️ Anexar'}
+                          <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={subindo===t.id}
+                            onChange={e=>{ anexar(t,e.target.files[0]); e.target.value=''; }}/>
+                        </label>
+                      </div>
+                      {arqs.length>0 && <div style={{marginTop:6}}>{arqs.map(d=><LinhaArq key={d.id} d={d}/>)}</div>}
+                    </div>
+                  );
+                })}
+                {avulsos.length>0 && (
+                  <div style={{padding:"8px 12px",borderRadius:7,background:"var(--c-subtle)",border:"1px solid "+C.border}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:4}}>Outros documentos</div>
+                    {avulsos.map(d=><div key={d.id} style={{marginBottom:4}}><span style={{fontSize:12,marginRight:6}}>{d.tipo_nome}:</span><LinhaArq d={d}/></div>)}
+                  </div>
+                )}
+                <label style={{...btnMini,cursor:"pointer",alignSelf:"flex-start"}}>
+                  {subindo==='outro'?'Enviando...':'➕ Anexar outro documento'}
+                  <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={subindo==='outro'}
+                    onChange={e=>{ anexar(null,e.target.files[0]); e.target.value=''; }}/>
+                </label>
+              </div>
+            )}
+            {gerenciar && (
+              <div style={{marginTop:14,padding:12,borderRadius:8,border:"1px dashed "+C.border}}>
+                <div style={{fontWeight:700,fontSize:12,color:C.pri,marginBottom:8}}>Tipos de documento do check-list (valem para todos os colaboradores)</div>
+                {tipos.map(t=>(
+                  <div key={t.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,marginBottom:4}}>
+                    <span style={{flex:1}}>{t.nome}{t.condicao?` — ${t.condicao}`:''}</span>
+                    <button type="button" style={btnMini} onClick={()=>toggleObrig(t)}>{t.obrigatorio?'Obrigatório':'Opcional'}</button>
+                    <button type="button" style={btnMini} onClick={()=>editarTipo(t)}>✏️</button>
+                    <button type="button" style={{...btnMini,color:"#991B1B"}} onClick={()=>removerTipo(t)}>✕</button>
+                  </div>
+                ))}
+                <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                  <input style={{...s.inputSm,flex:2,minWidth:160}} placeholder="Novo tipo (ex: CNH)" value={novoTipo.nome} onChange={e=>setNovoTipo(p=>({...p,nome:e.target.value}))}/>
+                  <input style={{...s.inputSm,flex:2,minWidth:160}} placeholder="Condição (opcional)" value={novoTipo.condicao} onChange={e=>setNovoTipo(p=>({...p,condicao:e.target.value}))}/>
+                  <label style={{fontSize:12,display:"flex",alignItems:"center",gap:4}}><input type="checkbox" checked={novoTipo.obrigatorio} onChange={e=>setNovoTipo(p=>({...p,obrigatorio:e.target.checked}))}/> Obrigatório</label>
+                  <button type="button" style={s.btn} onClick={addTipo}>Adicionar</button>
+                </div>
+              </div>
+            )}
+            <div style={{fontSize:11,color:C.muted,marginTop:8}}>🔒 Arquivos ficam em bucket privado. Contato (telefone, e-mail, Pix) e dados bancários estão nos campos acima.</div>
+          </div>
+        );
+      }
+
       function ColaboradoresPage({ empresaId, setColabAPI }) {
         // Catálogo centralizado de funções (cadastro em 📋 Planos de Cargos) — usado como
         // dropdown aqui em vez de texto livre, para manter os dados consistentes.
@@ -1540,6 +1731,8 @@
         const [termosGlobais, setTermosGlobais] = useState([]);
         const [termosExtras, setTermosExtras] = useState({});
         const [termosValores, setTermosValores] = useState({}); // termo_id -> texto livre (nº aditivo, nº armário, etc.)
+        const [termosArquivos, setTermosArquivos] = useState({}); // termo_id -> {path,nome} (cópia digitalizada do termo assinado)
+        const [subindoTermo, setSubindoTermo] = useState(null);
         const [historicoTermos, setHistoricoTermos] = useState([]);
         const [loading, setLoading] = useState(true);
         const [status, setStatus] = useState(null);
@@ -1561,7 +1754,7 @@
         const [relCarregando, setRelCarregando] = useState(false);
 
         const FORM_VAZIO = {
-          nome:"", funcao:"", setor:"", cpf:"", telefone:"", chavePix:"", email:"",
+          nome:"", funcao:"", setor:"", cpf:"", rg:"", endereco:"", telefone:"", chavePix:"", email:"",
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
           bancoNome:"", bancoCodigo:"", bancoTipoConta:"", bancoAgencia:"", bancoConta:"",
           salario:"", transporte:"", periculosidade:false,
@@ -1575,7 +1768,7 @@
         const normNome = n => !n ? "" : String(n).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/\s+/g," ").trim();
 
         const mapearParaApp = c => ({
-          nome:c.nome, setor:c.setor||'', funcao:c.funcao||'', cpf:c.cpf||'',
+          nome:c.nome, setor:c.setor||'', funcao:c.funcao||'', cpf:c.cpf||'', rg:c.rg||'', endereco:c.endereco||'',
           telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
           nascimento:c.nascimento||'', admissao:c.admissao||'',
           experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
@@ -1729,7 +1922,7 @@
         const abrirNovo = () => { setForm(FORM_VAZIO); setEditando({novo:true}); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoGratificacoes([]); setHistoricoExames([]); setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]); };
         const abrirEdicao = c => {
           setForm({
-            nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'',
+            nome:c.nome||'', funcao:c.funcao||'', setor:c.setor||'', cpf:c.cpf||'', rg:c.rg||'', endereco:c.endereco||'',
             telefone:c.telefone||'', chavePix:c.chave_pix||'', email:c.email||'',
             nascimento:c.nascimento||'', admissao:c.admissao||'',
             experiencia30:c.experiencia_30||'', experiencia90:c.experiencia_90||'', encerramento:c.data_encerramento||'',
@@ -1747,15 +1940,45 @@
             termoAssiduidade:!!c.termo_assiduidade,
             termoMudancaHorario:!!c.termo_mudanca_horario
           });
-          setTermosExtras({}); setTermosValores({}); setHistoricoTermos([]);
+          setTermosExtras({}); setTermosValores({}); setTermosArquivos({}); setHistoricoTermos([]);
           setEditando(c); setStatus(null); setAbaEditar('dados'); setHistoricoAtestados([]); setHistoricoFerias([]); setHistoricoSalario([]); setHistoricoAdiantamentos([]); setHistoricoAdiantamentosFixos([]); setHistoricoGratificacoes([]); setHistoricoExames([]);
           // Carrega assinatura (SIM/NÃO) e valor livre (nº aditivo, nº armário, etc.) de todos os termos
           _supa.from('colaborador_termos').select('*').eq('colaborador_id',c.id)
             .then(({data})=>{
-              const extras = {}, valores = {};
-              (data||[]).forEach(ct=>{ extras[ct.termo_id]=ct.assinado; valores[ct.termo_id]=ct.valor||''; });
-              setTermosExtras(extras); setTermosValores(valores);
+              const extras = {}, valores = {}, arqs = {};
+              (data||[]).forEach(ct=>{ extras[ct.termo_id]=ct.assinado; valores[ct.termo_id]=ct.valor||''; if(ct.arquivo_path) arqs[ct.termo_id]={path:ct.arquivo_path,nome:ct.arquivo_nome}; });
+              setTermosExtras(extras); setTermosValores(valores); setTermosArquivos(arqs);
             }).catch(()=>{});
+        };
+        const anexarTermoAssinado = async (t, file) => {
+          if(!file||!editando?.id) return;
+          setSubindoTermo(t.id);
+          const path = `${empresaId}/assinados/${editando.id}/${t.id}_${Date.now()}_${nomeArquivoSeguro(file.name)}`;
+          const err = await enviarArquivoRH(path, file);
+          if(err){ setSubindoTermo(null); toast('Erro ao enviar: '+err.message,'error'); return; }
+          const antigo = termosArquivos[t.id]?.path;
+          const {error} = await _supa.from('colaborador_termos').upsert({
+            empresa_id:empresaId, colaborador_id:editando.id, termo_id:t.id,
+            assinado:true, arquivo_path:path, arquivo_nome:file.name, updated_at:new Date().toISOString(),
+          },{onConflict:'colaborador_id,termo_id'});
+          setSubindoTermo(null);
+          if(error){ await removerArquivoRH(path); toast('Erro ao registrar: '+error.message,'error'); return; }
+          if(antigo) await removerArquivoRH(antigo);
+          setTermosArquivos(p=>({...p,[t.id]:{path,nome:file.name}}));
+          if(t.campo_legado){ const k=CAMPO_DB_TO_APP[t.campo_legado]; if(k) setForm(p=>({...p,[k]:true})); }
+          else setTermosExtras(p=>({...p,[t.id]:true}));
+          toast('Termo assinado anexado.');
+        };
+        const removerTermoAssinado = async (t) => {
+          const arq = termosArquivos[t.id]; if(!arq) return;
+          if(!await confirmar('Remover o arquivo digitalizado deste termo?','Remover arquivo')) return;
+          await _supa.from('colaborador_termos').update({arquivo_path:null,arquivo_nome:null}).eq('colaborador_id',editando.id).eq('termo_id',t.id);
+          await removerArquivoRH(arq.path);
+          setTermosArquivos(p=>{ const n={...p}; delete n[t.id]; return n; });
+        };
+        const gerarTermo = (t) => {
+          if(!t.modelo_texto){ toast('Este termo não tem texto-modelo. Cadastre em 📝 Termos.','error'); return; }
+          imprimirTermoHTML(t.nome, preencherTermo(t.modelo_texto, form, empresaId));
         };
         const carregarHistoricoTermos = async (colabId) => {
           try {
@@ -1773,7 +1996,7 @@
               nome:form.nome.trim(),
               nome_key:normNome(form.nome.trim()),
               funcao:form.funcao.trim()||null, setor:form.setor.trim()||null,
-              cpf:form.cpf.trim()||null,
+              cpf:form.cpf.trim()||null, rg:form.rg?.trim()||null, endereco:form.endereco?.trim()||null,
               telefone:form.telefone?.trim()||null, chave_pix:form.chavePix?.trim()||null,
               email:form.email?.trim()||null,
               nascimento:form.nascimento||null, admissao:form.admissao||null,
@@ -1975,6 +2198,8 @@
                   mask={maskCPF}
                   validate={v=>{ const d=v.replace(/\D/g,''); return d.length===11&&!validateCPF(v)?'CPF inválido':null; }}
                 />
+                <CampoForm label="RG" campo="rg" placeholder="Nº do RG / órgão emissor" form={form} setForm={setForm}/>
+                <CampoForm label="Endereço" campo="endereco" placeholder="Rua, nº, bairro, cidade" form={form} setForm={setForm}/>
                 <CampoForm label="Telefone" campo="telefone" placeholder="(00) 00000-0000" form={form} setForm={setForm} mask={maskFone}/>
                 <CampoForm label="E-mail" campo="email" type="email" placeholder="email@exemplo.com" form={form} setForm={setForm}/>
                 <CampoForm label="Chave PIX" campo="chavePix" placeholder="CPF, e-mail ou telefone" form={form} setForm={setForm}/>
@@ -2111,12 +2336,30 @@
                             style={{...s.inputSm,flex:1,background:"#fff"}}/>
                         </div>
                       )}
+                      {t.id && !editando.novo && (
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginTop:7,flexWrap:"wrap"}}>
+                          {t.modelo_texto && <button type="button" style={{...s.btnOutline,padding:"2px 10px",fontSize:11}} onClick={()=>gerarTermo(t)}>🖨️ Gerar preenchido</button>}
+                          {t.modelo_path && <button type="button" style={{...s.btnOutline,padding:"2px 10px",fontSize:11}} onClick={()=>abrirArquivoRH(t.modelo_path)}>📄 Modelo</button>}
+                          {termosArquivos[t.id]
+                            ? <>
+                                <button type="button" style={{...s.btnOutline,padding:"2px 10px",fontSize:11,color:"#166534"}} onClick={()=>abrirArquivoRH(termosArquivos[t.id].path)}>📎 {termosArquivos[t.id].nome||'Assinado'}</button>
+                                <button type="button" style={{...s.btnOutline,padding:"2px 8px",fontSize:11,color:"#991B1B"}} onClick={()=>removerTermoAssinado(t)}>✕</button>
+                              </>
+                            : <label style={{...s.btnOutline,padding:"2px 10px",fontSize:11,cursor:"pointer"}}>
+                                {subindoTermo===t.id?'Enviando...':'⬆️ Anexar assinado'}
+                                <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={subindoTermo===t.id}
+                                  onChange={e=>{ anexarTermoAssinado(t,e.target.files[0]); e.target.value=''; }}/>
+                              </label>}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
               <div style={{fontSize:11,color:C.muted,marginTop:8}}>💡 O campo "Detalhe" de cada termo (nº do aditivo, nº do armário...) é opcional e fica registrado com histórico de alterações — veja em "🗂️ Histórico do Colaborador" abaixo.</div>
             </div>
+
+            {!editando.novo && <DocumentosColaborador empresaId={empresaId} colab={editando}/>}
 
             <div style={{display:"flex",gap:10,marginTop:4,marginBottom:12}}>
               <button onClick={salvar} style={s.btn} disabled={loading}>{loading?"Salvando...":"💾 Salvar"}</button>
@@ -7567,6 +7810,40 @@
         const [form, setForm] = React.useState(VAZIO);
         const [saving, setSaving] = React.useState(false);
         const [stats, setStats] = React.useState({});
+        const [selId, setSelId] = React.useState(null);
+        const [textoModelo, setTextoModelo] = React.useState('');
+        const [colabGerar, setColabGerar] = React.useState('');
+        const [subindoModelo, setSubindoModelo] = React.useState(false);
+        const sel = termos.find(t=>t.id===selId);
+
+        const abrirTermo = t => { setSelId(t.id); setTextoModelo(t.modelo_texto||''); setColabGerar(''); };
+        const salvarTexto = async () => {
+          const {error} = await _supa.from('termos_assinatura').update({modelo_texto:textoModelo.trim()||null}).eq('id',sel.id);
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message+' (rode a migration sql/2026-10-08_...)'}); return; }
+          setStatus({ok:true,msg:'✅ Texto-modelo salvo.'}); await carregar();
+        };
+        const anexarModelo = async file => {
+          if(!file) return;
+          setSubindoModelo(true);
+          const path = `${empresaId}/modelos/${sel.id}_${Date.now()}_${nomeArquivoSeguro(file.name)}`;
+          const err = await enviarArquivoRH(path, file);
+          if(err){ setSubindoModelo(false); setStatus({ok:false,msg:'❌ '+err.message}); return; }
+          const {error} = await _supa.from('termos_assinatura').update({modelo_path:path,modelo_nome:file.name}).eq('id',sel.id);
+          setSubindoModelo(false);
+          if(error){ await removerArquivoRH(path); setStatus({ok:false,msg:'❌ '+error.message}); return; }
+          if(sel.modelo_path) await removerArquivoRH(sel.modelo_path);
+          setStatus({ok:true,msg:'✅ Modelo anexado.'}); await carregar();
+        };
+        const removerModelo = async () => {
+          if(!await confirmar('Remover o arquivo do modelo?','Remover modelo')) return;
+          await _supa.from('termos_assinatura').update({modelo_path:null,modelo_nome:null}).eq('id',sel.id);
+          await removerArquivoRH(sel.modelo_path); await carregar();
+        };
+        const gerarPara = () => {
+          const c = (colabAPI||[]).find(x=>x.nome===colabGerar);
+          if(!c){ setStatus({ok:false,msg:'Escolha um colaborador.'}); return; }
+          imprimirTermoHTML(sel.nome, preencherTermo(textoModelo, c, empresaId));
+        };
 
         const carregar = async () => {
           setLoading(true);
@@ -7646,6 +7923,46 @@
               </div>
             )}
 
+            {sel&&(
+              <div style={{...s.card,border:'2px solid '+C.acc,marginTop:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:C.pri}}>📄 Modelo: {sel.nome}</div>
+                  <button style={s.btnOutline} onClick={()=>setSelId(null)}>Fechar</button>
+                </div>
+                <label style={s.label}>Arquivo do modelo (PDF, Word ou imagem)</label>
+                <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
+                  {sel.modelo_path&&<>
+                    <button style={{...s.btnOutline,color:'#166534'}} onClick={()=>abrirArquivoRH(sel.modelo_path)}>📎 {sel.modelo_nome||'Modelo'}</button>
+                    <button style={{...s.btnOutline,color:'#991B1B'}} onClick={removerModelo}>✕ Remover</button>
+                  </>}
+                  <label style={{...s.btnOutline,cursor:'pointer'}}>
+                    {subindoModelo?'Enviando...':(sel.modelo_path?'⬆️ Substituir':'⬆️ Anexar modelo')}
+                    <input type="file" accept=".pdf,.doc,.docx,image/*" style={{display:'none'}} disabled={subindoModelo}
+                      onChange={e=>{anexarModelo(e.target.files[0]);e.target.value='';}}/>
+                  </label>
+                </div>
+                <label style={s.label}>Texto-modelo com preenchimento automático (opcional)</label>
+                <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:6}}>
+                  {CAMPOS_TERMO.map(([k,l])=>(
+                    <button key={k} type="button" style={{...s.btnOutline,padding:'1px 8px',fontSize:11}} title={l}
+                      onClick={()=>setTextoModelo(t=>t+'{{'+k+'}}')}>{'{{'+k+'}}'}</button>
+                  ))}
+                </div>
+                <textarea style={{...s.input,minHeight:200,fontFamily:'inherit',lineHeight:1.5}} value={textoModelo}
+                  onChange={e=>setTextoModelo(e.target.value)}
+                  placeholder={'Eu, {{nome}}, CPF {{cpf}}, RG {{rg}}, função {{funcao}}, declaro ter recebido o aparelho: ____________ (marca/modelo/IMEI)...'}/>
+                <div style={{fontSize:11,color:C.muted,margin:'4px 0 10px'}}>Campos {'{{...}}'} vêm do cadastro do colaborador; o que não existir (ex.: dados do aparelho) sai como linha em branco para preencher à mão.</div>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                  <button style={s.btn} onClick={salvarTexto}>💾 Salvar texto</button>
+                  <select style={{...s.input,width:260}} value={colabGerar} onChange={e=>setColabGerar(e.target.value)}>
+                    <option value="">Pré-visualizar para...</option>
+                    {(colabAPI||[]).map(c=><option key={c.nome} value={c.nome}>{c.nome}</option>)}
+                  </select>
+                  <button style={s.btnOutline} onClick={gerarPara} disabled={!textoModelo.trim()||!colabGerar}>🖨️ Gerar documento</button>
+                </div>
+              </div>
+            )}
+
             {loading?(
               <div style={{...s.card,color:C.muted,textAlign:'center',padding:32}}>Carregando termos...</div>
             ):(
@@ -7679,7 +7996,9 @@
                         return (
                           <tr key={t.id} style={{borderTop:'1px solid '+C.border,opacity:t.ativo?1:0.55}}>
                             <td style={s.td}>
-                              <div style={{fontWeight:600,fontSize:13,color:'#1E293B'}}>{t.nome}</div>
+                              <div style={{fontWeight:600,fontSize:13,color:'#1E293B',cursor:'pointer',textDecoration:selId===t.id?'underline':'none'}} onClick={()=>abrirTermo(t)} title="Abrir modelo do termo">
+                                {t.nome} {(t.modelo_path||t.modelo_texto)&&<span title="Tem modelo">📄</span>}
+                              </div>
                               {t.descricao&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{t.descricao}</div>}
                               {t.campo_legado&&<div style={{fontSize:10,color:'#9333EA',marginTop:3}}>⚙️ Campo do sistema · {t.campo_legado}</div>}
                             </td>
