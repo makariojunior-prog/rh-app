@@ -571,12 +571,14 @@
             .catch(()=>{});
         },[empresaId]);
 
-        // Admissões recentes (últimos 90 dias) com documentos obrigatórios faltando.
-        // Quem já estava na empresa tem a papelada física, então não entra no alerta.
+        // Admissões NOVAS (a partir de INICIO_CONTROLE_DOCS, até 90 dias) com documentos obrigatórios
+        // faltando. Quem já estava na empresa tem a papelada física, então não entra no alerta.
+        const INICIO_CONTROLE_DOCS = '2026-10-08';
         const [docsPendentes, setDocsPendentes] = React.useState([]);
         React.useEffect(()=>{
           if(!empresaId) return;
-          const desde = new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+          const ha90 = new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+          const desde = ha90 > INICIO_CONTROLE_DOCS ? ha90 : INICIO_CONTROLE_DOCS;
           (async()=>{
             const {data:tipos,error:e1} = await _supa.from('tipos_documento_colab').select('id,nome').eq('empresa_id',empresaId).eq('ativo',true).eq('obrigatorio',true).order('ordem');
             if(e1||!tipos?.length) return;
@@ -745,7 +747,7 @@
               <div style={{...s.card,border:"1.5px solid #FCD34D",background:"#FFFBEB",marginBottom:18}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <div style={s.cardTitle}>📁 Documentos de admissão pendentes</div>
-                  <span style={{fontSize:12,color:"#92400E",fontWeight:700}}>{docsPendentes.length} colaborador{docsPendentes.length!==1?"es":""} · admitidos nos últimos 90 dias</span>
+                  <span style={{fontSize:12,color:"#92400E",fontWeight:700}}>{docsPendentes.length} colaborador{docsPendentes.length!==1?"es":""} · novas admissões</span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8}}>
                   {docsPendentes.map(c=>(
