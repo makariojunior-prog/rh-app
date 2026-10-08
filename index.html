@@ -566,6 +566,24 @@
             .catch(()=>{});
         },[empresaId]);
 
+        // Admissões recentes (últimos 90 dias) com documentos obrigatórios faltando.
+        // Quem já estava na empresa tem a papelada física, então não entra no alerta.
+        const [docsPendentes, setDocsPendentes] = React.useState([]);
+        React.useEffect(()=>{
+          if(!empresaId) return;
+          const desde = new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+          (async()=>{
+            const {data:tipos,error:e1} = await _supa.from('tipos_documento_colab').select('id,nome').eq('empresa_id',empresaId).eq('ativo',true).eq('obrigatorio',true).order('ordem');
+            if(e1||!tipos?.length) return;
+            const {data:colabs} = await _supa.from('colaboradores').select('id,nome,funcao,admissao').eq('empresa_id',empresaId).eq('ativo',true).gte('admissao',desde).order('admissao',{ascending:false});
+            if(!colabs?.length) return;
+            const {data:docs} = await _supa.from('colaborador_documentos').select('colaborador_id,tipo_id').in('colaborador_id',colabs.map(c=>c.id));
+            const tem = {};
+            (docs||[]).forEach(d=>{ (tem[d.colaborador_id]=tem[d.colaborador_id]||new Set()).add(d.tipo_id); });
+            setDocsPendentes(colabs.map(c=>({...c, faltam:tipos.filter(t=>!tem[c.id]?.has(t.id)).map(t=>t.nome)})).filter(c=>c.faltam.length>0));
+          })().catch(()=>{});
+        },[empresaId]);
+
         // KPIs adicionais
         React.useEffect(()=>{
           if(!empresaId) return;
@@ -715,6 +733,25 @@
                   <div style={{color:"#3B82F6",fontSize:12}}>Cadastre colaboradores no módulo Colaboradores para que eles apareçam aqui.</div>
                 </div>
                 {onNavegar && <button onClick={()=>onNavegar("colaboradores")} style={{...s.btn,fontSize:12,padding:"6px 14px",flexShrink:0}}>Ir para Colaboradores →</button>}
+              </div>
+            )}
+
+            {docsPendentes.length>0&&(
+              <div style={{...s.card,border:"1.5px solid #FCD34D",background:"#FFFBEB",marginBottom:18}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={s.cardTitle}>📁 Documentos de admissão pendentes</div>
+                  <span style={{fontSize:12,color:"#92400E",fontWeight:700}}>{docsPendentes.length} colaborador{docsPendentes.length!==1?"es":""} · admitidos nos últimos 90 dias</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8}}>
+                  {docsPendentes.map(c=>(
+                    <div key={c.id} style={{background:"#fff",border:"1px solid #FDE68A",borderRadius:9,padding:"10px 13px"}}>
+                      <div style={{fontWeight:700,color:C.pri,fontSize:13}}>{c.nome}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{c.funcao||'—'} · admissão {fmtDate(c.admissao)}</div>
+                      <div style={{fontSize:11,color:"#B45309",marginTop:5}}>Faltam ({c.faltam.length}): {c.faltam.join(', ')}</div>
+                    </div>
+                  ))}
+                </div>
+                {onNavegar && <button onClick={()=>onNavegar("colaboradores")} style={{...s.btnOutline,fontSize:12,padding:"5px 12px",marginTop:10}}>Ir para Colaboradores →</button>}
               </div>
             )}
 
