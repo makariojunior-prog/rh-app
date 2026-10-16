@@ -29,9 +29,11 @@ Backup do Supabase: scripts em `backup/`, documentação em `docs/backup/`.
 
 ## Executar
 
-Sem build: abra `index.html` (ou `python3 -m http.server 4599`). React 18, ReactDOM, Babel
-(transpila no navegador), jsPDF e supabase-js vêm de CDN. O `package.json` só fixa
-`@supabase/supabase-js` para as scripts de backup — `node_modules` não é versionado.
+Dev sem build: abra `index.html` (ou `python3 -m http.server 4599`) — o Babel do CDN transpila
+o JSX no navegador. Produção: a Vercel roda `npm run build` (`scripts/build.mjs`), que
+pré-compila o `<script type="text/babel">` com as mesmas opções do Babel do navegador e publica
+só `dist/` (index sem Babel + `app.<hash>.js` com cache imutável, `vagas/`, ícones). Testes do
+build: `npm test`. jsPDF é carregado sob demanda (`carregarJsPDF`). Cabeçalhos em `vercel.json`.
 
 ## Backend — Supabase compartilhado
 
@@ -41,8 +43,11 @@ Projeto `taicaxtjtikdajmhtsxc`, também usado pelo CRM (`crm_*`, `varejo_*`, `at
 
 - Auth e-mail/senha (`_supa.auth`). `perfis` guarda `role` (admin/usuario), `empresa_id`
   (`cantina`/`lumar`), `paginas` permitidas e `dark_mode`.
-- Permissão por página é só no cliente; o isolamento real deve vir de RLS. Tabelas do RH estão
-  restritas ao role `authenticated`; isolamento por `empresa_id` é pendência.
+- RLS: tabelas do RH exigem `rh_is_member()` (perfil com role admin ou `paginas` não vazio);
+  `perfis` só o próprio (sem mudar papel/páginas — gatilho `rh_perfis_guard`) ou `rh_is_admin()`.
+  Permissão por página ainda é só no cliente; isolamento por `empresa_id` é pendência.
+- Buckets privados: `exames-aso`, `rh-documentos`, `curriculos` (abrir com `abrirCurriculo`).
+  Migrations novas em `supabase/migrations/`.
 - `localStorage` (`rh_*`) só para cache/UI: `rh_feriados`, `rh_folha_marc`, `rh_folha_ajustes`,
   `rh_colab_api`.
 

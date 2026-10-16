@@ -1,5 +1,13 @@
 {
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test scripts/build.test.mjs"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1"
+  },
+  "devDependencies": {
+    "@babel/standalone": "7.23.2"
   }
 }

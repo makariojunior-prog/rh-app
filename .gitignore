@@ -21,3 +21,6 @@ npm-debug.log*
 
 # Rascunho local
 RegistroVT (Backup)
+
+# Build de produção (gerado por npm run build)
+dist/

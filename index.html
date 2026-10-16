@@ -237,6 +237,24 @@
     let _addToast=null;
     function toast(msg,tipo='success'){ _addToast?.({id:Date.now()+Math.random(),msg,tipo}); }
 
+    // ---- Currículos (bucket privado 'curriculos') ----
+    // O site de vagas grava em candidatos.curriculo_url a URL "pública" do arquivo; com o bucket
+    // privado ela não abre mais. Extrai o caminho para gerar um link assinado. Links de fora
+    // (ex.: Google Drive, inscrições antigas) devolvem null e abrem como estão.
+    function caminhoCurriculo(url){
+      const m = String(url||'').match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/curriculos\/([^?#]+)/);
+      if(!m) return null;
+      try { return decodeURIComponent(m[1]); } catch(e) { return m[1]; }
+    }
+    async function abrirCurriculo(url){
+      const path = caminhoCurriculo(url);
+      if(!path){ window.open(url, '_blank', 'noopener'); return; }
+      const w = window.open('', '_blank'); // abre já no clique (evita bloqueio de pop-up)
+      const {data, error} = await _supa.storage.from('curriculos').createSignedUrl(path, 300);
+      if(error || !data?.signedUrl){ if(w) w.close(); alert('Não foi possível abrir o currículo: '+(error?.message||'arquivo não encontrado')); return; }
+      if(w){ w.opener = null; w.location.href = data.signedUrl; } else window.open(data.signedUrl, '_blank', 'noopener');
+    }
+
     // ---- Documentos / modelos de termos (bucket privado 'rh-documentos') ----
     const DOCS_BUCKET = 'rh-documentos';
     async function enviarArquivoRH(path, file){
@@ -3527,12 +3545,26 @@
         const [novaVaga, setNovaVaga]     = React.useState('');
         const [savingCfg, setSavingCfg]   = React.useState(false);
 
+        // Por padrão só os últimos MESES_CANDIDATOS meses (a tabela cresce sem parar e cada
+        // abertura baixava o histórico inteiro); "Mostrar mais antigas" traz tudo.
+        const MESES_CANDIDATOS = 6;
+        const [verTodosC, setVerTodosC] = React.useState(false);
+        const corteCandidatos = () => { const d=new Date(); d.setMonth(d.getMonth()-MESES_CANDIDATOS); return d.toISOString().slice(0,10); };
         const carregarCandidatos = async () => {
           if(!empresaId) return;
           setLoadingC(true);
-          const {data} = await _supa.from('candidatos').select('*').eq('empresa_id',empresaId).order('data_inscricao',{ascending:false});
+          let q = _supa.from('candidatos').select('*').eq('empresa_id',empresaId);
+          if(!verTodosC) q = q.gte('data_inscricao', corteCandidatos());
+          const {data} = await q.order('data_inscricao',{ascending:false});
           setCandidatos(data||[]);
           setLoadingC(false);
+        };
+        // Candidato pode estar fora da janela carregada: procura no banco antes de desistir.
+        const acharCandidatoId = async (nome) => {
+          const local = candidatos.find(c=>c.nome===nome);
+          if(local) return local.id;
+          const {data} = await _supa.from('candidatos').select('id').eq('empresa_id',empresaId).eq('nome',nome).order('data_inscricao',{ascending:false}).limit(1);
+          return data?.[0]?.id || null;
         };
         const carregarEntrevistas = async () => {
           if(!empresaId) return;
@@ -3541,7 +3573,8 @@
           setEntrevistas(data||[]);
           setLoadingE(false);
         };
-        React.useEffect(()=>{ carregarCandidatos(); carregarEntrevistas(); carregarLogs(); carregarConfig(); },[empresaId]);
+        React.useEffect(()=>{ carregarEntrevistas(); carregarLogs(); carregarConfig(); },[empresaId]);
+        React.useEffect(()=>{ carregarCandidatos(); },[empresaId, verTodosC]);
 
         const atualizarStatusC = async (id, novoSt) => {
           await _supa.from('candidatos').update({status:novoSt}).eq('id',id);
@@ -3573,8 +3606,8 @@
               local_entrevista:formE.localEntrevista||null, status:'agendada', obs:formE.obs||null
             });
             if(!error){
-              const cand = candidatos.find(c=>c.nome===formE.candidatoNome);
-              if(cand) atualizarStatusC(cand.id,'entrevista');
+              const candId = await acharCandidatoId(formE.candidatoNome);
+              if(candId) atualizarStatusC(candId,'entrevista');
               setMostrarFormE(false); setFormE(VAZIO_E); carregarEntrevistas();
               setStatusMsg({ok:true,msg:'✅ Entrevista agendada!'});
             } else setStatusMsg({ok:false,msg:'❌ '+error.message});
@@ -3591,8 +3624,8 @@
           if(resultado.status==='aprovado'||resultado.status==='reprovado'){
             const entrev = entrevistas.find(x=>x.id===resultado.id);
             if(entrev){
-              const cand = candidatos.find(c=>c.nome===entrev.candidato_nome);
-              if(cand) atualizarStatusC(cand.id, resultado.status);
+              const candId = await acharCandidatoId(entrev.candidato_nome);
+              if(candId) atualizarStatusC(candId, resultado.status);
             }
           }
           setResultado(null); carregarEntrevistas();
@@ -3659,6 +3692,12 @@
               </div>
             </div>
 
+            {(aba==='curriculos'||aba==='estatisticas')&&(
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',fontSize:12,color:C.muted,marginBottom:12}}>
+                <span>{verTodosC?'Mostrando todas as inscrições.':`Mostrando inscrições dos últimos ${MESES_CANDIDATOS} meses.`}</span>
+                <button style={{...s.btnOutline,padding:'4px 10px',fontSize:12}} disabled={loadingC} onClick={()=>setVerTodosC(v=>!v)}>{verTodosC?`Só últimos ${MESES_CANDIDATOS} meses`:'Mostrar mais antigas'}</button>
+              </div>
+            )}
             {statusMsg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,fontSize:13,background:statusMsg.ok===true?'#DCFCE7':statusMsg.ok===false?'#FEE2E2':'#FEF9C3',color:statusMsg.ok===true?'#166534':statusMsg.ok===false?'#991B1B':'#92400E'}}>{statusMsg.msg}</div>}
 
             {aba==='curriculos'&&(
@@ -3741,7 +3780,7 @@
                                   c.descricao_experiencia&&React.createElement('div',{style:{marginTop:10,fontSize:13}},React.createElement('span',{style:{color:C.muted,fontSize:11,display:'block'}},'Experiência profissional'),c.descricao_experiencia),
                                   c.motivacao&&React.createElement('div',{style:{marginTop:8,fontSize:13}},React.createElement('span',{style:{color:C.muted,fontSize:11,display:'block'}},'Motivação'),c.motivacao),
                                   c.diferencial&&React.createElement('div',{style:{marginTop:8,fontSize:13}},React.createElement('span',{style:{color:C.muted,fontSize:11,display:'block'}},'Diferencial'),c.diferencial),
-                                  c.curriculo_url&&React.createElement('div',{style:{marginTop:8}},React.createElement('a',{href:c.curriculo_url,target:'_blank',rel:'noreferrer',style:{fontSize:12,color:C.pri,textDecoration:'underline'}},'📎 Ver currículo'))
+                                  c.curriculo_url&&React.createElement('div',{style:{marginTop:8}},React.createElement('a',{href:'#',onClick:e=>{e.preventDefault();abrirCurriculo(c.curriculo_url);},style:{fontSize:12,color:C.pri,textDecoration:'underline',cursor:'pointer'}},'📎 Ver currículo'))
                                 )
                               )
                             )
