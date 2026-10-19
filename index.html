@@ -3696,6 +3696,7 @@
 
         const vagas = [...new Set(candidatos.map(c=>c.vaga).filter(Boolean))].sort();
         const candidatosBanco = candidatos.filter(c => c.status === 'banco');
+        const candidatosAprovados = candidatos.filter(c => c.status === 'aprovado');
         const filtradosBanco = candidatosBanco.filter(c => {
           if (vagaBanco && c.vaga !== vagaBanco) return false;
           if (buscaBanco) {
@@ -3707,6 +3708,25 @@
           }
           return true;
         });
+
+        const confirmarAssumirVaga = async (c) => {
+          const ok = await confirmar(
+            `Confirma que "${c.nome}" foi chamado(a) para assumir a vaga de ${c.vaga || 'trabalho'}? Ele(a) sairá da reserva do Banco de Currículos e ficará com status "Aprovado (Assumiu Vaga)".`,
+            '✅ Chamar Candidato para Assumir Vaga'
+          );
+          if (!ok) return;
+          await atualizarStatusC(c.id, 'aprovado');
+          toast(`✅ ${c.nome} marcado(a) como Aprovado para assumir a vaga!`, 'success');
+        };
+
+        const confirmarRetirarDoBanco = async (c) => {
+          const ok = await confirmar(
+            `Deseja retirar "${c.nome}" do Banco de Currículos e devolver para a lista de Triagem?`,
+            'Retirar do Banco de Currículos'
+          );
+          if (!ok) return;
+          await atualizarStatusC(c.id, 'triagem');
+        };
 
         const filtrados = candidatos.filter(c=>{
           if(filtroVaga&&c.vaga!==filtroVaga) return false;
@@ -3768,20 +3788,46 @@
               />
             )}
 
-            {/* ── ABA BANCO DE CURRÍCULOS (TALENTOS SELECIONADOS DISPONÍVEIS PARA FUTURAS VAGAS) ── */}
+            {/* ── ABA BANCO DE CURRÍCULOS (APROVADOS CUJA VAGA JÁ FOI PREENCHIDA) ── */}
             {aba==='banco'&&(
               <div>
                 <div style={{...s.card, background:'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', border:'1.5px solid #F59E0B', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12}}>
                   <div>
-                    <div style={{fontWeight:800, fontSize:15, color:'#92400E'}}>🗂️ Banco de Currículos (Reserva de Talentos)</div>
+                    <div style={{fontWeight:800, fontSize:15, color:'#92400E'}}>🗂️ Banco de Currículos — Candidatos Aprovados (Vaga Preenchida)</div>
                     <div style={{fontSize:12, color:'#78350F', marginTop:2}}>
-                      Candidatos pré-selecionados ou aprovados em entrevista que não assumiram a vaga imediata e estão prontos para serem chamados quando abrir nova oportunidade.
+                      Aqui ficam somente os candidatos <strong>aprovados no processo seletivo</strong>, mas que não assumiram porque a vaga já foi preenchida por outro candidato.
                     </div>
                   </div>
                   <div style={{fontSize:13, fontWeight:800, color:'#92400E', background:'#fff', padding:'6px 14px', borderRadius:20, border:'1px solid #F59E0B'}}>
-                    {candidatosBanco.length} {candidatosBanco.length === 1 ? 'currículo guardado' : 'currículos guardados'}
+                    {candidatosBanco.length} {candidatosBanco.length === 1 ? 'aprovado na reserva' : 'aprovados na reserva'}
                   </div>
                 </div>
+
+                {/* Painel rápido de candidatos com status 'Aprovado' para guardar no Banco com 1 clique (ou recuperar quem clicou em Assumir Vaga sem querer) */}
+                {candidatosAprovados.length > 0 && (
+                  <div style={{...s.card, background:'#F0FDF4', border:'1px solid #86EFAC', marginBottom:14, padding:'12px 16px'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, marginBottom:8}}>
+                      <div style={{fontSize:12, fontWeight:800, color:'#166534'}}>
+                        ✅ Candidatos com status "Aprovado" ({candidatosAprovados.length}) — A vaga já foi preenchida? Guarde os demais aprovados no Banco com 1 clique:
+                      </div>
+                    </div>
+                    <div style={{display:'flex', flexWrap:'wrap', gap:8}}>
+                      {candidatosAprovados.slice(0, 12).map(ca => (
+                        <div key={ca.id} style={{background:'#fff', border:'1px solid #BBF7D0', borderRadius:8, padding:'6px 10px', display:'flex', alignItems:'center', gap:8, fontSize:12}}>
+                          <div>
+                            <strong style={{color:'#14532D'}}>{ca.nome}</strong>
+                            <span style={{color:C.muted, fontSize:11, marginLeft:6}}>({ca.vaga || 'Sem vaga'})</span>
+                          </div>
+                          <button onClick={()=>atualizarStatusC(ca.id, 'banco')}
+                            style={{background:'#FEF3C7', border:'1px solid #F59E0B', color:'#92400E', borderRadius:6, fontSize:11, fontWeight:700, padding:'3px 8px', cursor:'pointer'}}
+                            title="Guardar este aprovado no Banco de Currículos (vaga já preenchida)">
+                            🗂️ Guardar no Banco
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div style={{display:'flex', gap:8, marginBottom:14, flexWrap:'wrap', alignItems:'center'}}>
                   <input style={{...s.input, width:240, marginBottom:0}} placeholder="Buscar por nome, vaga ou anotação..." value={buscaBanco} onChange={e=>setBuscaBanco(e.target.value)}/>
@@ -3799,9 +3845,9 @@
                 ) : filtradosBanco.length === 0 ? (
                   <div style={{...s.card, textAlign:'center', padding:'48px 20px', color:C.muted}}>
                     <div style={{fontSize:36, marginBottom:8}}>🗂️</div>
-                    <div style={{fontWeight:700, fontSize:14, marginBottom:4}}>Nenhum currículo no Banco de Talentos ainda</div>
-                    <div style={{fontSize:12, maxWidth:520, marginInline:'auto'}}>
-                      Na aba <strong>📋 Currículos</strong> ou ao registrar o <strong>📝 Resultado</strong> de uma entrevista, clique em <strong>"🗂️ Guardar no Banco"</strong> para manter os bons candidatos disponíveis aqui.
+                    <div style={{fontWeight:700, fontSize:14, marginBottom:4}}>Nenhum aprovado aguardando vaga no Banco de Currículos</div>
+                    <div style={{fontSize:12, maxWidth:540, marginInline:'auto'}}>
+                      Quando um candidato for aprovado em entrevista mas a vaga já tiver sido preenchida, selecione <strong>"🗂️ Aprovado — Vaga já preenchida (Banco de Currículos)"</strong> no resultado da entrevista ou clique em <strong>"🗂️ Guardar no Banco"</strong> nos candidatos aprovados acima.
                     </div>
                   </div>
                 ) : (
@@ -3809,24 +3855,27 @@
                     <table style={{width:'100%', borderCollapse:'collapse'}}>
                       <thead>
                         <tr style={{background:'var(--c-subtle)'}}>
-                          <th style={s.th}>Candidato</th>
+                          <th style={s.th}>Candidato Aprovado</th>
                           <th style={s.th}>WhatsApp</th>
-                          <th style={s.th}>Vaga / Função</th>
+                          <th style={s.th}>Vaga em que foi aprovado</th>
                           <th style={s.th}>Experiência</th>
-                          <th style={s.th}>Anotação do RH</th>
+                          <th style={s.th}>Anotação da Entrevista / RH</th>
                           <th style={s.th}>Inscrição</th>
-                          <th style={{...s.th, textAlign:'right'}}>Ações Rápidas</th>
+                          <th style={{...s.th, textAlign:'right'}}>Quando abrir nova vaga</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filtradosBanco.map(c => {
                           const ab = expandido === c.id;
                           const whatsLimpo = String(c.whatsapp || '').replace(/\D/g, '');
-                          const linkWhats = whatsLimpo ? `https://wa.me/${whatsLimpo.startsWith('55') ? whatsLimpo : '55' + whatsLimpo}?text=${encodeURIComponent(`Olá ${c.nome}, tudo bem? Aqui é do RH! Surgiu uma nova oportunidade para a vaga de ${c.vaga || 'nossa equipe'} e gostaríamos de conversar com você.`)}` : null;
+                          const linkWhats = whatsLimpo ? `https://wa.me/${whatsLimpo.startsWith('55') ? whatsLimpo : '55' + whatsLimpo}?text=${encodeURIComponent(`Olá ${c.nome}, tudo bem? Aqui é do RH! Como você foi aprovado(a) em nosso processo seletivo, surgiu uma nova vaga para ${c.vaga || 'nossa equipe'} e gostaríamos de saber se você ainda tem interesse em assumir!`)}` : null;
                           return (
                             <React.Fragment key={c.id}>
                               <tr style={{borderTop:'1px solid '+C.border, cursor:'pointer'}} onClick={()=>setExpandido(ab?null:c.id)}>
-                                <td style={{...s.td, fontWeight:700}}>{c.nome}</td>
+                                <td style={{...s.td, fontWeight:700}}>
+                                  {c.nome}
+                                  <span style={{marginLeft:6, background:'#DCFCE7', color:'#166534', fontSize:10, fontWeight:700, padding:'1px 6px', borderRadius:6}}>APROVADO</span>
+                                </td>
                                 <td style={{...s.td, fontSize:12}}>
                                   {linkWhats ? (
                                     <a href={linkWhats} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}
@@ -3845,7 +3894,7 @@
                                   {editObsId === c.id ? (
                                     <div style={{display:'flex', gap:4}}>
                                       <input type="text" value={obsTexto} onChange={e=>setObsTexto(e.target.value)}
-                                        placeholder="Ex: Ótimo perfil para próxima vaga..."
+                                        placeholder="Ex: Aprovado na entrevista, vaga preenchida..."
                                         style={{...s.inputSm, flex:1, marginBottom:0}}/>
                                       <button onClick={()=>salvarObsBanco(c.id, obsTexto)} style={{...s.btn, padding:'3px 8px', fontSize:11}}>Salvar</button>
                                       <button onClick={()=>setEditObsId(null)} style={{...s.btnOutline, padding:'3px 6px', fontSize:11}}>✕</button>
@@ -3873,19 +3922,14 @@
                                       📎 Currículo
                                     </button>
                                   )}
-                                  <button onClick={()=>agendarEntrevista(c)}
-                                    style={{background:'none', border:'1px solid '+C.pri, color:C.pri, borderRadius:5, fontSize:11, padding:'3px 8px', cursor:'pointer', marginRight:4}}
-                                    title="Chamar para Entrevista">
-                                    📅 Chamar p/ Entrevista
+                                  <button onClick={()=>confirmarAssumirVaga(c)}
+                                    style={{background:'#DCFCE7', border:'1px solid #16A34A', color:'#166534', borderRadius:5, fontSize:11, fontWeight:700, padding:'3px 9px', cursor:'pointer', marginRight:4}}
+                                    title="Confirmar que o candidato foi chamado para assumir a vaga">
+                                    ✅ Chamar p/ Assumir Vaga
                                   </button>
-                                  <button onClick={()=>atualizarStatusC(c.id, 'aprovado')}
-                                    style={{background:'#DCFCE7', border:'1px solid #16A34A', color:'#166534', borderRadius:5, fontSize:11, fontWeight:700, padding:'3px 8px', cursor:'pointer', marginRight:4}}
-                                    title="Aprovar para assumir a vaga">
-                                    ✅ Assumir Vaga
-                                  </button>
-                                  <button onClick={()=>atualizarStatusC(c.id, 'triagem')}
+                                  <button onClick={()=>confirmarRetirarDoBanco(c)}
                                     style={{background:'none', border:'1px solid '+C.border, color:C.muted, borderRadius:5, fontSize:11, padding:'3px 7px', cursor:'pointer'}}
-                                    title="Devolver para a lista de Triagem">
+                                    title="Retirar do Banco de Currículos">
                                     ↩️
                                   </button>
                                 </td>
@@ -3977,7 +4021,7 @@
                                   )
                                 ),
                                 React.createElement('td',{style:{...s.td,textAlign:'right',whiteSpace:'nowrap'}},
-                                  c.status!=='banco'&&React.createElement('button',{onClick:e=>{e.stopPropagation();atualizarStatusC(c.id,'banco');},title:'Guardar este candidato no Banco de Currículos para futuras vagas',style:{background:'#FFFBEB',border:'1px solid #F59E0B',color:'#92400E',borderRadius:5,fontSize:11,fontWeight:700,padding:'3px 8px',cursor:'pointer',marginRight:4}},'🗂️ Banco'),
+                                  c.status==='aprovado'&&React.createElement('button',{onClick:e=>{e.stopPropagation();atualizarStatusC(c.id,'banco');},title:'Vaga já foi preenchida? Guardar este candidato aprovado no Banco de Currículos',style:{background:'#FFFBEB',border:'1px solid #F59E0B',color:'#92400E',borderRadius:5,fontSize:11,fontWeight:700,padding:'3px 8px',cursor:'pointer',marginRight:4}},'🗂️ Vaga Preenchida → Banco'),
                                   React.createElement('button',{onClick:e=>{e.stopPropagation();agendarEntrevista(c);},style:{background:'none',border:'1px solid '+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginRight:4}},'📅 Entrevistar'),
                                   React.createElement('span',{style:{fontSize:12,color:C.muted}},ab?'▲':'▼')
                                 )
@@ -4062,8 +4106,8 @@
                         <label style={s.label}>Resultado *</label>
                         <select value={resultado.status} onChange={e=>setResultado(p=>({...p,status:e.target.value,motivo:''}))} style={s.input}>
                           <option value="">Selecione...</option>
-                          <option value="aprovado">✅ Aprovado (Assumir vaga)</option>
-                          <option value="banco">🗂️ Aprovado p/ Banco de Currículos (Reserva)</option>
+                          <option value="aprovado">✅ Aprovado (Vai assumir a vaga)</option>
+                          <option value="banco">🗂️ Aprovado — Vaga já preenchida (Banco de Currículos)</option>
                           <option value="reprovado">❌ Reprovado</option>
                           <option value="cancelado">🚫 Cancelado</option>
                         </select>
