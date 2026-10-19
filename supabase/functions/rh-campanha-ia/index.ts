@@ -273,6 +273,7 @@ Deno.serve(async (req: Request) => {
       const gerar_foto_ia            = Boolean(b.gerar_foto_ia)
 
       const geminiKey =
+        Deno.env.get('RH_GEMINI_API_KEY') ??
         Deno.env.get('GEMINI_API_KEY') ??
         Deno.env.get('GOOGLE_API_KEY') ??
         Deno.env.get('COMPRAS_WA_GEMINI_API_KEY') ??
@@ -411,7 +412,7 @@ Deno.serve(async (req: Request) => {
           avisoIA = `IA de texto falhou (${redigirSegredos(String(err), [geminiKey])}); usamos o modelo oficial estruturado.`
         }
       } else {
-        avisoIA = 'Chave GEMINI_API_KEY não encontrada nos secrets; prévia montada com o template oficial da empresa.'
+        avisoIA = 'Chave RH_GEMINI_API_KEY não encontrada nos secrets; prévia montada com o template oficial da empresa.'
       }
 
       // Gera a fotografia ilustrativa da função (quadro superior direito) via Gemini Nano Banana 2.1
