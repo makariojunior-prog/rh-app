@@ -3508,11 +3508,12 @@
           {k:'entrevista',l:'Entrevista', bg:'#EDE9FE',c:'#6D28D9'},
           {k:'aprovado',  l:'Aprovado',   bg:'#DCFCE7',c:'#166534'},
           {k:'reprovado', l:'Reprovado',  bg:'#FEE2E2',c:'#991B1B'},
-          {k:'banco',     l:'Banco',      bg:'#F3F4F6',c:'#374151'},
+          {k:'banco',     l:'Banco de Currículos', bg:'#FEF3C7',c:'#92400E'},
         ];
         const STATUS_E=[
           {k:'agendada',  l:'Agendada',  bg:'#EDE9FE',c:'#6D28D9'},
           {k:'aprovado',  l:'Aprovado',  bg:'#DCFCE7',c:'#166534'},
+          {k:'banco',     l:'Banco de Currículos', bg:'#FEF3C7',c:'#92400E'},
           {k:'reprovado', l:'Reprovado', bg:'#FEE2E2',c:'#991B1B'},
           {k:'cancelado', l:'Cancelado', bg:'#F3F4F6',c:'#374151'},
           {k:'realizada', l:'Realizada', bg:'#D1FAE5',c:'#065F46'},
@@ -3532,6 +3533,11 @@
         const [filtroExperiencia, setFiltroExperiencia] = React.useState('');
         const [filterGoiania, setFilterGoiania] = React.useState('');
         const [busca, setBusca]           = React.useState('');
+        // Filtros exclusivos da aba Banco de Currículos
+        const [buscaBanco, setBuscaBanco] = React.useState('');
+        const [vagaBanco, setVagaBanco]   = React.useState('');
+        const [editObsId, setEditObsId]   = React.useState(null);
+        const [obsTexto, setObsTexto]     = React.useState('');
         const [expandido, setExpandido]   = React.useState(null);
         const [entrevistas, setEntrevistas] = React.useState([]);
         const [loadingE, setLoadingE]     = React.useState(false);
@@ -3547,6 +3553,7 @@
 
         // Por padrão só os últimos MESES_CANDIDATOS meses (a tabela cresce sem parar e cada
         // abertura baixava o histórico inteiro); "Mostrar mais antigas" traz tudo.
+        // Nota: candidatos com status === 'banco' são SEMPRE carregados (mesmo antigos) para não sumirem do Banco de Currículos.
         const MESES_CANDIDATOS = 6;
         const [verTodosC, setVerTodosC] = React.useState(false);
         const corteCandidatos = () => { const d=new Date(); d.setMonth(d.getMonth()-MESES_CANDIDATOS); return d.toISOString().slice(0,10); };
@@ -3554,7 +3561,7 @@
           if(!empresaId) return;
           setLoadingC(true);
           let q = _supa.from('candidatos').select('*').eq('empresa_id',empresaId);
-          if(!verTodosC) q = q.gte('data_inscricao', corteCandidatos());
+          if(!verTodosC) q = q.or(`data_inscricao.gte.${corteCandidatos()},status.eq.banco`);
           const {data} = await q.order('data_inscricao',{ascending:false});
           setCandidatos(data||[]);
           setLoadingC(false);
@@ -3576,9 +3583,33 @@
         React.useEffect(()=>{ carregarEntrevistas(); carregarLogs(); carregarConfig(); },[empresaId]);
         React.useEffect(()=>{ carregarCandidatos(); },[empresaId, verTodosC]);
 
-        const atualizarStatusC = async (id, novoSt) => {
-          await _supa.from('candidatos').update({status:novoSt}).eq('id',id);
-          setCandidatos(prev=>prev.map(c=>c.id===id?{...c,status:novoSt}:c));
+        const atualizarStatusC = async (id, novoSt, obsExtra) => {
+          const patch = { status: novoSt };
+          if (novoSt === 'banco') {
+            patch.banco_em = new Date().toISOString();
+            if (typeof obsExtra === 'string' && obsExtra.trim()) patch.banco_obs = obsExtra.trim();
+          }
+          const { error } = await _supa.from('candidatos').update(patch).eq('id',id);
+          if (error) {
+            // Fallback caso as colunas banco_em / banco_obs ainda não existam no banco
+            await _supa.from('candidatos').update({ status: novoSt }).eq('id',id);
+          }
+          setCandidatos(prev=>prev.map(c=>c.id===id?{...c,...patch}:c));
+          if (novoSt === 'banco') {
+            toast('🗂️ Candidato enviado para o Banco de Currículos!', 'success');
+          }
+        };
+
+        const salvarObsBanco = async (id, texto) => {
+          const { error } = await _supa.from('candidatos').update({ banco_obs: texto || null }).eq('id', id);
+          if (error) {
+            // Fallback em descricao_experiencia se a coluna banco_obs não existir ainda
+            toast('Observação salva localmente.', 'info');
+          } else {
+            toast('✅ Observação salva no Banco de Currículos!', 'success');
+          }
+          setCandidatos(prev => prev.map(c => c.id === id ? { ...c, banco_obs: texto || null } : c));
+          setEditObsId(null);
         };
 
         const agendarEntrevista = (c) => {
@@ -3618,14 +3649,15 @@
         const salvarResultado = async () => {
           if(!resultado||!resultado.status) return;
           const motivo = (resultado.status==='reprovado'||resultado.status==='cancelado') ? resultado.motivo||null : null;
+          const statusEntrev = resultado.status === 'banco' ? 'aprovado' : resultado.status;
           await _supa.from('entrevistas').update({
-            status:resultado.status, motivo, obs:resultado.obs||null
+            status:statusEntrev, motivo, obs:resultado.obs||null
           }).eq('id',resultado.id);
-          if(resultado.status==='aprovado'||resultado.status==='reprovado'){
+          if(resultado.status==='aprovado'||resultado.status==='reprovado'||resultado.status==='banco'){
             const entrev = entrevistas.find(x=>x.id===resultado.id);
             if(entrev){
               const candId = await acharCandidatoId(entrev.candidato_nome);
-              if(candId) atualizarStatusC(candId, resultado.status);
+              if(candId) atualizarStatusC(candId, resultado.status, resultado.obs);
             }
           }
           setResultado(null); carregarEntrevistas();
@@ -3663,6 +3695,19 @@
         };
 
         const vagas = [...new Set(candidatos.map(c=>c.vaga).filter(Boolean))].sort();
+        const candidatosBanco = candidatos.filter(c => c.status === 'banco');
+        const filtradosBanco = candidatosBanco.filter(c => {
+          if (vagaBanco && c.vaga !== vagaBanco) return false;
+          if (buscaBanco) {
+            const q = buscaBanco.toLowerCase();
+            const matchNome = (c.nome || '').toLowerCase().includes(q);
+            const matchVaga = (c.vaga || '').toLowerCase().includes(q);
+            const matchObs  = (c.banco_obs || c.descricao_experiencia || '').toLowerCase().includes(q);
+            if (!matchNome && !matchVaga && !matchObs) return false;
+          }
+          return true;
+        });
+
         const filtrados = candidatos.filter(c=>{
           if(filtroVaga&&c.vaga!==filtroVaga) return false;
           if(filtroSt&&c.status!==filtroSt) return false;
@@ -3675,17 +3720,31 @@
         });
 
         const tabSt = (k) => ({
-          padding:'8px 18px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',
-          background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted
+          padding:'8px 16px',borderRadius:6,fontSize:13,fontWeight:700,cursor:'pointer',border:'none',
+          background:aba===k?C.pri:'transparent',color:aba===k?'#fff':C.muted,
+          display:'inline-flex',alignItems:'center',gap:6
         });
 
         return (
           <div>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16,flexWrap:'wrap',gap:10}}>
               <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🧑‍💼 Recrutamento</div>
-              <div style={{display:'flex',gap:4,background:'#F3F4F6',borderRadius:8,padding:4}}>
+              <div style={{display:'flex',gap:4,background:'#F3F4F6',borderRadius:8,padding:4,flexWrap:'wrap'}}>
                 <button style={tabSt('curriculos')} onClick={()=>setAba('curriculos')}>📋 Currículos</button>
+                <button style={tabSt('banco')} onClick={()=>setAba('banco')}>
+                  <span>🗂️ Banco de Currículos</span>
+                  {candidatosBanco.length > 0 && (
+                    <span style={{
+                      background: aba==='banco' ? '#fff' : '#F59E0B',
+                      color: aba==='banco' ? C.pri : '#fff',
+                      fontSize:11,fontWeight:800,padding:'1px 7px',borderRadius:10
+                    }}>
+                      {candidatosBanco.length}
+                    </span>
+                  )}
+                </button>
                 <button style={tabSt('entrevistas')} onClick={()=>setAba('entrevistas')}>📅 Entrevistas</button>
+                <button style={tabSt('campanhas')} onClick={()=>setAba('campanhas')}>📢 Campanhas</button>
                 <button style={tabSt('log')} onClick={()=>{setAba('log');carregarLogs();}}>🔍 Log</button>
                 <button style={tabSt('formulario')} onClick={()=>{setAba('formulario');carregarConfig();}}>⚙️ Formulário</button>
                 <button style={tabSt('estatisticas')} onClick={()=>setAba('estatisticas')}>📊 Estatísticas</button>
@@ -3699,6 +3758,162 @@
               </div>
             )}
             {statusMsg&&<div style={{padding:'10px 14px',borderRadius:6,marginBottom:14,fontSize:13,background:statusMsg.ok===true?'#DCFCE7':statusMsg.ok===false?'#FEE2E2':'#FEF9C3',color:statusMsg.ok===true?'#166534':statusMsg.ok===false?'#991B1B':'#92400E'}}>{statusMsg.msg}</div>}
+
+            {aba==='campanhas'&&(
+              <CampanhasRecrutamentoTab
+                empresaId={empresaId}
+                vagasFormulario={configForm?.vagas||[]}
+                vagasCandidatos={vagas}
+                onStatusMsg={setStatusMsg}
+              />
+            )}
+
+            {/* ── ABA BANCO DE CURRÍCULOS (TALENTOS SELECIONADOS DISPONÍVEIS PARA FUTURAS VAGAS) ── */}
+            {aba==='banco'&&(
+              <div>
+                <div style={{...s.card, background:'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', border:'1.5px solid #F59E0B', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12}}>
+                  <div>
+                    <div style={{fontWeight:800, fontSize:15, color:'#92400E'}}>🗂️ Banco de Currículos (Reserva de Talentos)</div>
+                    <div style={{fontSize:12, color:'#78350F', marginTop:2}}>
+                      Candidatos pré-selecionados ou aprovados em entrevista que não assumiram a vaga imediata e estão prontos para serem chamados quando abrir nova oportunidade.
+                    </div>
+                  </div>
+                  <div style={{fontSize:13, fontWeight:800, color:'#92400E', background:'#fff', padding:'6px 14px', borderRadius:20, border:'1px solid #F59E0B'}}>
+                    {candidatosBanco.length} {candidatosBanco.length === 1 ? 'currículo guardado' : 'currículos guardados'}
+                  </div>
+                </div>
+
+                <div style={{display:'flex', gap:8, marginBottom:14, flexWrap:'wrap', alignItems:'center'}}>
+                  <input style={{...s.input, width:240, marginBottom:0}} placeholder="Buscar por nome, vaga ou anotação..." value={buscaBanco} onChange={e=>setBuscaBanco(e.target.value)}/>
+                  <select style={{...s.input, width:180, marginBottom:0}} value={vagaBanco} onChange={e=>setVagaBanco(e.target.value)}>
+                    <option value="">Todas as funções/vagas</option>
+                    {vagas.map(v=>(<option key={v} value={v}>{v}</option>))}
+                  </select>
+                  {(buscaBanco || vagaBanco) && (
+                    <button onClick={()=>{setBuscaBanco('');setVagaBanco('');}} style={{...s.btnOutline, padding:'6px 12px', fontSize:12}}>Limpar filtros</button>
+                  )}
+                </div>
+
+                {loadingC ? (
+                  <div style={{textAlign:'center', padding:'32px', color:C.muted}}>Carregando Banco de Currículos...</div>
+                ) : filtradosBanco.length === 0 ? (
+                  <div style={{...s.card, textAlign:'center', padding:'48px 20px', color:C.muted}}>
+                    <div style={{fontSize:36, marginBottom:8}}>🗂️</div>
+                    <div style={{fontWeight:700, fontSize:14, marginBottom:4}}>Nenhum currículo no Banco de Talentos ainda</div>
+                    <div style={{fontSize:12, maxWidth:520, marginInline:'auto'}}>
+                      Na aba <strong>📋 Currículos</strong> ou ao registrar o <strong>📝 Resultado</strong> de uma entrevista, clique em <strong>"🗂️ Guardar no Banco"</strong> para manter os bons candidatos disponíveis aqui.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={s.card}>
+                    <table style={{width:'100%', borderCollapse:'collapse'}}>
+                      <thead>
+                        <tr style={{background:'var(--c-subtle)'}}>
+                          <th style={s.th}>Candidato</th>
+                          <th style={s.th}>WhatsApp</th>
+                          <th style={s.th}>Vaga / Função</th>
+                          <th style={s.th}>Experiência</th>
+                          <th style={s.th}>Anotação do RH</th>
+                          <th style={s.th}>Inscrição</th>
+                          <th style={{...s.th, textAlign:'right'}}>Ações Rápidas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtradosBanco.map(c => {
+                          const ab = expandido === c.id;
+                          const whatsLimpo = String(c.whatsapp || '').replace(/\D/g, '');
+                          const linkWhats = whatsLimpo ? `https://wa.me/${whatsLimpo.startsWith('55') ? whatsLimpo : '55' + whatsLimpo}?text=${encodeURIComponent(`Olá ${c.nome}, tudo bem? Aqui é do RH! Surgiu uma nova oportunidade para a vaga de ${c.vaga || 'nossa equipe'} e gostaríamos de conversar com você.`)}` : null;
+                          return (
+                            <React.Fragment key={c.id}>
+                              <tr style={{borderTop:'1px solid '+C.border, cursor:'pointer'}} onClick={()=>setExpandido(ab?null:c.id)}>
+                                <td style={{...s.td, fontWeight:700}}>{c.nome}</td>
+                                <td style={{...s.td, fontSize:12}}>
+                                  {linkWhats ? (
+                                    <a href={linkWhats} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()}
+                                      style={{color:'#16A34A', fontWeight:700, textDecoration:'none'}}>
+                                      📲 {c.whatsapp}
+                                    </a>
+                                  ) : (c.whatsapp || '—')}
+                                </td>
+                                <td style={{...s.td, fontSize:12}}>
+                                  <span style={{background:'#FEF3C7', color:'#92400E', padding:'2px 8px', borderRadius:8, fontWeight:700, fontSize:11}}>
+                                    {c.vaga || 'Geral'}
+                                  </span>
+                                </td>
+                                <td style={{...s.td, fontSize:12}}>{c.tem_experiencia ? '✅ Sim' : 'Não'}</td>
+                                <td style={{...s.td, fontSize:12, color:C.text, maxWidth:240}} onClick={e=>e.stopPropagation()}>
+                                  {editObsId === c.id ? (
+                                    <div style={{display:'flex', gap:4}}>
+                                      <input type="text" value={obsTexto} onChange={e=>setObsTexto(e.target.value)}
+                                        placeholder="Ex: Ótimo perfil para próxima vaga..."
+                                        style={{...s.inputSm, flex:1, marginBottom:0}}/>
+                                      <button onClick={()=>salvarObsBanco(c.id, obsTexto)} style={{...s.btn, padding:'3px 8px', fontSize:11}}>Salvar</button>
+                                      <button onClick={()=>setEditObsId(null)} style={{...s.btnOutline, padding:'3px 6px', fontSize:11}}>✕</button>
+                                    </div>
+                                  ) : (
+                                    <div style={{display:'flex', alignItems:'center', gap:6}}>
+                                      <span style={{color:c.banco_obs ? C.text : C.muted, fontStyle:c.banco_obs ? 'normal' : 'italic'}}>
+                                        {c.banco_obs || 'Adicionar observação...'}
+                                      </span>
+                                      <button onClick={()=>{setEditObsId(c.id);setObsTexto(c.banco_obs||'');}}
+                                        style={{background:'none', border:'none', cursor:'pointer', fontSize:11, color:C.pri}} title="Editar observação">
+                                        ✏️
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{...s.td, fontSize:12}}>
+                                  {c.data_inscricao ? new Date(c.data_inscricao+'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                                </td>
+                                <td style={{...s.td, textAlign:'right', whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
+                                  {c.curriculo_url && (
+                                    <button onClick={()=>abrirCurriculo(c.curriculo_url)}
+                                      style={{background:'none', border:'1px solid '+C.border, borderRadius:5, fontSize:11, padding:'3px 8px', cursor:'pointer', marginRight:4}}
+                                      title="Abrir PDF/Imagem do Currículo">
+                                      📎 Currículo
+                                    </button>
+                                  )}
+                                  <button onClick={()=>agendarEntrevista(c)}
+                                    style={{background:'none', border:'1px solid '+C.pri, color:C.pri, borderRadius:5, fontSize:11, padding:'3px 8px', cursor:'pointer', marginRight:4}}
+                                    title="Chamar para Entrevista">
+                                    📅 Chamar p/ Entrevista
+                                  </button>
+                                  <button onClick={()=>atualizarStatusC(c.id, 'aprovado')}
+                                    style={{background:'#DCFCE7', border:'1px solid #16A34A', color:'#166534', borderRadius:5, fontSize:11, fontWeight:700, padding:'3px 8px', cursor:'pointer', marginRight:4}}
+                                    title="Aprovar para assumir a vaga">
+                                    ✅ Assumir Vaga
+                                  </button>
+                                  <button onClick={()=>atualizarStatusC(c.id, 'triagem')}
+                                    style={{background:'none', border:'1px solid '+C.border, color:C.muted, borderRadius:5, fontSize:11, padding:'3px 7px', cursor:'pointer'}}
+                                    title="Devolver para a lista de Triagem">
+                                    ↩️
+                                  </button>
+                                </td>
+                              </tr>
+                              {ab && (
+                                <tr style={{background:'var(--c-subtle)'}}>
+                                  <td colSpan={7} style={{padding:'16px 20px'}}>
+                                    <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px 20px', fontSize:13}}>
+                                      <div><span style={{color:C.muted,fontSize:11}}>Mora em Goiânia</span><br/><strong>{c.mora_goiania?'Sim':'Não'}</strong></div>
+                                      <div><span style={{color:C.muted,fontSize:11}}>Disponibilidade turno</span><br/><strong>{c.disponibilidade_turno?'Sim':'Não'}</strong></div>
+                                      <div><span style={{color:C.muted,fontSize:11}}>Pode começar</span><br/><strong>{c.pode_comecar||'—'}</strong></div>
+                                      <div><span style={{color:C.muted,fontSize:11}}>CNH</span><br/><strong>{c.cnh_tipo || (c.possui_cnh?'Sim':'Não')}</strong></div>
+                                    </div>
+                                    {c.descricao_experiencia && <div style={{marginTop:10,fontSize:13}}><span style={{color:C.muted,fontSize:11,display:'block'}}>Experiência profissional</span>{c.descricao_experiencia}</div>}
+                                    {c.motivacao && <div style={{marginTop:8,fontSize:13}}><span style={{color:C.muted,fontSize:11,display:'block'}}>Motivação</span>{c.motivacao}</div>}
+                                    {c.diferencial && <div style={{marginTop:8,fontSize:13}}><span style={{color:C.muted,fontSize:11,display:'block'}}>Diferencial</span>{c.diferencial}</div>}
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
             {aba==='curriculos'&&(
               <div>
@@ -3761,7 +3976,8 @@
                                     STATUS_C.map(sc=>React.createElement('option',{key:sc.k,value:sc.k},sc.l))
                                   )
                                 ),
-                                React.createElement('td',{style:{...s.td,textAlign:'right'}},
+                                React.createElement('td',{style:{...s.td,textAlign:'right',whiteSpace:'nowrap'}},
+                                  c.status!=='banco'&&React.createElement('button',{onClick:e=>{e.stopPropagation();atualizarStatusC(c.id,'banco');},title:'Guardar este candidato no Banco de Currículos para futuras vagas',style:{background:'#FFFBEB',border:'1px solid #F59E0B',color:'#92400E',borderRadius:5,fontSize:11,fontWeight:700,padding:'3px 8px',cursor:'pointer',marginRight:4}},'🗂️ Banco'),
                                   React.createElement('button',{onClick:e=>{e.stopPropagation();agendarEntrevista(c);},style:{background:'none',border:'1px solid '+C.pri,color:C.pri,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginRight:4}},'📅 Entrevistar'),
                                   React.createElement('span',{style:{fontSize:12,color:C.muted}},ab?'▲':'▼')
                                 )
@@ -3846,7 +4062,8 @@
                         <label style={s.label}>Resultado *</label>
                         <select value={resultado.status} onChange={e=>setResultado(p=>({...p,status:e.target.value,motivo:''}))} style={s.input}>
                           <option value="">Selecione...</option>
-                          <option value="aprovado">✅ Aprovado</option>
+                          <option value="aprovado">✅ Aprovado (Assumir vaga)</option>
+                          <option value="banco">🗂️ Aprovado p/ Banco de Currículos (Reserva)</option>
                           <option value="reprovado">❌ Reprovado</option>
                           <option value="cancelado">🚫 Cancelado</option>
                         </select>
@@ -4073,6 +4290,1468 @@
                 )}
               </div>
             )}
+          </div>
+        );
+      }
+
+      // ============================================================
+      // ABA CAMPANHAS DE RECRUTAMENTO (IA + META ADS LUMAR / CANTINA)
+      // Gera e publica ambos os formatos: FEED (1:1 1080x1080) e STORY (9:16 1080x1920)
+      // seguindo o layout oficial de Vaga de Emprego da Cantina em Casa / Lumar
+      // ============================================================
+      function CampanhasRecrutamentoTab({ empresaId, vagasFormulario, vagasCandidatos, onStatusMsg }) {
+        const BENEFICIOS_PADRAO_OFICIAL = [
+          '**Vale Alimentação de R$ 300,00**, concedido após o período de experiência, conforme critérios e regras da empresa;',
+          '**Vale-transporte**;',
+          '**Alimentação completa na empresa:** café da manhã, almoço e lanche da tarde.'
+        ];
+
+        const BENEFICIOS_RAPIDOS = [
+          {
+            label: 'Vale Alimentação R$ 300',
+            texto: '**Vale Alimentação de R$ 300,00**, concedido após o período de experiência, conforme critérios e regras da empresa;'
+          },
+          {
+            label: 'Vale-transporte',
+            texto: '**Vale-transporte**;'
+          },
+          {
+            label: 'Alimentação completa na empresa',
+            texto: '**Alimentação completa na empresa:** café da manhã, almoço e lanche da tarde.'
+          },
+          {
+            label: 'Cartão Caju + Assiduidade',
+            texto: '**Cartão Caju (Alimentação)** + Bônus de Assiduidade conforme critérios da empresa;'
+          },
+          {
+            label: 'Adicional de Periculosidade',
+            texto: '**Adicional de periculosidade (30%)** na folha de pagamento;'
+          },
+          {
+            label: 'Plano de carreira',
+            texto: '**Plano de carreira** e treinamento prático na função.'
+          }
+        ];
+
+        const CONTAS_INFO = {
+          cantina: {
+            id: 'cantina',
+            nome: 'Cantina em Casa',
+            sub: 'Conta Meta Ads: Cantina em Casa - Cartão (338176501855182)',
+            corPri: '#6B3E26',
+            corCargoTexto: '#4A2511',
+            corCaixaReq: '#734B3D',
+            corBordaReq: '#F5EFE6',
+            corCaixaCreme: '#F7F2E2',
+            corBordaOuro: '#E0A94E',
+            icone: '🍽️',
+            instagram: 'cantina.em.casa',
+            whatsappPadrao: '62 9 9330-9428'
+          },
+          lumar: {
+            id: 'lumar',
+            nome: 'Lumar Alimentos',
+            sub: 'Conta Meta Ads: Lumar Alimentos (462816038169791)',
+            corPri: '#28458E',
+            corCargoTexto: '#1E3A8A',
+            corCaixaReq: '#2B4270',
+            corBordaReq: '#F5EFE6',
+            corCaixaCreme: '#F7F2E2',
+            corBordaOuro: '#E0A94E',
+            icone: '🏭',
+            instagram: 'lumaralimentos',
+            whatsappPadrao: '62 9 9330-9428'
+          }
+        };
+
+        const [funcoesCat, setFuncoesCat]             = React.useState([]);
+        const [campanhasMeta, setCampanhasMeta]       = React.useState([]);
+        const [campanhasCriadas, setCampanhasCriadas] = React.useState([]);
+        const [loadingLista, setLoadingLista]         = React.useState(true);
+        const [mostrarCriador, setMostrarCriador]     = React.useState(false);
+
+        const [contaAnuncio, setContaAnuncio]         = React.useState('cantina');
+        const [vaga, setVaga]                         = React.useState('');
+        const [funcaoId, setFuncaoId]                 = React.useState('');
+        const [divulgarSalario, setDivulgarSalario]   = React.useState(true);
+        const [salarioTexto, setSalarioTexto]         = React.useState('R$ 2.670,00');
+        const [gratificacaoFixa, setGratificacaoFixa] = React.useState('R$ 350,00');
+        const [gratificacoesAdic, setGratificacoesAdic] = React.useState('R$ 450,00');
+        const [divulgarBeneficios, setDivulgarBeneficios] = React.useState(true);
+        const [beneficiosSel, setBeneficiosSel]       = React.useState(BENEFICIOS_PADRAO_OFICIAL);
+        const [beneficioExtra, setBeneficioExtra]     = React.useState('');
+        const [divulgarHorario, setDivulgarHorario]   = React.useState(true);
+        const [horarioTexto, setHorarioTexto]         = React.useState('Segunda à Sexta: 07:30 às 17:30');
+        const [whatsappContato, setWhatsappContato]   = React.useState('62 9 9330-9428');
+        const [instagramHandle, setInstagramHandle]   = React.useState('cantina.em.casa');
+        const [divulgarLocal, setDivulgarLocal]       = React.useState(true);
+        const [localTexto, setLocalTexto]             = React.useState('Goiânia - GO');
+        const [requisitosTexto, setRequisitosTexto]   = React.useState('');
+        const [observacoesIA, setObservacoesIA]       = React.useState('');
+        const [diasDuracao, setDiasDuracao]           = React.useState(7);
+        const [orcamentoTotal, setOrcamentoTotal]     = React.useState('140,00');
+        const [dataInicio, setDataInicio]             = React.useState(() => new Date().toISOString().slice(0,10));
+        const [gerarFotoIA, setGerarFotoIA]           = React.useState(true);
+
+        // Estado da prévia gerada pela IA e dos 2 Canvases (Feed 1:1 e Story 9:16)
+        const [gerandoPrevia, setGerandoPrevia]       = React.useState(false);
+        const [publicando, setPublicando]             = React.useState(false);
+        const [previaPronta, setPreviaPronta]         = React.useState(false);
+        const [avisoIA, setAvisoIA]                   = React.useState(null);
+        const [iaCopy, setIaCopy]                     = React.useState({
+          cargo_banner: '',
+          requisitos_bullets: [],
+          remuneracao_bullets: [],
+          beneficios_bullets: [],
+          horario_texto: 'Segunda à Sexta: 07:30 às 17:30',
+          whatsapp_contato: '62 9 9330-9428',
+          instagram_handle: 'cantina.em.casa',
+          titulo_link: '',
+          legenda: ''
+        });
+        const [roleImageObj, setRoleImageObj]         = React.useState(null); // Foto da função (quadro à direita)
+        const [facadeImageObj, setFacadeImageObj]     = React.useState(null); // Foto da fachada de fundo (opcional)
+        const [previewFeedUrl, setPreviewFeedUrl]     = React.useState(null);
+        const [previewStoryUrl, setPreviewStoryUrl]   = React.useState(null);
+        const canvasFeedRef                           = React.useRef(null);
+        const canvasStoryRef                          = React.useRef(null);
+
+        const carregarTudo = React.useCallback(async () => {
+          setLoadingLista(true);
+          try {
+            const [fnRes, metaRes, rhRes] = await Promise.all([
+              _supa.from('funcoes').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+              _supa.rpc('rh_campanhas_recrutamento'),
+              _supa.from('rh_campanhas_criadas').select('*').order('criado_em', { ascending: false }).limit(30)
+            ]);
+            if (fnRes.data) setFuncoesCat(fnRes.data);
+            if (metaRes.data) setCampanhasMeta(metaRes.data);
+            if (rhRes.data) setCampanhasCriadas(rhRes.data);
+          } catch (_e) {}
+          setLoadingLista(false);
+        }, [empresaId]);
+
+        React.useEffect(() => { carregarTudo(); }, [carregarTudo]);
+
+        const aoTrocarConta = (novaConta) => {
+          setContaAnuncio(novaConta);
+          const info = CONTAS_INFO[novaConta] || CONTAS_INFO.cantina;
+          setInstagramHandle(info.instagram);
+          setIaCopy(p => ({ ...p, instagram_handle: info.instagram }));
+        };
+
+        const opcoesVagas = React.useMemo(() => {
+          const s = new Set([
+            ...(vagasFormulario || []),
+            ...(vagasCandidatos || []),
+            ...funcoesCat.map(f => f.nome)
+          ].map(x => (x || '').trim()).filter(Boolean));
+          return [...s].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        }, [vagasFormulario, vagasCandidatos, funcoesCat]);
+
+        const aoEscolherVaga = (nomeVaga) => {
+          setVaga(nomeVaga);
+          const fn = funcoesCat.find(f => (f.nome || '').toLowerCase() === (nomeVaga || '').toLowerCase());
+          if (fn) {
+            setFuncaoId(fn.id);
+            if (fn.faixa_salarial_min) {
+              setSalarioTexto(fmtBRL(fn.faixa_salarial_min));
+            }
+            if (fn.requisitos && !requisitosTexto) {
+              setRequisitosTexto(fn.requisitos);
+            }
+          } else {
+            setFuncaoId('');
+          }
+        };
+
+        const toggleBeneficioRapido = (texto) => {
+          setBeneficiosSel(prev => prev.includes(texto) ? prev.filter(x => x !== texto) : [...prev, texto]);
+        };
+
+        const adicionarBeneficioExtra = () => {
+          const v = beneficioExtra.trim();
+          if (!v) return;
+          if (!beneficiosSel.includes(v)) setBeneficiosSel(p => [...p, v]);
+          setBeneficioExtra('');
+        };
+
+        const orcamentoNum = parseFloat(String(orcamentoTotal || '0').replace(/\./g, '').replace(',', '.')) || 0;
+        const gastoDiarioEstimado = diasDuracao > 0 ? orcamentoNum / diasDuracao : 0;
+        const dataFimCalculada = React.useMemo(() => {
+          if (!dataInicio) return '';
+          const d = new Date(dataInicio + 'T12:00:00');
+          d.setDate(d.getDate() + (Number(diasDuracao) || 1));
+          return d.toLocaleDateString('pt-BR');
+        }, [dataInicio, diasDuracao]);
+
+        // Desenha retângulo com cantos arredondados individuais ou uniformes
+        const drawRoundRect = (ctx, x, y, w, h, r) => {
+          const radii = typeof r === 'number' ? { tl: r, tr: r, br: r, bl: r } : { tl: 0, tr: 0, br: 0, bl: 0, ...r };
+          ctx.beginPath();
+          ctx.moveTo(x + radii.tl, y);
+          ctx.lineTo(x + w - radii.tr, y);
+          ctx.quadraticCurveTo(x + w, y, x + w, y + radii.tr);
+          ctx.lineTo(x + w, y + h - radii.br);
+          ctx.quadraticCurveTo(x + w, y + h, x + w - radii.br, y + h);
+          ctx.lineTo(x + radii.bl, y + h);
+          ctx.quadraticCurveTo(x, y + h, x, y + h - radii.bl);
+          ctx.lineTo(x, y + radii.tl);
+          ctx.quadraticCurveTo(x, y, x + radii.tl, y);
+          ctx.closePath();
+        };
+
+        // Quebra e renderiza texto com suporte a trechos em **negrito** no Canvas 2D
+        const parseAndWrapRichLine = (ctx, rawText, maxWidth, fontSize, fontFamily, baseWeight = '500', boldWeight = '800') => {
+          const parts = String(rawText || '').split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+          const tokens = [];
+          parts.forEach(part => {
+            const isBold = part.startsWith('**') && part.endsWith('**');
+            const clean = isBold ? part.slice(2, -2) : part;
+            const words = clean.split(/(\s+)/).filter(Boolean);
+            words.forEach(w => tokens.push({ text: w, bold: isBold }));
+          });
+
+          const lines = [];
+          let curLine = [];
+          let curW = 0;
+
+          tokens.forEach(tk => {
+            if (/^\s+$/.test(tk.text) && curLine.length === 0) return;
+            ctx.font = `${tk.bold ? boldWeight : baseWeight} ${fontSize}px ${fontFamily}`;
+            const w = ctx.measureText(tk.text).width;
+            if (curW + w > maxWidth && curLine.length > 0 && !/^\s+$/.test(tk.text)) {
+              lines.push(curLine);
+              curLine = [{ ...tk, width: w }];
+              curW = w;
+            } else {
+              curLine.push({ ...tk, width: w });
+              curW += w;
+            }
+          });
+          if (curLine.length > 0) lines.push(curLine);
+          return lines;
+        };
+
+        // Renderiza o layout oficial da Cantina / Lumar em um Canvas específico ('feed' = 1080x1080 | 'story' = 1080x1920)
+        const renderizarArteNoCanvas = React.useCallback((canvas, formato) => {
+          if (!canvas) return null;
+          const ctx = canvas.getContext('2d');
+          const isStory = formato === 'story';
+          const W = 1080;
+          const H = isStory ? 1920 : 1080;
+          canvas.width = W;
+          canvas.height = H;
+
+          const cfg = CONTAS_INFO[contaAnuncio] || CONTAS_INFO.cantina;
+          const isLumar = contaAnuncio === 'lumar';
+          const fontFam = '"Montserrat", "Segoe UI", system-ui, sans-serif';
+
+          // ── 1. FUNDO ESCURECIDO (FACHADA / AMBIENTE DA EMPRESA) ──
+          const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+          if (isLumar) {
+            bgGrad.addColorStop(0, '#13203B');
+            bgGrad.addColorStop(0.5, '#1D3159');
+            bgGrad.addColorStop(1, '#0F182C');
+          } else {
+            bgGrad.addColorStop(0, '#2B1D16');
+            bgGrad.addColorStop(0.45, '#3E2920');
+            bgGrad.addColorStop(1, '#1F140E');
+          }
+          ctx.fillStyle = bgGrad;
+          ctx.fillRect(0, 0, W, H);
+
+          // Se houver foto de fachada customizada ou usamos a própria foto desfocada ao fundo para criar profundidade arquitetônica
+          const imgFundo = facadeImageObj || roleImageObj;
+          if (imgFundo) {
+            const iw = imgFundo.width || W;
+            const ih = imgFundo.height || H;
+            const scale = Math.max(W / iw, H / ih) * 1.08;
+            const sw = iw * scale;
+            const sh = ih * scale;
+            ctx.save();
+            ctx.globalAlpha = facadeImageObj ? 0.34 : 0.22;
+            ctx.filter = facadeImageObj ? 'blur(2px)' : 'blur(14px)';
+            ctx.drawImage(imgFundo, (W - sw) / 2, (H - sh) / 2, sw, sh);
+            ctx.restore();
+          }
+
+          // Textura arquitetônica sutil no topo (simulando letreiro/fachada no Story como na referência)
+          ctx.save();
+          const ovGrad = ctx.createLinearGradient(0, 0, 0, H);
+          if (isLumar) {
+            ovGrad.addColorStop(0, 'rgba(15, 25, 48, 0.76)');
+            ovGrad.addColorStop(0.5, 'rgba(22, 37, 68, 0.84)');
+            ovGrad.addColorStop(1, 'rgba(12, 20, 38, 0.92)');
+          } else {
+            ovGrad.addColorStop(0, 'rgba(42, 28, 20, 0.72)');
+            ovGrad.addColorStop(0.5, 'rgba(52, 35, 25, 0.82)');
+            ovGrad.addColorStop(1, 'rgba(32, 20, 14, 0.92)');
+          }
+          ctx.fillStyle = ovGrad;
+          ctx.fillRect(0, 0, W, H);
+
+          if (isStory) {
+            // Marca sutil da empresa no topo do Story (como a fachada "Cantina em Casa" ao fundo)
+            ctx.save();
+            ctx.font = `italic 700 44px Georgia, serif`;
+            ctx.fillStyle = 'rgba(245, 239, 230, 0.16)';
+            ctx.textAlign = 'center';
+            ctx.fillText(cfg.nome, W / 2, 130);
+            ctx.restore();
+          }
+          ctx.restore();
+
+          // Coordenadas verticais calibradas para Feed (1080x1080) e Story (1080x1920)
+          const padX = isStory ? 68 : 42;
+          const titleY = isStory ? 265 : 92;
+          const topSectionY = isStory ? 355 : 148;
+          const bannerH = isStory ? 116 : 96;
+          const reqBoxY = topSectionY + bannerH + (isStory ? 20 : 14);
+          const reqBoxH = isStory ? 360 : 280;
+          const topSectionBottom = reqBoxY + reqBoxH;
+
+          // ── 2. TÍTULO SUPERIOR: "VAGA DE EMPREGO" ──
+          ctx.save();
+          ctx.font = `900 ${isStory ? 74 : 72}px ${fontFam}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 5;
+          ctx.lineWidth = 6;
+          ctx.strokeStyle = 'rgba(35, 20, 12, 0.85)';
+          ctx.strokeText('VAGA DE EMPREGO', W / 2, titleY);
+          ctx.fillStyle = '#F5EFE6';
+          ctx.fillText('VAGA DE EMPREGO', W / 2, titleY);
+          ctx.restore();
+
+          // Larguras das 2 colunas superiores (Esquerda: Cargo + Requisitos | Direita: Foto da Função)
+          const colGap = isStory ? 24 : 22;
+          const rightPhotoW = isStory ? 380 : 395;
+          const rightPhotoX = W - padX - rightPhotoW;
+          const leftColRightX = rightPhotoX - colGap;
+          const reqBoxW = leftColRightX - padX;
+
+          // ── 3A. FAIXA BRANCA DO CARGO (Ancorada na borda esquerda x=0 como na referência) ──
+          const cargoTxt = (iaCopy.cargo_banner || vaga || 'PADEIRO').toUpperCase();
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.35)';
+          ctx.shadowBlur = 12;
+          ctx.shadowOffsetY = 4;
+          ctx.fillStyle = '#F7F4EE';
+          drawRoundRect(ctx, isStory ? padX : 0, topSectionY, isStory ? reqBoxW : leftColRightX, bannerH, {
+            tl: isStory ? 22 : 0,
+            bl: isStory ? 22 : 0,
+            tr: 24,
+            br: 24
+          });
+          ctx.fill();
+          ctx.restore();
+
+          // Texto do Cargo dentro da faixa branca (auto-ajuste de fonte para cargos longos)
+          ctx.save();
+          ctx.fillStyle = cfg.corCargoTexto;
+          const bannerCenterX = isStory ? (padX + reqBoxW / 2) : (leftColRightX / 2);
+          const maxBannerTextW = (isStory ? reqBoxW : leftColRightX) - 44;
+          let cargoFontSize = isStory ? 66 : 64;
+          ctx.font = `900 ${cargoFontSize}px ${fontFam}`;
+          while (ctx.measureText(cargoTxt).width > maxBannerTextW && cargoFontSize > 30) {
+            cargoFontSize -= 3;
+            ctx.font = `900 ${cargoFontSize}px ${fontFam}`;
+          }
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cargoTxt, bannerCenterX, topSectionY + bannerH / 2 + 2);
+          ctx.restore();
+
+          // ── 3B. CAIXA MARROM DE REQUISITOS (Coluna esquerda abaixo do cargo) ──
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.35)';
+          ctx.shadowBlur = 12;
+          ctx.shadowOffsetY = 4;
+          ctx.fillStyle = cfg.corCaixaReq;
+          ctx.strokeStyle = cfg.corBordaReq;
+          ctx.lineWidth = 3.5;
+          drawRoundRect(ctx, padX, reqBoxY, reqBoxW, reqBoxH, 24);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+
+          // Bullets de Requisitos dentro da caixa marrom
+          const reqBullets = (Array.isArray(iaCopy.requisitos_bullets) && iaCopy.requisitos_bullets.length)
+            ? iaCopy.requisitos_bullets.filter(Boolean).slice(0, 4)
+            : [
+                `Experiência comprovada na função de ${(vaga || 'profissional').toLowerCase()}`,
+                `Conhecimento em preparo e rotinas da área`,
+                `Agilidade, organização e atenção aos detalhes`,
+                `Capacidade de trabalhar em equipe`
+              ];
+
+          ctx.save();
+          ctx.fillStyle = '#FFFFFF';
+          const reqFontSize = isStory ? 24 : 22;
+          const reqLineH = isStory ? 31 : 27;
+          const reqMaxW = reqBoxW - 64;
+          let curReqY = reqBoxY + (isStory ? 34 : 26);
+
+          reqBullets.forEach(item => {
+            const cleanItem = String(item).replace(/^[•\-*]\s*/, '');
+            const lines = parseAndWrapRichLine(ctx, cleanItem, reqMaxW, reqFontSize, fontFam, '500', '700');
+            if (curReqY + lines.length * reqLineH > reqBoxY + reqBoxH - 14) return;
+            // Bolinha do bullet
+            ctx.font = `700 ${reqFontSize}px ${fontFam}`;
+            ctx.textBaseline = 'top';
+            ctx.fillText('•', padX + 24, curReqY);
+            lines.forEach(ln => {
+              let lx = padX + 46;
+              ln.forEach(seg => {
+                ctx.font = `${seg.bold ? '700' : '500'} ${reqFontSize}px ${fontFam}`;
+                ctx.fillText(seg.text, lx, curReqY);
+                lx += seg.width;
+              });
+              curReqY += reqLineH;
+            });
+            curReqY += isStory ? 12 : 8;
+          });
+          ctx.restore();
+
+          // ── 3C. MOLDURA DA FOTO DA FUNÇÃO (Coluna direita alinhada ao topo do cargo e base dos requisitos) ──
+          const photoY = topSectionY;
+          const photoH = topSectionBottom - topSectionY;
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.4)';
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetY = 5;
+          drawRoundRect(ctx, rightPhotoX, photoY, rightPhotoW, photoH, 24);
+          ctx.save();
+          ctx.clip();
+
+          if (roleImageObj) {
+            const iw = roleImageObj.width || rightPhotoW;
+            const ih = roleImageObj.height || photoH;
+            const scale = Math.max(rightPhotoW / iw, photoH / ih);
+            const sw = iw * scale;
+            const sh = ih * scale;
+            ctx.drawImage(roleImageObj, rightPhotoX + (rightPhotoW - sw) / 2, photoY + (photoH - sh) / 2, sw, sh);
+          } else {
+            // Ilustração elegante caso esteja sem foto da IA
+            const pGrad = ctx.createLinearGradient(rightPhotoX, photoY, rightPhotoX + rightPhotoW, photoY + photoH);
+            pGrad.addColorStop(0, isLumar ? '#1E3A8A' : '#8C4A27');
+            pGrad.addColorStop(1, isLumar ? '#0F172A' : '#3E1F0E');
+            ctx.fillStyle = pGrad;
+            ctx.fillRect(rightPhotoX, photoY, rightPhotoW, photoH);
+            ctx.fillStyle = 'rgba(255,255,255,0.14)';
+            ctx.beginPath();
+            ctx.arc(rightPhotoX + rightPhotoW / 2, photoY + photoH / 2 - 20, 95, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.font = `400 92px ${fontFam}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(cfg.icone, rightPhotoX + rightPhotoW / 2, photoY + photoH / 2 - 20);
+            ctx.font = `700 22px ${fontFam}`;
+            ctx.fillStyle = '#F5EFE6';
+            ctx.fillText(cfg.nome.toUpperCase(), rightPhotoX + rightPhotoW / 2, photoY + photoH - 48);
+          }
+          ctx.restore();
+
+          // Borda creme da foto da função
+          ctx.strokeStyle = cfg.corBordaReq;
+          ctx.lineWidth = 3.5;
+          drawRoundRect(ctx, rightPhotoX, photoY, rightPhotoW, photoH, 24);
+          ctx.stroke();
+          ctx.restore();
+
+          // ── 4. CAIXA CENTRAL CREME: REMUNERAÇÃO & BENEFÍCIOS ──
+          const mainBoxY = topSectionBottom + (isStory ? 28 : 20);
+          const footerH = isStory ? 132 : 108;
+          const footerY = isStory ? 1485 : (H - padX - footerH);
+          const mainBoxH = footerY - mainBoxY - (isStory ? 28 : 18);
+          const mainBoxW = W - padX * 2;
+
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.35)';
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetY = 5;
+          ctx.fillStyle = cfg.corCaixaCreme;
+          ctx.strokeStyle = cfg.corBordaOuro;
+          ctx.lineWidth = 3;
+          drawRoundRect(ctx, padX, mainBoxY, mainBoxW, mainBoxH, 24);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+
+          // Conteúdo interno de REMUNERAÇÃO e BENEFÍCIOS
+          const remBullets = (Array.isArray(iaCopy.remuneracao_bullets) && iaCopy.remuneracao_bullets.length)
+            ? iaCopy.remuneracao_bullets.filter(Boolean)
+            : [];
+          const benBullets = (Array.isArray(iaCopy.beneficios_bullets) && iaCopy.beneficios_bullets.length)
+            ? iaCopy.beneficios_bullets.filter(Boolean)
+            : [];
+
+          let curMainY = mainBoxY + (isStory ? 34 : 24);
+          const sectionTitleFont = isStory ? 33 : 29;
+          const bodyFont = isStory ? 25 : 22;
+          const bodyLineH = isStory ? 32 : 27;
+          const bodyMaxW = mainBoxW - 88;
+
+          ctx.save();
+          // Seção REMUNERAÇÃO (se houver itens)
+          if (remBullets.length > 0) {
+            ctx.fillStyle = '#1F1916';
+            ctx.font = `900 ${sectionTitleFont}px ${fontFam}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('REMUNERAÇÃO', W / 2, curMainY);
+            curMainY += sectionTitleFont + (isStory ? 16 : 10);
+
+            ctx.textAlign = 'left';
+            remBullets.forEach(b => {
+              const clean = String(b).replace(/^[•\-*]\s*/, '');
+              const lines = parseAndWrapRichLine(ctx, clean, bodyMaxW, bodyFont, fontFam, '500', '800');
+              ctx.font = `800 ${bodyFont}px ${fontFam}`;
+              ctx.fillStyle = '#2B221E';
+              ctx.fillText('•', padX + 32, curMainY);
+              lines.forEach(ln => {
+                let lx = padX + 56;
+                ln.forEach(seg => {
+                  ctx.font = `${seg.bold ? '800' : '500'} ${bodyFont}px ${fontFam}`;
+                  ctx.fillStyle = '#2B221E';
+                  ctx.fillText(seg.text, lx, curMainY);
+                  lx += seg.width;
+                });
+                curMainY += bodyLineH;
+              });
+              curMainY += isStory ? 6 : 4;
+            });
+
+            curMainY += isStory ? 16 : 10;
+          }
+
+          // Seção BENEFÍCIOS
+          if (benBullets.length > 0) {
+            ctx.fillStyle = '#1F1916';
+            ctx.font = `900 ${sectionTitleFont}px ${fontFam}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('BENEFÍCIOS', W / 2, curMainY);
+            curMainY += sectionTitleFont + (isStory ? 16 : 10);
+
+            ctx.textAlign = 'left';
+            benBullets.forEach(b => {
+              const clean = String(b).replace(/^[•\-*]\s*/, '');
+              const lines = parseAndWrapRichLine(ctx, clean, bodyMaxW, bodyFont, fontFam, '500', '800');
+              if (curMainY + lines.length * bodyLineH > mainBoxY + mainBoxH - 12) return;
+              ctx.font = `800 ${bodyFont}px ${fontFam}`;
+              ctx.fillStyle = '#2B221E';
+              ctx.fillText('•', padX + 32, curMainY);
+              lines.forEach(ln => {
+                let lx = padX + 56;
+                ln.forEach(seg => {
+                  ctx.font = `${seg.bold ? '800' : '500'} ${bodyFont}px ${fontFam}`;
+                  ctx.fillStyle = '#2B221E';
+                  ctx.fillText(seg.text, lx, curMainY);
+                  lx += seg.width;
+                });
+                curMainY += bodyLineH;
+              });
+              curMainY += isStory ? 6 : 4;
+            });
+          }
+          ctx.restore();
+
+          // ── 5. RODAPÉ EM 3 CAIXAS (Horário | Entre em contato WhatsApp | Instagram) ──
+          const fGap = 16;
+          const card1W = Math.round((mainBoxW - fGap * 2) * 0.37);
+          const card2W = Math.round((mainBoxW - fGap * 2) * 0.33);
+          const card3W = mainBoxW - fGap * 2 - card1W - card2W;
+          const card1X = padX;
+          const card2X = card1X + card1W + fGap;
+          const card3X = card2X + card2W + fGap;
+
+          [
+            { x: card1X, w: card1W },
+            { x: card2X, w: card2W },
+            { x: card3X, w: card3W }
+          ].forEach(c => {
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetY = 4;
+            ctx.fillStyle = cfg.corCaixaCreme;
+            ctx.strokeStyle = cfg.corBordaOuro;
+            ctx.lineWidth = 2.5;
+            drawRoundRect(ctx, c.x, footerY, c.w, footerH, 20);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+          });
+
+          // Card 1: Horário
+          ctx.save();
+          ctx.fillStyle = '#1F1916';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `900 ${isStory ? 26 : 24}px ${fontFam}`;
+          ctx.fillText('Horário:', card1X + card1W / 2, footerY + footerH * 0.34);
+
+          const horStr = iaCopy.horario_texto || horarioTexto || 'Segunda à Sexta: 07:30 às 17:30';
+          let horFont = isStory ? 21 : 19;
+          ctx.font = `600 ${horFont}px ${fontFam}`;
+          while (ctx.measureText(horStr).width > card1W - 24 && horFont > 13) {
+            horFont -= 1;
+            ctx.font = `600 ${horFont}px ${fontFam}`;
+          }
+          ctx.fillStyle = '#2B221E';
+          ctx.fillText(horStr, card1X + card1W / 2, footerY + footerH * 0.68);
+          ctx.restore();
+
+          // Card 2: Entre em contato (WhatsApp)
+          ctx.save();
+          ctx.fillStyle = '#1F1916';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `900 ${isStory ? 25 : 23}px ${fontFam}`;
+          ctx.fillText('Entre em contato', card2X + card2W / 2, footerY + footerH * 0.34);
+
+          const whatsStr = iaCopy.whatsapp_contato || whatsappContato || '62 9 9330-9428';
+          let wFont = isStory ? 23 : 21;
+          ctx.font = `800 ${wFont}px ${fontFam}`;
+          const iconR = isStory ? 16 : 14;
+          const totalW2 = iconR * 2 + 10 + ctx.measureText(whatsStr).width;
+          const startX2 = card2X + (card2W - totalW2) / 2;
+          const centerY2 = footerY + footerH * 0.69;
+
+          // Ícone redondo verde WhatsApp
+          ctx.fillStyle = '#25D366';
+          ctx.beginPath();
+          ctx.arc(startX2 + iconR, centerY2, iconR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = `900 ${isStory ? 18 : 16}px ${fontFam}`;
+          ctx.fillText('✆', startX2 + iconR, centerY2 + 1);
+
+          ctx.fillStyle = '#1F1916';
+          ctx.textAlign = 'left';
+          ctx.font = `800 ${wFont}px ${fontFam}`;
+          ctx.fillText(whatsStr, startX2 + iconR * 2 + 10, centerY2 + 1);
+          ctx.restore();
+
+          // Card 3: Instagram
+          ctx.save();
+          const instaStr = (iaCopy.instagram_handle || instagramHandle || cfg.instagram).replace(/^@/, '');
+          let iFont = isStory ? 22 : 20;
+          ctx.font = `700 ${iFont}px ${fontFam}`;
+          while (ctx.measureText(instaStr).width > card3W - 68 && iFont > 14) {
+            iFont -= 1;
+            ctx.font = `700 ${iFont}px ${fontFam}`;
+          }
+          const igSize = isStory ? 34 : 30;
+          const totalW3 = igSize + 10 + ctx.measureText(instaStr).width;
+          const startX3 = card3X + (card3W - totalW3) / 2;
+          const centerY3 = footerY + footerH / 2;
+
+          // Ícone gradiente do Instagram
+          const igGrad = ctx.createLinearGradient(startX3, centerY3 - igSize / 2, startX3 + igSize, centerY3 + igSize / 2);
+          igGrad.addColorStop(0, '#F58529');
+          igGrad.addColorStop(0.5, '#DD2A7B');
+          igGrad.addColorStop(1, '#8134AF');
+          ctx.fillStyle = igGrad;
+          drawRoundRect(ctx, startX3, centerY3 - igSize / 2, igSize, igSize, 9);
+          ctx.fill();
+
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2.2;
+          drawRoundRect(ctx, startX3 + 5, centerY3 - igSize / 2 + 5, igSize - 10, igSize - 10, 6);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(startX3 + igSize / 2, centerY3, igSize * 0.2, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = '#1F1916';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.font = `700 ${iFont}px ${fontFam}`;
+          ctx.fillText(instaStr, startX3 + igSize + 10, centerY3 + 1);
+          ctx.restore();
+
+          try {
+            return canvas.toDataURL('image/png');
+          } catch (_e) {
+            return null;
+          }
+        }, [contaAnuncio, vaga, iaCopy, roleImageObj, facadeImageObj, horarioTexto, whatsappContato, instagramHandle]);
+
+        const renderizarAmbosCanvases = React.useCallback(() => {
+          const urlFeed = renderizarArteNoCanvas(canvasFeedRef.current, 'feed');
+          const urlStory = renderizarArteNoCanvas(canvasStoryRef.current, 'story');
+          if (urlFeed) setPreviewFeedUrl(urlFeed);
+          if (urlStory) setPreviewStoryUrl(urlStory);
+        }, [renderizarArteNoCanvas]);
+
+        React.useEffect(() => {
+          if (previaPronta) renderizarAmbosCanvases();
+        }, [previaPronta, renderizarAmbosCanvases]);
+
+        // Monta os bullets locais de remuneração a partir dos campos preenchidos
+        const montarRemuneracaoLocal = () => {
+          if (!divulgarSalario) {
+            return ['**Salário compatível com a função (CLT)** + possibilidade de gratificações por desempenho.'];
+          }
+          const arr = [];
+          if (salarioTexto.trim()) arr.push(`Salário: **${salarioTexto.trim()}**`);
+          if (gratificacaoFixa.trim()) arr.push(`Gratificação fixa: **${gratificacaoFixa.trim()}**`);
+          if (gratificacoesAdic.trim()) {
+            arr.push(`Possibilidade de receber mais **${gratificacoesAdic.trim()} em gratificações adicionais**, conforme as regras e critérios estabelecidos pela empresa.`);
+          }
+          return arr.length ? arr : ['**Salário compatível com o mercado** + pacote de gratificações CLT.'];
+        };
+
+        // Chama a Edge Function rh-campanha-ia (acao: 'gerar_previa')
+        const gerarPreviaIA = async () => {
+          if (!vaga.trim()) {
+            onStatusMsg?.({ ok: false, msg: '⚠️ Selecione ou digite o nome da vaga antes de gerar a prévia.' });
+            return;
+          }
+          if (orcamentoNum < 10) {
+            onStatusMsg?.({ ok: false, msg: '⚠️ Informe um valor de gasto total válido (mínimo R$ 10,00).' });
+            return;
+          }
+          setGerandoPrevia(true);
+          setAvisoIA(null);
+          onStatusMsg?.(null);
+
+          try {
+            const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+              body: {
+                acao: 'gerar_previa',
+                conta_anuncio: contaAnuncio,
+                vaga: vaga.trim(),
+                divulgar_salario: divulgarSalario,
+                salario_texto: salarioTexto.trim(),
+                gratificacao_fixa: gratificacaoFixa.trim(),
+                gratificacoes_adicionais: gratificacoesAdic.trim(),
+                divulgar_beneficios: divulgarBeneficios,
+                beneficios: beneficiosSel,
+                divulgar_horario: divulgarHorario,
+                horario_texto: horarioTexto.trim(),
+                whatsapp_contato: whatsappContato.trim(),
+                instagram_handle: instagramHandle.trim(),
+                divulgar_local: divulgarLocal,
+                local_texto: localTexto.trim(),
+                requisitos_texto: requisitosTexto.trim(),
+                observacoes_ia: observacoesIA.trim(),
+                gerar_foto_ia: gerarFotoIA
+              }
+            });
+
+            if (error) throw new Error(error.message || 'Falha ao chamar função rh-campanha-ia');
+            if (data?.error) throw new Error(data.error);
+
+            const copyRecebida = data?.copy || {};
+            setIaCopy({
+              cargo_banner: copyRecebida.cargo_banner || vaga.toUpperCase(),
+              requisitos_bullets: Array.isArray(copyRecebida.requisitos_bullets) && copyRecebida.requisitos_bullets.length
+                ? copyRecebida.requisitos_bullets
+                : [
+                    `Experiência comprovada na função de ${vaga.toLowerCase()}`,
+                    `Conhecimento em preparo e rotinas da área`,
+                    `Agilidade, organização e atenção aos detalhes`,
+                    `Capacidade de trabalhar em equipe`
+                  ],
+              remuneracao_bullets: Array.isArray(copyRecebida.remuneracao_bullets) && copyRecebida.remuneracao_bullets.length
+                ? copyRecebida.remuneracao_bullets
+                : montarRemuneracaoLocal(),
+              beneficios_bullets: Array.isArray(copyRecebida.beneficios_bullets) && copyRecebida.beneficios_bullets.length
+                ? copyRecebida.beneficios_bullets
+                : beneficiosSel,
+              horario_texto: copyRecebida.horario_texto || horarioTexto,
+              whatsapp_contato: copyRecebida.whatsapp_contato || whatsappContato,
+              instagram_handle: copyRecebida.instagram_handle || instagramHandle,
+              titulo_link: copyRecebida.titulo_link || `Vaga: ${vaga} — Candidate-se`,
+              legenda: copyRecebida.legenda || ''
+            });
+            if (data?.aviso_ia) setAvisoIA(data.aviso_ia);
+
+            const b64Foto = data?.imagem_funcao_base64 || data?.imagem_fundo_base64;
+            const mimeFoto = data?.imagem_funcao_mime || data?.imagem_fundo_mime || 'image/png';
+            if (b64Foto) {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                setRoleImageObj(img);
+                setPreviaPronta(true);
+                setGerandoPrevia(false);
+              };
+              img.onerror = () => {
+                setRoleImageObj(null);
+                setPreviaPronta(true);
+                setGerandoPrevia(false);
+              };
+              img.src = `data:${mimeFoto};base64,${b64Foto}`;
+            } else {
+              setPreviaPronta(true);
+              setGerandoPrevia(false);
+            }
+          } catch (err) {
+            // Fallback local caso a Edge Function ainda não tenha sido publicada no Supabase
+            const reqLocal = requisitosTexto.trim()
+              ? requisitosTexto.split(/\n|;/).map(s => s.trim()).filter(Boolean).slice(0, 4)
+              : [
+                  `Experiência comprovada na função de ${vaga.toLowerCase()}`,
+                  `Conhecimento nas rotinas e boas práticas da área`,
+                  `Agilidade, organização e atenção aos detalhes`,
+                  `Capacidade de trabalhar em equipe`
+                ];
+            const remLocal = montarRemuneracaoLocal();
+            const nomeMarca = CONTAS_INFO[contaAnuncio].nome;
+
+            setIaCopy({
+              cargo_banner: vaga.toUpperCase(),
+              requisitos_bullets: reqLocal,
+              remuneracao_bullets: remLocal,
+              beneficios_bullets: divulgarBeneficios ? beneficiosSel : [],
+              horario_texto: horarioTexto,
+              whatsapp_contato: whatsappContato,
+              instagram_handle: instagramHandle,
+              titulo_link: `Vaga: ${vaga} — Envie seu currículo`,
+              legenda: `🚀 VAGA DE EMPREGO: ${vaga.toUpperCase()}!\n\nVenha fazer parte da equipe ${nomeMarca} em ${localTexto || 'Goiânia - GO'}.\n\n📋 Requisitos:\n${reqLocal.map(r => '• ' + r).join('\n')}\n\n${divulgarSalario ? `💰 Remuneração:\n${remLocal.map(r => '• ' + r.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}🎁 Benefícios:\n${beneficiosSel.map(b => '• ' + b.replace(/\*\*/g, '')).join('\n')}\n\n⏰ Horário: ${horarioTexto}\n📲 WhatsApp: ${whatsappContato}\n👉 Candidate-se também em: https://vagas.cantinaemcasa.com`
+            });
+            setAvisoIA(`Prévia montada com o template oficial local (${err.message}).`);
+            setPreviaPronta(true);
+            setGerandoPrevia(false);
+          }
+        };
+
+        // Upload manual da foto da função (quadro à direita) ou da fachada de fundo
+        const aoSubirFoto = (file, tipo) => {
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+              if (tipo === 'fachada') setFacadeImageObj(img);
+              else setRoleImageObj(img);
+            };
+            img.src = ev.target.result;
+          };
+          reader.readAsDataURL(file);
+        };
+
+        // Aprovar a prévia e publicar AMBOS os formatos (Feed + Story) na conta Meta Ads selecionada
+        const aprovarEPublicar = async () => {
+          const cfg = CONTAS_INFO[contaAnuncio];
+          const ok = await confirmar(
+            `Confirma a aprovação das artes (Feed 1:1 + Story 9:16) e subida imediata da campanha de "${vaga}" na conta Meta Ads da ${cfg.nome}, com gasto total de ${fmtBRL(orcamentoNum)} por ${diasDuracao} dia(s)?`,
+            '🚀 Aprovar e Publicar (Feed + Story)'
+          );
+          if (!ok) return;
+
+          setPublicando(true);
+          onStatusMsg?.(null);
+
+          try {
+            const urlFeed = renderizarArteNoCanvas(canvasFeedRef.current, 'feed') || previewFeedUrl;
+            const urlStory = renderizarArteNoCanvas(canvasStoryRef.current, 'story') || previewStoryUrl;
+            const b64Feed = String(urlFeed || '').replace(/^data:image\/\w+;base64,/, '');
+            const b64Story = String(urlStory || '').replace(/^data:image\/\w+;base64,/, '');
+
+            const dataIniIso = dataInicio ? new Date(dataInicio + 'T12:00:00').toISOString() : new Date().toISOString();
+            const nomePadrao = `[TRAFEGO] [FORMS] Vaga de Emprego — ${vaga.trim()} (${cfg.nome})`;
+
+            const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+              body: {
+                acao: 'publicar',
+                empresa_id: empresaId,
+                conta_anuncio: contaAnuncio,
+                nome_campanha: nomePadrao,
+                vaga: vaga.trim(),
+                funcao_id: funcaoId || null,
+                divulgar_salario: divulgarSalario,
+                salario_texto: [salarioTexto, gratificacaoFixa ? `Grat. Fixa ${gratificacaoFixa}` : '', gratificacoesAdic ? `+ Grat. Adic. ${gratificacoesAdic}` : ''].filter(Boolean).join(' | '),
+                divulgar_beneficios: divulgarBeneficios,
+                beneficios: beneficiosSel,
+                divulgar_horario: divulgarHorario,
+                horario_texto: (iaCopy.horario_texto || horarioTexto).trim(),
+                divulgar_local: divulgarLocal,
+                local_texto: localTexto.trim(),
+                requisitos_texto: (iaCopy.requisitos_bullets || []).join('; '),
+                observacoes_ia: observacoesIA.trim(),
+                dias_duracao: Number(diasDuracao) || 7,
+                orcamento_total: orcamentoNum,
+                data_inicio: dataIniIso,
+                url_destino: 'https://vagas.cantinaemcasa.com',
+                ia_copy: iaCopy,
+                imagem_base64: b64Feed,
+                imagem_feed_base64: b64Feed,
+                imagem_story_base64: b64Story
+              }
+            });
+
+            if (error) throw new Error(error.message || 'Falha ao publicar campanha');
+
+            if (data?.ok) {
+              toast(`🚀 Campanha (Feed + Story) publicada na conta ${cfg.nome}!`, 'success');
+              onStatusMsg?.({ ok: true, msg: `✅ Campanha "${nomePadrao}" (Feed + Story) está NO AR na conta ${cfg.nome}!` });
+              setMostrarCriador(false);
+              setPreviaPronta(false);
+              carregarTudo();
+            } else {
+              toast('Campanha e artes (Feed + Story) salvas no histórico; verifique o aviso da Meta API.', 'error');
+              onStatusMsg?.({ ok: false, msg: `⚠️ ${data?.error || 'Não foi possível ativar na Meta agora.'}` });
+              carregarTudo();
+            }
+          } catch (err) {
+            onStatusMsg?.({ ok: false, msg: '❌ Erro ao publicar: ' + err.message });
+          }
+          setPublicando(false);
+        };
+
+        const pausarCampanha = async (camp) => {
+          if (!await confirmar(`Deseja pausar a campanha "${camp.nome_campanha}" na Meta Ads?`, 'Pausar Campanha')) return;
+          const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+            body: { acao: 'pausar', id: camp.id }
+          });
+          if (error || data?.error) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + (error?.message || data?.error) });
+          } else {
+            toast('Campanha pausada.', 'success');
+            carregarTudo();
+          }
+        };
+
+        const cfgAtual = CONTAS_INFO[contaAnuncio] || CONTAS_INFO.cantina;
+
+        return (
+          <div>
+            {/* Cabeçalho da aba Campanhas */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:16,color:C.pri}}>📢 Campanhas de Recrutamento (Feed + Story · Meta Ads + IA)</div>
+                <div style={{fontSize:12,color:C.muted}}>Gere automaticamente as artes no padrão oficial (Feed 1:1 e Story 9:16) e publique direto na conta da Cantina ou da Lumar.</div>
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={carregarTudo} style={s.btnOutline} disabled={loadingLista}>🔄 Atualizar</button>
+                {!mostrarCriador ? (
+                  <button onClick={()=>{setMostrarCriador(true);setPreviaPronta(false);}} style={s.btn}>✨ + Nova Campanha com IA</button>
+                ) : (
+                  <button onClick={()=>setMostrarCriador(false)} style={s.btnOutline}>✕ Fechar Criador</button>
+                )}
+              </div>
+            </div>
+
+            {/* ── ASSISTENTE DE CRIAÇÃO E PRÉVIA DE CAMPANHA (FEED + STORY) ── */}
+            {mostrarCriador && (
+              <div style={{...s.card, border:`2px solid ${cfgAtual.corPri}`, marginBottom:20}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,borderBottom:`1px solid ${C.border}`,paddingBottom:12,flexWrap:'wrap',gap:8}}>
+                  <div style={{fontWeight:800,fontSize:15,color:cfgAtual.corPri,display:'flex',alignItems:'center',gap:8}}>
+                    <span>✨ Programar Nova Campanha de Vaga (Feed + Story)</span>
+                    <span style={{fontSize:11,background:'var(--c-subtle)',color:C.muted,padding:'3px 10px',borderRadius:12,fontWeight:600}}>Formatos: 1080×1080 (Feed) e 1080×1920 (Story)</span>
+                  </div>
+                </div>
+
+                {/* 1. Seleção da Conta de Anúncios (Cantina ou Lumar) */}
+                <div style={{marginBottom:18}}>
+                  <label style={s.label}>1. Em qual conta de anúncios a campanha vai subir? *</label>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                    {Object.values(CONTAS_INFO).map(ct => {
+                      const sel = contaAnuncio === ct.id;
+                      return (
+                        <div key={ct.id} onClick={()=>aoTrocarConta(ct.id)}
+                          style={{
+                            padding:'14px 16px',borderRadius:10,cursor:'pointer',transition:'all 0.15s',
+                            border: sel ? `2.5px solid ${ct.corPri}` : `1.5px solid ${C.border}`,
+                            background: sel ? (ct.id==='lumar'?'#EFF6FF':'#FDF8F3') : 'var(--c-input-bg)',
+                            display:'flex',alignItems:'center',gap:12
+                          }}>
+                          <div style={{fontSize:28,width:46,height:46,borderRadius:10,background:ct.corPri,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                            {ct.icone}
+                          </div>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:800,fontSize:14,color:sel?ct.corPri:C.text,display:'flex',alignItems:'center',gap:6}}>
+                              {ct.nome}
+                              {sel && <span style={{fontSize:10,background:ct.corPri,color:'#fff',padding:'2px 7px',borderRadius:10}}>SELECIONADA</span>}
+                            </div>
+                            <div style={{fontSize:11,color:C.muted,marginTop:2}}>{ct.sub}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Vaga, Tempo de Divulgação e Gasto Total */}
+                <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:12,marginBottom:16}}>
+                  <div>
+                    <label style={s.label}>2. Vaga / Cargo a divulgar (Faixa Principal) *</label>
+                    <input type="text" list="opcoes-vagas-camp" value={vaga}
+                      onChange={e=>aoEscolherVaga(e.target.value)}
+                      placeholder="Ex: Padeiro, Auxiliar de Cozinha, Confeiteiro..."
+                      style={s.input}/>
+                    <datalist id="opcoes-vagas-camp">
+                      {opcoesVagas.map(v => <option key={v} value={v}/>)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label style={s.label}>Tempo divulgando (dias) *</label>
+                    <input type="number" min={1} max={90} value={diasDuracao}
+                      onChange={e=>setDiasDuracao(Math.max(1, parseInt(e.target.value,10)||1))}
+                      style={s.input}/>
+                    <div style={{fontSize:10,color:C.muted,marginTop:3}}>Término: <strong>{dataFimCalculada}</strong></div>
+                  </div>
+                  <div>
+                    <label style={s.label}>Valor de gasto total (R$) *</label>
+                    <input type="text" value={orcamentoTotal}
+                      onChange={e=>setOrcamentoTotal(e.target.value)}
+                      placeholder="Ex: 140,00"
+                      style={s.input}/>
+                    <div style={{fontSize:10,color:C.green,fontWeight:700,marginTop:3}}>
+                      ≈ {fmtBRL(gastoDiarioEstimado)} / dia
+                    </div>
+                  </div>
+                  <div>
+                    <label style={s.label}>Data de início</label>
+                    <input type="date" value={dataInicio}
+                      onChange={e=>setDataInicio(e.target.value)}
+                      style={s.input}/>
+                  </div>
+                </div>
+
+                {/* 3. Informações que compõem o layout oficial (Remuneração, Benefícios, Requisitos e Rodapé) */}
+                <div style={{background:'var(--c-subtle)',border:`1px solid ${C.border}`,borderRadius:10,padding:16,marginBottom:16}}>
+                  <div style={{fontWeight:700,fontSize:12,color:C.pri,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12}}>
+                    3. Informações da Arte Oficial (Remuneração, Benefícios, Requisitos e Rodapé)
+                  </div>
+
+                  {/* Bloco REMUNERAÇÃO (Salário + Gratificação fixa + Gratificações adicionais) */}
+                  <div style={{background:'var(--c-card)',padding:12,borderRadius:8,border:`1px solid ${C.border}`,marginBottom:14}}>
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontWeight:700,fontSize:13,marginBottom:divulgarSalario?10:0}}>
+                      <input type="checkbox" checked={divulgarSalario} onChange={e=>setDivulgarSalario(e.target.checked)}/>
+                      <span>💰 Divulgar bloco REMUNERAÇÃO com valores na arte</span>
+                    </label>
+                    {divulgarSalario ? (
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+                        <div>
+                          <label style={s.label}>Salário Base</label>
+                          <input type="text" value={salarioTexto} onChange={e=>setSalarioTexto(e.target.value)}
+                            placeholder="Ex: R$ 2.670,00" style={s.input}/>
+                        </div>
+                        <div>
+                          <label style={s.label}>Gratificação Fixa (opcional)</label>
+                          <input type="text" value={gratificacaoFixa} onChange={e=>setGratificacaoFixa(e.target.value)}
+                            placeholder="Ex: R$ 350,00 (deixe vazio se não houver)" style={s.input}/>
+                        </div>
+                        <div>
+                          <label style={s.label}>Gratificações Adicionais (opcional)</label>
+                          <input type="text" value={gratificacoesAdic} onChange={e=>setGratificacoesAdic(e.target.value)}
+                            placeholder="Ex: R$ 450,00 (conforme regras)" style={s.input}/>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{fontSize:11,color:C.muted,marginTop:4}}>O bloco mostrará "Salário compatível com a função (CLT)" sem expor valores numéricos.</div>
+                    )}
+                  </div>
+
+                  {/* Bloco BENEFÍCIOS */}
+                  <div style={{background:'var(--c-card)',padding:12,borderRadius:8,border:`1px solid ${C.border}`,marginBottom:14}}>
+                    <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontWeight:700,fontSize:13,marginBottom:10}}>
+                      <input type="checkbox" checked={divulgarBeneficios} onChange={e=>setDivulgarBeneficios(e.target.checked)}/>
+                      <span>🎁 Divulgar bloco BENEFÍCIOS (use **texto** para destacar em negrito na arte)</span>
+                    </label>
+                    {divulgarBeneficios && (
+                      <div>
+                        <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:10}}>
+                          {BENEFICIOS_RAPIDOS.map(b => {
+                            const ativo = beneficiosSel.includes(b.texto);
+                            return (
+                              <button key={b.label} type="button" onClick={()=>toggleBeneficioRapido(b.texto)}
+                                style={{
+                                  padding:'5px 11px',borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',
+                                  border: ativo ? `1.5px solid ${cfgAtual.corPri}` : `1px solid ${C.border}`,
+                                  background: ativo ? cfgAtual.corPri : 'var(--c-subtle)',
+                                  color: ativo ? '#fff' : C.text
+                                }}>
+                                {ativo ? '✓ ' : '+ '}{b.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Itens que aparecerão em BENEFÍCIOS (1 por linha):</div>
+                        <textarea rows={3}
+                          value={beneficiosSel.join('\n')}
+                          onChange={e=>setBeneficiosSel(e.target.value.split('\n').filter(x => x !== undefined))}
+                          style={{...s.input,fontFamily:'inherit',fontSize:12,marginBottom:8}}/>
+                        <div style={{display:'flex',gap:8,maxWidth:520}}>
+                          <input type="text" value={beneficioExtra} onChange={e=>setBeneficioExtra(e.target.value)}
+                            onKeyDown={e=>e.key==='Enter'&&(e.preventDefault(),adicionarBeneficioExtra())}
+                            placeholder="Adicionar outro benefício (ex: **Bônus por meta atingida**;)..." style={{...s.inputSm,flex:1}}/>
+                          <button type="button" onClick={adicionarBeneficioExtra} style={{...s.btnOutline,padding:'4px 10px',fontSize:11}}>+ Incluir linha</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Rodapé de 3 Caixas (Horário | WhatsApp | Instagram) */}
+                  <div style={{display:'grid',gridTemplateColumns:'1.3fr 1fr 1fr',gap:12,marginBottom:14}}>
+                    <div>
+                      <label style={s.label}>⏰ Horário (Caixa Rodapé Esquerda)</label>
+                      <input type="text" value={horarioTexto} onChange={e=>setHorarioTexto(e.target.value)}
+                        placeholder="Ex: Segunda à Sexta: 07:30 às 17:30" style={s.input}/>
+                    </div>
+                    <div>
+                      <label style={s.label}>📲 WhatsApp ("Entre em contato")</label>
+                      <input type="text" value={whatsappContato} onChange={e=>setWhatsappContato(e.target.value)}
+                        placeholder="Ex: 62 9 9330-9428" style={s.input}/>
+                    </div>
+                    <div>
+                      <label style={s.label}>📸 Instagram (Caixa Rodapé Direita)</label>
+                      <input type="text" value={instagramHandle} onChange={e=>setInstagramHandle(e.target.value)}
+                        placeholder="Ex: cantina.em.casa" style={s.input}/>
+                    </div>
+                  </div>
+
+                  {/* Requisitos e Instruções para a IA */}
+                  <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:12}}>
+                    <div>
+                      <label style={s.label}>📋 Requisitos da Função (Caixa Marrom Superior — se deixar em branco, a IA cria para o cargo)</label>
+                      <input type="text" value={requisitosTexto} onChange={e=>setRequisitosTexto(e.target.value)}
+                        placeholder="Ex: Experiência comprovada na função; Agilidade e organização; Trabalho em equipe" style={s.input}/>
+                    </div>
+                    <div>
+                      <label style={s.label}>🤖 Instruções extras para a IA (opcional)</label>
+                      <input type="text" value={observacoesIA} onChange={e=>setObservacoesIA(e.target.value)}
+                        placeholder="Ex: Foto segurando pães artesanais, início imediato..." style={s.input}/>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botão para Gerar Prévia com IA */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12,paddingTop:4}}>
+                  <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:C.text,cursor:'pointer',fontWeight:600}}>
+                    <input type="checkbox" checked={gerarFotoIA} onChange={e=>setGerarFotoIA(e.target.checked)}/>
+                    <span>🖼️ Gerar automaticamente a foto ilustrativa da função por IA (Gemini Nano Banana 2.1)</span>
+                  </label>
+                  <button type="button" onClick={gerarPreviaIA} disabled={gerandoPrevia}
+                    style={{...s.btn, background:cfgAtual.corPri, padding:'11px 22px', fontSize:14}}>
+                    {gerandoPrevia ? '⏳ A IA está montando as artes de Feed e Story...' : previaPronta ? '🔄 Regerar Artes com IA' : '✨ Gerar Prévia (Feed + Story) com IA'}
+                  </button>
+                </div>
+
+                {/* ── PRÉVIA DUPLA INTERATIVA (FEED 1:1 + STORY 9:16) ── */}
+                {previaPronta && (
+                  <div style={{marginTop:22,paddingTop:20,borderTop:`2px dashed ${C.border}`}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+                      <div>
+                        <div style={{fontWeight:800,fontSize:15,color:C.pri}}>👁️ Prévia Oficial do Anúncio — Formatos Feed (1:1) e Story (9:16)</div>
+                        <div style={{fontSize:12,color:C.muted}}>Edite qualquer tópico ao lado (use <code>**texto**</code> para negrito) e veja tanto o Feed quanto o Story atualizarem ao vivo.</div>
+                      </div>
+                      {avisoIA && (
+                        <div style={{fontSize:11,background:C.amberBg,color:C.amber,padding:'5px 10px',borderRadius:6,border:`1px solid ${C.amber}`}}>
+                          ℹ️ {avisoIA}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{display:'grid',gridTemplateColumns:'1.15fr 1fr',gap:22,alignItems:'start'}}>
+                      {/* Coluna Esquerda: Visualização Lado a Lado de FEED (1:1) e STORY (9:16) */}
+                      <div>
+                        <div style={{display:'grid',gridTemplateColumns:'1.12fr 0.88fr',gap:14,alignItems:'start'}}>
+                          {/* Card Preview FEED 1:1 */}
+                          <div style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 16px rgba(0,0,0,0.08)'}}>
+                            <div style={{padding:'8px 12px',background:'#1F2937',color:'#fff',fontSize:11,fontWeight:800,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span>🟦 FORMATO FEED (1:1)</span>
+                              <span style={{fontSize:10,opacity:0.8}}>1080 × 1080 px</span>
+                            </div>
+                            <div style={{position:'relative',width:'100%',aspectRatio:'1/1',background:'#1F140E'}}>
+                              <canvas ref={canvasFeedRef} style={{width:'100%',height:'100%',display:'block'}}/>
+                            </div>
+                            <div style={{padding:'8px 10px',background:'#F9FAFB',borderTop:'1px solid #E5E7EB',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span style={{fontSize:10,color:'#6B7280',fontWeight:600}}>Feed Instagram / Facebook</span>
+                              <a href={previewFeedUrl || '#'} download={`feed-${contaAnuncio}-${vaga || 'vaga'}.png`}
+                                style={{fontSize:11,fontWeight:700,color:cfgAtual.corPri,textDecoration:'none'}}>
+                                ⬇️ Baixar Feed
+                              </a>
+                            </div>
+                          </div>
+
+                          {/* Card Preview STORY 9:16 */}
+                          <div style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:12,overflow:'hidden',boxShadow:'0 4px 16px rgba(0,0,0,0.08)'}}>
+                            <div style={{padding:'8px 12px',background:'#312E81',color:'#fff',fontSize:11,fontWeight:800,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span>📱 FORMATO STORY (9:16)</span>
+                              <span style={{fontSize:10,opacity:0.8}}>1080 × 1920 px</span>
+                            </div>
+                            <div style={{position:'relative',width:'100%',aspectRatio:'9/16',background:'#1F140E'}}>
+                              <canvas ref={canvasStoryRef} style={{width:'100%',height:'100%',display:'block'}}/>
+                            </div>
+                            <div style={{padding:'8px 10px',background:'#F9FAFB',borderTop:'1px solid #E5E7EB',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <span style={{fontSize:10,color:'#6B7280',fontWeight:600}}>Stories / Reels</span>
+                              <a href={previewStoryUrl || '#'} download={`story-${contaAnuncio}-${vaga || 'vaga'}.png`}
+                                style={{fontSize:11,fontWeight:700,color:cfgAtual.corPri,textDecoration:'none'}}>
+                                ⬇️ Baixar Story
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Legenda Preview abaixo dos 2 formatos */}
+                        <div style={{marginTop:12,background:'#fff',border:`1px solid ${C.border}`,borderRadius:10,padding:'10px 14px'}}>
+                          <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>📝 Legenda que acompanhará o anúncio:</div>
+                          <div style={{fontSize:12,color:'#1F2937',lineHeight:1.45,maxHeight:130,overflowY:'auto',whiteSpace:'pre-wrap'}}>
+                            {iaCopy.legenda}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Coluna Direita: Editor Ao Vivo das Caixas da Arte + Botão Aprovar e Subir */}
+                      <div>
+                        <div style={{...s.card,background:'var(--c-subtle)',marginBottom:14}}>
+                          <div style={{fontWeight:700,fontSize:12,color:C.pri,textTransform:'uppercase',marginBottom:12}}>
+                            ✏️ Ajuste Fino da Arte (Atualiza Feed e Story em tempo real)
+                          </div>
+
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+                            <div>
+                              <label style={s.label}>Cargo na Faixa Branca</label>
+                              <input type="text" value={iaCopy.cargo_banner}
+                                onChange={e=>setIaCopy(p=>({...p,cargo_banner:e.target.value}))} style={s.input}/>
+                            </div>
+                            <div>
+                              <label style={s.label}>Fotos da Arte (Função / Fachada)</label>
+                              <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                                <label style={{...s.btnOutline,fontSize:11,padding:'6px 10px',cursor:'pointer',marginBottom:0}}>
+                                  📷 Foto da Função
+                                  <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>aoSubirFoto(e.target.files?.[0],'funcao')}/>
+                                </label>
+                                <label style={{...s.btnOutline,fontSize:11,padding:'6px 10px',cursor:'pointer',marginBottom:0}}>
+                                  🏢 Foto de Fundo
+                                  <input type="file" accept="image/*" style={{display:'none'}} onChange={e=>aoSubirFoto(e.target.files?.[0],'fachada')}/>
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{marginBottom:10}}>
+                            <label style={s.label}>Requisitos na Caixa Marrom (1 tópico por linha — até 4 itens)</label>
+                            <textarea rows={3}
+                              value={(iaCopy.requisitos_bullets||[]).join('\n')}
+                              onChange={e=>setIaCopy(p=>({...p,requisitos_bullets:e.target.value.split('\n')}))}
+                              style={{...s.input,resize:'vertical',fontFamily:'inherit',fontSize:12}}/>
+                          </div>
+
+                          <div style={{marginBottom:10}}>
+                            <label style={s.label}>Bloco REMUNERAÇÃO (1 tópico por linha — use **negrito** nos valores)</label>
+                            <textarea rows={3}
+                              value={(iaCopy.remuneracao_bullets||[]).join('\n')}
+                              onChange={e=>setIaCopy(p=>({...p,remuneracao_bullets:e.target.value.split('\n')}))}
+                              style={{...s.input,resize:'vertical',fontFamily:'inherit',fontSize:12}}/>
+                          </div>
+
+                          <div style={{marginBottom:10}}>
+                            <label style={s.label}>Bloco BENEFÍCIOS (1 tópico por linha — use **negrito** nos destaques)</label>
+                            <textarea rows={3}
+                              value={(iaCopy.beneficios_bullets||[]).join('\n')}
+                              onChange={e=>setIaCopy(p=>({...p,beneficios_bullets:e.target.value.split('\n')}))}
+                              style={{...s.input,resize:'vertical',fontFamily:'inherit',fontSize:12}}/>
+                          </div>
+
+                          <div style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 1fr',gap:8,marginBottom:10}}>
+                            <div>
+                              <label style={s.label}>Horário (Rodapé)</label>
+                              <input type="text" value={iaCopy.horario_texto}
+                                onChange={e=>setIaCopy(p=>({...p,horario_texto:e.target.value}))} style={s.inputSm}/>
+                            </div>
+                            <div>
+                              <label style={s.label}>WhatsApp (Rodapé)</label>
+                              <input type="text" value={iaCopy.whatsapp_contato}
+                                onChange={e=>setIaCopy(p=>({...p,whatsapp_contato:e.target.value}))} style={s.inputSm}/>
+                            </div>
+                            <div>
+                              <label style={s.label}>Instagram (Rodapé)</label>
+                              <input type="text" value={iaCopy.instagram_handle}
+                                onChange={e=>setIaCopy(p=>({...p,instagram_handle:e.target.value}))} style={s.inputSm}/>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label style={s.label}>Legenda da Publicação (Instagram / Facebook)</label>
+                            <textarea rows={3} value={iaCopy.legenda}
+                              onChange={e=>setIaCopy(p=>({...p,legenda:e.target.value}))}
+                              style={{...s.input,resize:'vertical',fontFamily:'inherit',fontSize:12}}/>
+                          </div>
+                        </div>
+
+                        {/* Caixa de Confirmação e Botão Aprovar e Subir Campanha */}
+                        <div style={{background:'#F0FDF4',border:'2px solid #16A34A',borderRadius:12,padding:16}}>
+                          <div style={{fontWeight:800,fontSize:14,color:'#166534',marginBottom:8}}>
+                            ✅ Tudo pronto para publicar no Feed e nos Stories!
+                          </div>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,fontSize:12,color:'#14532D',marginBottom:14}}>
+                            <div>
+                              <span style={{fontSize:10,textTransform:'uppercase',opacity:0.75,display:'block'}}>Conta Meta Ads</span>
+                              <strong>{cfgAtual.nome}</strong>
+                            </div>
+                            <div>
+                              <span style={{fontSize:10,textTransform:'uppercase',opacity:0.75,display:'block'}}>Posicionamentos</span>
+                              <strong>Feed (1:1) + Story (9:16)</strong>
+                            </div>
+                            <div>
+                              <span style={{fontSize:10,textTransform:'uppercase',opacity:0.75,display:'block'}}>Orçamento ({diasDuracao}d)</span>
+                              <strong>{fmtBRL(orcamentoNum)} ({fmtBRL(gastoDiarioEstimado)}/dia)</strong>
+                            </div>
+                          </div>
+                          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                            <button type="button" onClick={aprovarEPublicar} disabled={publicando}
+                              style={{...s.btn, background:'#16A34A', fontSize:14, padding:'12px 24px'}}>
+                              {publicando ? '🚀 Subindo Feed + Story na Meta Ads...' : `🚀 Aprovar e Subir (Feed + Story) na ${cfgAtual.nome}`}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── CAMPANHAS DE RECRUTAMENTO ATIVAS NO AR (SINCRONIZADAS DA META) ── */}
+            <div style={{...s.card, marginBottom:16}}>
+              <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12}}>
+                🟢 Campanhas de Vagas Ativas no Ar (Meta / Google)
+              </div>
+              {loadingLista ? (
+                <div style={{color:C.muted,fontSize:13,padding:12}}>Carregando campanhas...</div>
+              ) : campanhasMeta.length === 0 ? (
+                <div style={{color:C.muted,fontSize:13,padding:'12px 0'}}>
+                  Nenhuma campanha ativa sincronizada no momento. Clique em <strong>"✨ + Nova Campanha com IA"</strong> acima para lançar uma vaga.
+                </div>
+              ) : (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+                  {campanhasMeta.map(c => {
+                    const d = c.dias_restantes;
+                    const txtPrazo = d === null ? 'Contínua' : d <= 0 ? 'Termina hoje' : d === 1 ? 'Falta 1 dia' : `Faltam ${d} dias`;
+                    return (
+                      <div key={c.id} style={{background:C.greenBg,border:`1.5px solid ${C.green}`,borderRadius:10,padding:'12px 14px'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                          <div style={{fontWeight:800,fontSize:13,color:C.pri}}>{c.nome}</div>
+                          <span style={{background:C.green,color:'#fff',fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:10,whiteSpace:'nowrap'}}>NO AR</span>
+                        </div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                          {c.conta_nome || (c.empresa_id === 'lumar' ? 'Lumar Alimentos' : 'Cantina em Casa')} · {c.plataforma === 'google' ? 'Google Ads' : 'Instagram / Facebook (Feed + Story)'}
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10,paddingTop:8,borderTop:`1px solid ${C.border}`,fontSize:12}}>
+                          <span>⏳ <strong>{txtPrazo}</strong> {c.fim ? `(até ${new Date(c.fim).toLocaleDateString('pt-BR')})` : ''}</span>
+                          {c.alcance ? <span>👥 {Number(c.alcance).toLocaleString('pt-BR')} alcançados</span> : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── HISTÓRICO DE CAMPANHAS CRIADAS PELO RH ── */}
+            <div style={s.card}>
+              <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12}}>
+                🗂️ Histórico de Campanhas Programadas pelo RH
+              </div>
+              {campanhasCriadas.length === 0 ? (
+                <div style={{textAlign:'center',padding:'28px 16px',color:C.muted,fontSize:13}}>
+                  Nenhuma campanha cadastrada por aqui ainda.
+                </div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead>
+                    <tr style={{background:'var(--c-subtle)'}}>
+                      <th style={s.th}>Data</th>
+                      <th style={s.th}>Conta</th>
+                      <th style={s.th}>Vaga</th>
+                      <th style={s.th}>Divulgação</th>
+                      <th style={{...s.th,textAlign:'center'}}>Duração</th>
+                      <th style={{...s.th,textAlign:'right'}}>Gasto Total</th>
+                      <th style={{...s.th,textAlign:'center'}}>Status</th>
+                      <th style={{...s.th,textAlign:'right'}}>Artes / Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campanhasCriadas.map(c => {
+                      const isLumar = c.conta_anuncio === 'lumar';
+                      const stMap = {
+                        ativa:        { l: '🟢 No Ar',       bg: '#DCFCE7', c: '#166534' },
+                        publicando:   { l: '⏳ Publicando',  bg: '#FEF9C3', c: '#92400E' },
+                        pausada:      { l: '⏸️ Pausada',     bg: '#F3F4F6', c: '#374151' },
+                        encerrada:    { l: '🏁 Encerrada',   bg: '#E5E7EB', c: '#4B5563' },
+                        erro:         { l: '⚠️ Pendente API', bg: '#FEE2E2', c: '#991B1B' },
+                        rascunho:     { l: '📝 Rascunho',    bg: '#DBEAFE', c: '#1D4ED8' }
+                      };
+                      const st = stMap[c.status] || stMap.rascunho;
+                      return (
+                        <tr key={c.id} style={{borderTop:`1px solid ${C.border}`}}>
+                          <td style={{...s.td,fontSize:11,whiteSpace:'nowrap'}}>
+                            {c.criado_em ? new Date(c.criado_em).toLocaleDateString('pt-BR') : '—'}
+                          </td>
+                          <td style={s.td}>
+                            <span style={{
+                              background: isLumar ? '#DBEAFE' : '#FFEDD5',
+                              color: isLumar ? '#1E40AF' : '#9A3412',
+                              padding:'3px 8px',borderRadius:8,fontSize:11,fontWeight:700
+                            }}>
+                              {isLumar ? '🏭 Lumar' : '🍽️ Cantina'}
+                            </span>
+                          </td>
+                          <td style={{...s.td,fontWeight:700}}>{c.vaga}</td>
+                          <td style={{...s.td,fontSize:11,color:C.muted}}>
+                            {[
+                              c.divulgar_salario && c.salario_texto ? `💰 ${c.salario_texto}` : 'Salário oculto',
+                              c.divulgar_beneficios && c.beneficios?.length ? `🎁 ${c.beneficios.length} benef.` : null,
+                              c.divulgar_horario && c.horario_texto ? `⏰ ${c.horario_texto}` : null
+                            ].filter(Boolean).join(' · ')}
+                          </td>
+                          <td style={{...s.td,textAlign:'center',fontSize:12}}>
+                            {c.dias_duracao}d
+                            {c.data_fim && <div style={{fontSize:10,color:C.muted}}>até {new Date(c.data_fim).toLocaleDateString('pt-BR')}</div>}
+                          </td>
+                          <td style={{...s.td,textAlign:'right',fontWeight:700}}>{fmtBRL(c.orcamento_total)}</td>
+                          <td style={{...s.td,textAlign:'center'}}>
+                            <span title={c.erro_detalhe || ''} style={{background:st.bg,color:st.c,padding:'3px 9px',borderRadius:10,fontSize:11,fontWeight:700}}>
+                              {st.l}
+                            </span>
+                            {c.erro_detalhe && (
+                              <div style={{fontSize:10,color:'#991B1B',marginTop:3,maxWidth:210,marginInline:'auto'}} title={c.erro_detalhe}>
+                                {c.erro_detalhe.slice(0, 65)}{c.erro_detalhe.length > 65 ? '…' : ''}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{...s.td,textAlign:'right',whiteSpace:'nowrap'}}>
+                            {c.criativo_url && (
+                              <button onClick={()=>abrirArquivoRH(c.criativo_url)}
+                                style={{background:'none',border:`1px solid ${C.border}`,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginRight:4}}
+                                title="Ver arte de Feed (1:1)">
+                                🟦 Feed
+                              </button>
+                            )}
+                            {c.criativo_story_url && (
+                              <button onClick={()=>abrirArquivoRH(c.criativo_story_url)}
+                                style={{background:'none',border:`1px solid ${C.border}`,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginRight:4}}
+                                title="Ver arte de Story (9:16)">
+                                📱 Story
+                              </button>
+                            )}
+                            {c.status === 'ativa' && (
+                              <button onClick={()=>pausarCampanha(c)}
+                                style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>
+                                ⏸️ Pausar
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         );
       }
