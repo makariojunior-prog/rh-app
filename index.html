@@ -195,7 +195,11 @@
       .rh-main [style*="grid-template-columns: 1fr 2fr"],
       .rh-main [style*="grid-template-columns: 2fr 1fr"],
       .rh-main [style*="grid-template-columns: 1fr 3fr"],
-      .rh-main [style*="px 1fr"] { grid-template-columns: minmax(0, 1fr) !important; }
+      .rh-main [style*="px 1fr"],
+      .rh-main [style*="grid-template-columns: 1.15fr 1fr"],
+      .rh-main [style*="grid-template-columns: 1.12fr 0.88fr"],
+      .rh-main [style*="grid-template-columns: 1.4fr 1fr"],
+      .rh-main [style*="grid-template-columns: 1.3fr 1fr 1fr"] { grid-template-columns: minmax(0, 1fr) !important; }
       .rh-main [style*="grid-template-columns: repeat(4"],
       .rh-main [style*="grid-template-columns: repeat(3"],
       .rh-main [style*="grid-template-columns: 1fr 1fr 1fr"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -4741,7 +4745,7 @@
           let curReqY = reqBoxY + (isStory ? 34 : 26);
 
           reqBullets.forEach(item => {
-            const cleanItem = String(item).replace(/^[•\-*]\s*/, '');
+            const cleanItem = String(item).replace(/^(?:[•\-]|\*(?!\*))\s*/, '');
             const lines = parseAndWrapRichLine(ctx, cleanItem, reqMaxW, reqFontSize, fontFam, '500', '700');
             if (curReqY + lines.length * reqLineH > reqBoxY + reqBoxH - 14) return;
             // Bolinha do bullet
@@ -4836,11 +4840,30 @@
             ? iaCopy.beneficios_bullets.filter(Boolean)
             : [];
 
-          let curMainY = mainBoxY + (isStory ? 34 : 24);
           const sectionTitleFont = isStory ? 33 : 29;
-          const bodyFont = isStory ? 25 : 22;
-          const bodyLineH = isStory ? 32 : 27;
+          let bodyFont = isStory ? 25 : 22;
+          let bodyLineH = isStory ? 32 : 27;
           const bodyMaxW = mainBoxW - 88;
+
+          // Altura do conteúdo para uma fonte; usada para encolher a fonte até tudo caber
+          // (antes o último benefício era descartado sem aviso) e para centralizar na caixa
+          // (sem Benefícios não sobra vão vazio embaixo).
+          const alturaSecao = (bullets, fs, lh) => bullets.length === 0 ? 0 :
+            sectionTitleFont + (isStory ? 16 : 10) +
+            bullets.reduce((t, b) => t +
+              parseAndWrapRichLine(ctx, String(b).replace(/^(?:[•\-]|\*(?!\*))\s*/, ''), bodyMaxW, fs, fontFam, '500', '800').length * lh +
+              (isStory ? 6 : 4), 0);
+          const alturaConteudoCom = (fs, lh) => alturaSecao(remBullets, fs, lh) +
+            (remBullets.length && benBullets.length ? (isStory ? 16 : 10) : 0) + alturaSecao(benBullets, fs, lh);
+          const padTopoCaixa = isStory ? 34 : 24;
+          const alturaUtil = mainBoxH - padTopoCaixa - 12;
+          const fonteMinima = isStory ? 18 : 16;
+          while (alturaConteudoCom(bodyFont, bodyLineH) > alturaUtil && bodyFont > fonteMinima) {
+            bodyFont -= 1;
+            bodyLineH = Math.round(bodyFont * 1.25);
+          }
+          const alturaConteudo = alturaConteudoCom(bodyFont, bodyLineH);
+          let curMainY = mainBoxY + Math.max(padTopoCaixa, (mainBoxH - alturaConteudo) / 2);
 
           ctx.save();
           // Seção REMUNERAÇÃO (se houver itens)
@@ -4854,7 +4877,7 @@
 
             ctx.textAlign = 'left';
             remBullets.forEach(b => {
-              const clean = String(b).replace(/^[•\-*]\s*/, '');
+              const clean = String(b).replace(/^(?:[•\-]|\*(?!\*))\s*/, '');
               const lines = parseAndWrapRichLine(ctx, clean, bodyMaxW, bodyFont, fontFam, '500', '800');
               ctx.font = `800 ${bodyFont}px ${fontFam}`;
               ctx.fillStyle = '#2B221E';
@@ -4886,7 +4909,7 @@
 
             ctx.textAlign = 'left';
             benBullets.forEach(b => {
-              const clean = String(b).replace(/^[•\-*]\s*/, '');
+              const clean = String(b).replace(/^(?:[•\-]|\*(?!\*))\s*/, '');
               const lines = parseAndWrapRichLine(ctx, clean, bodyMaxW, bodyFont, fontFam, '500', '800');
               if (curMainY + lines.length * bodyLineH > mainBoxY + mainBoxH - 12) return;
               ctx.font = `800 ${bodyFont}px ${fontFam}`;
@@ -5111,9 +5134,11 @@
               remuneracao_bullets: Array.isArray(copyRecebida.remuneracao_bullets) && copyRecebida.remuneracao_bullets.length
                 ? copyRecebida.remuneracao_bullets
                 : montarRemuneracaoLocal(),
-              beneficios_bullets: Array.isArray(copyRecebida.beneficios_bullets) && copyRecebida.beneficios_bullets.length
-                ? copyRecebida.beneficios_bullets
-                : beneficiosSel,
+              beneficios_bullets: !divulgarBeneficios
+                ? []
+                : Array.isArray(copyRecebida.beneficios_bullets) && copyRecebida.beneficios_bullets.length
+                  ? copyRecebida.beneficios_bullets
+                  : beneficiosSel,
               horario_texto: divulgarHorario ? (copyRecebida.horario_texto || horarioTexto) : '',
               whatsapp_contato: copyRecebida.whatsapp_contato || whatsappContato,
               instagram_handle: copyRecebida.instagram_handle || instagramHandle,
