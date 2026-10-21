@@ -4831,7 +4831,8 @@
           const remBullets = (Array.isArray(iaCopy.remuneracao_bullets) && iaCopy.remuneracao_bullets.length)
             ? iaCopy.remuneracao_bullets.filter(Boolean)
             : [];
-          const benBullets = (Array.isArray(iaCopy.beneficios_bullets) && iaCopy.beneficios_bullets.length)
+          // "Divulgar benefícios" desligado: a arte sai sem o bloco, mesmo que a IA tenha listado.
+          const benBullets = (divulgarBeneficios && Array.isArray(iaCopy.beneficios_bullets) && iaCopy.beneficios_bullets.length)
             ? iaCopy.beneficios_bullets.filter(Boolean)
             : [];
 
@@ -4941,7 +4942,9 @@
           ctx.font = `900 ${isStory ? 26 : 24}px ${fontFam}`;
           ctx.fillText('Horário:', card1X + card1W / 2, footerY + footerH * 0.34);
 
-          const horStr = iaCopy.horario_texto || horarioTexto || 'Segunda à Sexta: 07:30 às 17:30';
+          const horStr = !divulgarHorario
+            ? 'A combinar na entrevista'
+            : (iaCopy.horario_texto || horarioTexto || 'Segunda à Sexta: 07:30 às 17:30');
           let horFont = isStory ? 21 : 19;
           ctx.font = `600 ${horFont}px ${fontFam}`;
           while (ctx.measureText(horStr).width > card1W - 24 && horFont > 13) {
@@ -5111,7 +5114,7 @@
               beneficios_bullets: Array.isArray(copyRecebida.beneficios_bullets) && copyRecebida.beneficios_bullets.length
                 ? copyRecebida.beneficios_bullets
                 : beneficiosSel,
-              horario_texto: copyRecebida.horario_texto || horarioTexto,
+              horario_texto: divulgarHorario ? (copyRecebida.horario_texto || horarioTexto) : '',
               whatsapp_contato: copyRecebida.whatsapp_contato || whatsappContato,
               instagram_handle: copyRecebida.instagram_handle || instagramHandle,
               titulo_link: copyRecebida.titulo_link || `Vaga: ${vaga} — Candidate-se`,
@@ -5157,11 +5160,11 @@
               requisitos_bullets: reqLocal,
               remuneracao_bullets: remLocal,
               beneficios_bullets: divulgarBeneficios ? beneficiosSel : [],
-              horario_texto: horarioTexto,
+              horario_texto: divulgarHorario ? horarioTexto : '',
               whatsapp_contato: whatsappContato,
               instagram_handle: instagramHandle,
               titulo_link: `Vaga: ${vaga} — Envie seu currículo`,
-              legenda: `🚀 VAGA DE EMPREGO: ${vaga.toUpperCase()}!\n\nVenha fazer parte da equipe ${nomeMarca} em ${localTexto || 'Goiânia - GO'}.\n\n📋 Requisitos:\n${reqLocal.map(r => '• ' + r).join('\n')}\n\n${divulgarSalario ? `💰 Remuneração:\n${remLocal.map(r => '• ' + r.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}🎁 Benefícios:\n${beneficiosSel.map(b => '• ' + b.replace(/\*\*/g, '')).join('\n')}\n\n⏰ Horário: ${horarioTexto}\n📲 WhatsApp: ${whatsappContato}\n👉 Candidate-se também em: https://vagas.cantinaemcasa.com`
+              legenda: `🚀 VAGA DE EMPREGO: ${vaga.toUpperCase()}!\n\nVenha fazer parte da equipe ${nomeMarca} em ${localTexto || 'Goiânia - GO'}.\n\n📋 Requisitos:\n${reqLocal.map(r => '• ' + r).join('\n')}\n\n${divulgarSalario ? `💰 Remuneração:\n${remLocal.map(r => '• ' + r.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarBeneficios && beneficiosSel.length ? `🎁 Benefícios:\n${beneficiosSel.map(b => '• ' + b.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarHorario ? `⏰ Horário: ${horarioTexto}\n` : ''}📲 WhatsApp: ${whatsappContato}\n👉 Candidate-se também em: https://vagas.cantinaemcasa.com`
             });
             setAvisoIA(`Prévia montada com o template oficial local (${err.message}).`);
             setPreviaPronta(true);
@@ -5192,6 +5195,11 @@
             '🚀 Aprovar e Publicar (Feed + Story)'
           );
           if (!ok) return;
+          // Proteção contra erro de digitação (ex.: "14000" em vez de "140,00").
+          if (orcamentoNum > 1000 && !await confirmar(
+            `Atenção: o gasto total informado é ${fmtBRL(orcamentoNum)} (≈ ${fmtBRL(gastoDiarioEstimado)} por dia). Confirma esse valor?`,
+            'Confirmar valor alto'
+          )) return;
 
           setPublicando(true);
           onStatusMsg?.(null);
@@ -5729,7 +5737,9 @@
                         erro:         { l: '⚠️ Pendente API', bg: '#FEE2E2', c: '#991B1B' },
                         rascunho:     { l: '📝 Rascunho',    bg: '#DBEAFE', c: '#1D4ED8' }
                       };
-                      const st = stMap[c.status] || stMap.rascunho;
+                      // A Meta encerra sozinha no fim do período; o registro aqui continua 'ativa'.
+                      const encerradaPorData = c.status === 'ativa' && c.data_fim && new Date(c.data_fim) < new Date();
+                      const st = stMap[encerradaPorData ? 'encerrada' : c.status] || stMap.rascunho;
                       return (
                         <tr key={c.id} style={{borderTop:`1px solid ${C.border}`}}>
                           <td style={{...s.td,fontSize:11,whiteSpace:'nowrap'}}>
@@ -5782,7 +5792,7 @@
                                 📱 Story
                               </button>
                             )}
-                            {c.status === 'ativa' && (
+                            {c.status === 'ativa' && !encerradaPorData && (
                               <button onClick={()=>pausarCampanha(c)}
                                 style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer'}}>
                                 ⏸️ Pausar

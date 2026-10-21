@@ -56,6 +56,19 @@ const CONTAS_META: Record<'cantina' | 'lumar', {
   },
 }
 
+// Token de escrita da Meta para a conta (mesma ordem em publicar e pausar)
+function resolverTokenMeta(contaKey: 'cantina' | 'lumar', credencialRef?: string | null): string {
+  const sufixo = contaKey === 'lumar' ? '_LUMAR' : '_CANTINA'
+  return (
+    Deno.env.get(`META_ACCESS_TOKEN_ESCRITA${sufixo}`) ||
+    Deno.env.get('META_ACCESS_TOKEN_ESCRITA') ||
+    (credencialRef ? Deno.env.get(credencialRef) : '') ||
+    Deno.env.get(`META_ACCESS_TOKEN${sufixo}`) ||
+    Deno.env.get('META_ACCESS_TOKEN') ||
+    ''
+  )
+}
+
 // Redige tokens de qualquer mensagem de erro antes de devolver ou salvar no banco
 function redigirSegredos(msg: string, segredos: string[]): string {
   let out = msg.replace(/access_token=[^&\s"']+/gi, 'access_token=[REDACTED]')
@@ -166,14 +179,17 @@ function gerarCopyFallback(params: {
     remuneracao_bullets.push(`**Salário compatível com a função (CLT)** + possibilidade de gratificações por desempenho.`)
   }
 
-  // Benefícios (com suporte a **negrito** no estilo oficial)
-  const beneficios_bullets = params.divulgar_beneficios && params.beneficios.length > 0
-    ? params.beneficios
-    : [
-        `**Vale Alimentação de R$ 300,00**, concedido após o período de experiência, conforme critérios e regras da empresa;`,
-        `**Vale-transporte**;`,
-        `**Alimentação completa na empresa:** café da manhã, almoço e lanche da tarde.`,
-      ]
+  // Benefícios (com suporte a **negrito** no estilo oficial). Se o RH escolheu não divulgar,
+  // a arte e a legenda saem sem o bloco (antes caíam na lista padrão mesmo assim).
+  const beneficios_bullets = !params.divulgar_beneficios
+    ? []
+    : params.beneficios.length > 0
+      ? params.beneficios
+      : [
+          `**Vale Alimentação de R$ 300,00**, concedido após o período de experiência, conforme critérios e regras da empresa;`,
+          `**Vale-transporte**;`,
+          `**Alimentação completa na empresa:** café da manhã, almoço e lanche da tarde.`,
+        ]
 
   const linhasLegenda = [
     `🚀 VAGA DE EMPREGO: ${params.vaga.toUpperCase()}!`,
@@ -210,7 +226,7 @@ function gerarCopyFallback(params: {
     requisitos_bullets,
     remuneracao_bullets,
     beneficios_bullets,
-    horario_texto: params.horario_texto || 'Segunda à Sexta: 07:30 às 17:30',
+    horario_texto: params.divulgar_horario ? (params.horario_texto || 'Segunda à Sexta: 07:30 às 17:30') : '',
     whatsapp_contato: params.whatsapp_contato || '62 9 9330-9428',
     instagram_handle: params.instagram_handle || (params.conta === 'lumar' ? 'lumaralimentos' : 'cantina.em.casa'),
     titulo_link: `Vaga: ${params.vaga} — Envie seu currículo`,
@@ -241,6 +257,15 @@ Deno.serve(async (req: Request) => {
     const { data: isMember } = await callerClient.rpc('rh_is_member')
     if (!isMember) {
       return json({ error: 'Apenas membros autorizados do RH podem gerenciar campanhas.' }, 403)
+    }
+    // Publicar gasta verba de anúncio: exige a mesma liberação da tela (admin ou página
+    // 'recrutamento'), não só ser membro do RH.
+    const { data: perfil } = await callerClient
+      .from('perfis').select('role, paginas').eq('id', caller.id).maybeSingle()
+    const podeRecrutamento = perfil?.role === 'admin' ||
+      (Array.isArray(perfil?.paginas) && perfil.paginas.includes('recrutamento'))
+    if (!podeRecrutamento) {
+      return json({ error: 'Seu acesso não inclui o módulo de Recrutamento.' }, 403)
     }
 
     const body = await req.json().catch(() => null)
@@ -313,10 +338,14 @@ Deno.serve(async (req: Request) => {
             divulgar_salario
               ? `- Remuneração a divulgar: Salário base=${salario_texto || 'não informado'} | Gratificação fixa=${gratificacao_fixa || 'não informada'} | Gratificações adicionais=${gratificacoes_adicionais || 'não informada'}`
               : `- Remuneração: NÃO expor valores numéricos (indicar salário compatível com a função + pacote CLT).`,
-            divulgar_beneficios && beneficios.length
-              ? `- Benefícios selecionados: ${beneficios.join(' | ')}`
-              : `- Benefícios: usar lista padrão da empresa.`,
-            `- Horário de trabalho: ${horario_texto}`,
+            !divulgar_beneficios
+              ? `- Benefícios: NÃO divulgar. Devolva "beneficios_bullets" como lista vazia e não cite benefícios na legenda.`
+              : beneficios.length
+                ? `- Benefícios selecionados: ${beneficios.join(' | ')}`
+                : `- Benefícios: usar lista padrão da empresa.`,
+            divulgar_horario
+              ? `- Horário de trabalho: ${horario_texto}`
+              : `- Horário: NÃO divulgar (não cite horário na legenda).`,
             requisitos_texto ? `- Requisitos informados pelo RH: ${requisitos_texto}` : `- Requisitos: elabore 4 tópicos objetivos e profissionais típicos para a função de ${vaga}.`,
             observacoes_ia ? `- Instruções adicionais do recrutador: ${observacoes_ia}` : ``,
             ``,
@@ -392,10 +421,12 @@ Deno.serve(async (req: Request) => {
                 remuneracao_bullets: Array.isArray(parsed.remuneracao_bullets) && parsed.remuneracao_bullets.length
                   ? parsed.remuneracao_bullets.map(String).slice(0, 4)
                   : fallback.remuneracao_bullets,
-                beneficios_bullets: Array.isArray(parsed.beneficios_bullets) && parsed.beneficios_bullets.length
-                  ? parsed.beneficios_bullets.map(String).slice(0, 5)
-                  : fallback.beneficios_bullets,
-                horario_texto: horario_texto || fallback.horario_texto,
+                beneficios_bullets: !divulgar_beneficios
+                  ? []
+                  : Array.isArray(parsed.beneficios_bullets) && parsed.beneficios_bullets.length
+                    ? parsed.beneficios_bullets.map(String).slice(0, 5)
+                    : fallback.beneficios_bullets,
+                horario_texto: fallback.horario_texto,
                 whatsapp_contato: whatsapp_contato || fallback.whatsapp_contato,
                 instagram_handle: instagram_handle || fallback.instagram_handle,
                 titulo_link: String(parsed.titulo_link || fallback.titulo_link).slice(0, 65),
@@ -563,14 +594,7 @@ Deno.serve(async (req: Request) => {
         .eq('id_externo', contaCfg.conta_id_externo)
         .maybeSingle()
 
-      const sufixo = contaKey === 'lumar' ? '_LUMAR' : '_CANTINA'
-      const metaToken =
-        Deno.env.get(`META_ACCESS_TOKEN_ESCRITA${sufixo}`) ||
-        Deno.env.get('META_ACCESS_TOKEN_ESCRITA') ||
-        (mktConta?.credencial_ref ? Deno.env.get(mktConta.credencial_ref) : '') ||
-        Deno.env.get(`META_ACCESS_TOKEN${sufixo}`) ||
-        Deno.env.get('META_ACCESS_TOKEN') ||
-        ''
+      const metaToken = resolverTokenMeta(contaKey, mktConta?.credencial_ref)
 
       const graphVersion = Deno.env.get('META_GRAPH_VERSION') || 'v23.0'
 
@@ -653,6 +677,24 @@ Deno.serve(async (req: Request) => {
         return j
       }
 
+      // Ajuste direto num objeto da Meta (campanha), fora do /act_
+      const atualizarObjetoMeta = async (objectId: string, params: Record<string, string>) => {
+        const r = await fetch(`https://graph.facebook.com/${graphVersion}/${objectId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ ...params, access_token: metaToken }).toString(),
+        })
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok || j?.error) {
+          const detalhe = j?.error?.error_user_msg || j?.error?.message || JSON.stringify(j)
+          throw new Error(`Meta API (${objectId}): ${redigirSegredos(String(detalhe), [metaToken])}`)
+        }
+        return j
+      }
+
+      // A campanha nasce PAUSADA e só é ativada depois que conjunto, criativos e anúncios
+      // existem: uma falha no meio não deixa nada veiculando nem gastando.
+      let campaignId = ''
       try {
         // Passo 4.1: Upload da imagem de Feed 1:1 (/adimages)
         const imgFeedRes = await postMeta('adimages', { bytes: imagem_feed_b64 })
@@ -676,26 +718,17 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Passo 4.2: Criar a Campanha (/campaigns)
-        let campaignId = ''
-        try {
-          const campRes = await postMeta('campaigns', {
-            name: nome_campanha,
-            objective: 'OUTCOME_TRAFFIC',
-            status: 'ACTIVE',
-            special_ad_categories: JSON.stringify(['EMPLOYMENT']),
-            special_ad_category_country: JSON.stringify(['BR']),
-          })
-          campaignId = String(campRes.id)
-        } catch (_errEmp) {
-          const campRes = await postMeta('campaigns', {
-            name: nome_campanha,
-            objective: 'OUTCOME_TRAFFIC',
-            status: 'ACTIVE',
-            special_ad_categories: JSON.stringify([]),
-          })
-          campaignId = String(campRes.id)
-        }
+        // Passo 4.2: Criar a Campanha (/campaigns). Anúncio de vaga é categoria especial
+        // EMPLOYMENT na política da Meta; não há mais "tentar de novo sem a categoria" —
+        // isso arriscava restrição da conta de anúncios inteira.
+        const campRes = await postMeta('campaigns', {
+          name: nome_campanha,
+          objective: 'OUTCOME_TRAFFIC',
+          status: 'PAUSED',
+          special_ad_categories: JSON.stringify(['EMPLOYMENT']),
+          special_ad_category_country: JSON.stringify(['BR']),
+        })
+        campaignId = String(campRes.id)
 
         // Passo 4.3: Criar Conjunto de Anúncios (/adsets) cobrindo Feed e Stories em Goiânia e Região
         const lifetimeBudgetCents = String(Math.round(orcamento_total * 100))
@@ -798,6 +831,9 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        // Passo 4.6: tudo criado — ativa a campanha
+        await atualizarObjetoMeta(campaignId, { status: 'ACTIVE' })
+
         // Passo 5: Atualiza rh_campanhas_criadas como 'ativa'
         const { data: campAtualizada } = await admin
           .from('rh_campanhas_criadas')
@@ -899,7 +935,15 @@ Deno.serve(async (req: Request) => {
           campanha: campAtualizada,
         })
       } catch (errMeta) {
-        const msgLimpa = redigirSegredos(String(errMeta), [metaToken])
+        let msgLimpa = redigirSegredos(String(errMeta), [metaToken])
+        // Remove a campanha incompleta (estava pausada) para não sobrar lixo na conta.
+        if (campaignId) {
+          try {
+            await atualizarObjetoMeta(campaignId, { status: 'DELETED' })
+          } catch (eDel) {
+            msgLimpa += ` | Campanha ${campaignId} ficou pausada na Meta e não pôde ser excluída: ${redigirSegredos(String(eDel), [metaToken])}`
+          }
+        }
         await admin
           .from('rh_campanhas_criadas')
           .update({
@@ -943,13 +987,13 @@ Deno.serve(async (req: Request) => {
       if (!camp) return json({ error: 'Campanha não encontrada.' }, 404)
 
       const contaKey: 'cantina' | 'lumar' = camp.conta_anuncio === 'lumar' ? 'lumar' : 'cantina'
-      const sufixo = contaKey === 'lumar' ? '_LUMAR' : '_CANTINA'
-      const metaToken =
-        Deno.env.get(`META_ACCESS_TOKEN_ESCRITA${sufixo}`) ||
-        Deno.env.get('META_ACCESS_TOKEN_ESCRITA') ||
-        Deno.env.get(`META_ACCESS_TOKEN${sufixo}`) ||
-        Deno.env.get('META_ACCESS_TOKEN') ||
-        ''
+      const { data: mktContaP } = await admin
+        .from('mkt_contas').select('credencial_ref')
+        .eq('plataforma', 'meta').eq('id_externo', camp.conta_id_externo).maybeSingle()
+      const metaToken = resolverTokenMeta(contaKey, mktContaP?.credencial_ref)
+      if (camp.meta_campaign_id && !metaToken) {
+        return json({ error: 'Token da Meta não configurado: não foi possível pausar a campanha na Meta.' }, 500)
+      }
       const graphVersion = Deno.env.get('META_GRAPH_VERSION') || 'v23.0'
 
       if (camp.meta_campaign_id && metaToken) {
