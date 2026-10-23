@@ -647,8 +647,10 @@
             const {data:colabs} = await _supa.from('colaboradores').select('id,nome,funcao,admissao').eq('empresa_id',empresaId).eq('ativo',true).gte('admissao',desde).order('admissao',{ascending:false});
             if(!colabs?.length) return;
             const {data:docs} = await _supa.from('colaborador_documentos').select('colaborador_id,tipo_id').in('colaborador_id',colabs.map(c=>c.id));
+            const {data:dispensas} = await _supa.from('colaborador_documentos_dispensas').select('colaborador_id,tipo_id').in('colaborador_id',colabs.map(c=>c.id));
             const tem = {};
             (docs||[]).forEach(d=>{ (tem[d.colaborador_id]=tem[d.colaborador_id]||new Set()).add(d.tipo_id); });
+            (dispensas||[]).forEach(d=>{ (tem[d.colaborador_id]=tem[d.colaborador_id]||new Set()).add(d.tipo_id); });
             setDocsPendentes(colabs.map(c=>({...c, faltam:tipos.filter(t=>!tem[c.id]?.has(t.id)).map(t=>t.nome)})).filter(c=>c.faltam.length>0));
           })().catch(()=>{});
         },[empresaId]);
@@ -1676,6 +1678,7 @@
       function DocumentosColaborador({ empresaId, colab }) {
         const [tipos, setTipos] = useState([]);
         const [docs, setDocs] = useState([]);
+        const [dispensas, setDispensas] = useState([]);
         const [loading, setLoading] = useState(true);
         const [subindo, setSubindo] = useState(null);
         const [gerenciar, setGerenciar] = useState(false);
@@ -1686,9 +1689,10 @@
           setLoading(true);
           const t = await _supa.from('tipos_documento_colab').select('*').eq('empresa_id',empresaId).eq('ativo',true).order('ordem').order('nome');
           const d = await _supa.from('colaborador_documentos').select('*').eq('colaborador_id',colab.id).order('created_at',{ascending:false});
+          const dp = await _supa.from('colaborador_documentos_dispensas').select('*').eq('colaborador_id',colab.id);
           const err = t.error||d.error;
           setErroSql(err ? err.message : null);
-          setTipos(t.data||[]); setDocs(d.data||[]); setLoading(false);
+          setTipos(t.data||[]); setDocs(d.data||[]); setDispensas(dp.data||[]); setLoading(false);
         };
         useEffect(()=>{ carregar(); },[colab.id,empresaId]);
 
@@ -1712,6 +1716,19 @@
           await _supa.from('colaborador_documentos').delete().eq('id',d.id);
           await removerArquivoRH(d.arquivo_path); carregar();
         };
+        const dispensar = async (tipo) => {
+          const resposta = window.prompt(`Por que "${tipo.nome}" não se aplica a ${colab.nome}? (opcional)`,'');
+          if(resposta===null) return; // cancelou
+          const motivo = resposta.trim()||null;
+          const {error} = await _supa.from('colaborador_documentos_dispensas').insert({
+            empresa_id:empresaId, colaborador_id:colab.id, tipo_id:tipo.id, motivo,
+          });
+          if(error){ toast('Erro ao marcar como não aplicável: '+error.message,'error'); return; }
+          toast('Marcado como não aplicável.'); carregar();
+        };
+        const reativarDispensa = async (disp) => {
+          await _supa.from('colaborador_documentos_dispensas').delete().eq('id',disp.id); carregar();
+        };
         const addTipo = async () => {
           if(!novoTipo.nome.trim()) return;
           const {error} = await _supa.from('tipos_documento_colab').insert({
@@ -1733,9 +1750,10 @@
         };
 
         const docsDoTipo = t => docs.filter(d=>d.tipo_id===t.id);
+        const dispensaDoTipo = t => dispensas.find(d=>d.tipo_id===t.id);
         const avulsos = docs.filter(d=>!d.tipo_id || !tipos.some(t=>t.id===d.tipo_id));
         const obrig = tipos.filter(t=>t.obrigatorio);
-        const okObrig = obrig.filter(t=>docsDoTipo(t).length>0).length;
+        const okObrig = obrig.filter(t=>docsDoTipo(t).length>0||dispensaDoTipo(t)).length;
         const btnMini = {...s.btnOutline,padding:"2px 10px",fontSize:11};
         const LinhaArq = ({d}) => (
           <span style={{display:"inline-flex",gap:4,alignItems:"center",marginRight:8}}>
@@ -1758,21 +1776,31 @@
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {tipos.map(t=>{
                   const arqs = docsDoTipo(t);
+                  const disp = dispensaDoTipo(t);
                   return (
-                    <div key={t.id} style={{padding:"8px 12px",borderRadius:7,background:arqs.length?"#F0FDF4":"var(--c-subtle)",border:"1px solid "+(arqs.length?C.green:C.border)}}>
+                    <div key={t.id} style={{padding:"8px 12px",borderRadius:7,background:arqs.length?"#F0FDF4":disp?"#F1F5F9":"var(--c-subtle)",border:"1px solid "+(arqs.length?C.green:disp?C.border:C.border)}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span style={{fontSize:13,fontWeight:500,color:"#374151"}}>
-                          {arqs.length?'✅':'⬜'} {t.nome}
+                          {arqs.length?'✅':disp?'➖':'⬜'} {t.nome}
                           {t.condicao && <span style={{fontSize:11,color:C.muted,marginLeft:6}}>({t.condicao})</span>}
                           {!t.obrigatorio && <span style={{fontSize:10,color:C.muted,marginLeft:6}}>opcional</span>}
                         </span>
-                        <label style={{...btnMini,cursor:"pointer"}}>
-                          {subindo===t.id?'Enviando...':'⬆️ Anexar'}
-                          <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={subindo===t.id}
-                            onChange={e=>{ anexar(t,e.target.files[0]); e.target.value=''; }}/>
-                        </label>
+                        {!arqs.length && !disp && (
+                          <div style={{display:"flex",gap:6}}>
+                            <label style={{...btnMini,cursor:"pointer"}}>
+                              {subindo===t.id?'Enviando...':'⬆️ Anexar'}
+                              <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={subindo===t.id}
+                                onChange={e=>{ anexar(t,e.target.files[0]); e.target.value=''; }}/>
+                            </label>
+                            <button type="button" style={btnMini} onClick={()=>dispensar(t)} title="Marcar que este colaborador não precisa deste documento">➖ Não se aplica</button>
+                          </div>
+                        )}
+                        {disp && !arqs.length && (
+                          <button type="button" style={btnMini} onClick={()=>reativarDispensa(disp)} title="Voltar a exigir/permitir anexar este documento">↩️ Reativar</button>
+                        )}
                       </div>
                       {arqs.length>0 && <div style={{marginTop:6}}>{arqs.map(d=><LinhaArq key={d.id} d={d}/>)}</div>}
+                      {disp && !arqs.length && <div style={{fontSize:11,color:C.muted,marginTop:4,fontStyle:"italic"}}>Não se aplica{disp.motivo?`: ${disp.motivo}`:''}</div>}
                     </div>
                   );
                 })}
@@ -7742,6 +7770,129 @@
       // colaborativos. Independente de Exames (usa suas próprias tabelas
       // normas_sst / normas_destaques).
       // ============================================================
+      // ---- Documentos legais/SST da empresa (PGR, PCMSO, LTCAT, licenças, relatórios de clínica) ----
+      const CATEGORIAS_DOC_LEGAL = [
+        {v:'PGR', ico:'📋'}, {v:'PCMSO', ico:'🩺'}, {v:'LTCAT', ico:'🧪'},
+        {v:'Licença Ambiental', ico:'🏭'}, {v:'Relatório Psicossocial', ico:'🧠'},
+        {v:'AEP', ico:'📐'}, {v:'Outro', ico:'📄'},
+      ];
+      function DocumentosLegaisEmpresa({ empresaId }) {
+        const [lista, setLista] = React.useState([]);
+        const [loading, setLoading] = React.useState(true);
+        const [erro, setErro] = React.useState(null);
+        const [subindo, setSubindo] = React.useState(false);
+        const VAZIO_DOC_LEGAL = {categoria:'PGR', titulo:'', validade:'', observacoes:''};
+        const [form, setForm] = React.useState(VAZIO_DOC_LEGAL);
+        const [arquivo, setArquivo] = React.useState(null);
+        const [aberto, setAberto] = React.useState(false);
+        const btnMini = {...s.btnOutline,padding:'3px 10px',fontSize:11};
+
+        const carregar = async () => {
+          if(!empresaId) return;
+          setLoading(true);
+          const {data,error} = await _supa.from('documentos_legais_empresa').select('*').eq('empresa_id',empresaId).order('categoria').order('created_at',{ascending:false});
+          setErro(error?error.message:null);
+          setLista(data||[]);
+          setLoading(false);
+        };
+        React.useEffect(()=>{ carregar(); },[empresaId]);
+
+        const enviar = async () => {
+          if(!arquivo){ toast('Selecione um arquivo.','error'); return; }
+          if(!form.titulo.trim()){ toast('Dê um título ao documento.','error'); return; }
+          setSubindo(true);
+          const path = `${empresaId}/legais/${Date.now()}_${nomeArquivoSeguro(arquivo.name)}`;
+          const err = await enviarArquivoRH(path, arquivo);
+          if(err){ setSubindo(false); toast('Erro ao enviar: '+err.message,'error'); return; }
+          const {data:{session}} = await _supa.auth.getSession();
+          const {error} = await _supa.from('documentos_legais_empresa').insert({
+            empresa_id:empresaId, categoria:form.categoria, titulo:form.titulo.trim(),
+            arquivo_path:path, arquivo_nome:arquivo.name, validade:form.validade||null,
+            observacoes:form.observacoes.trim()||null, created_by: session?.user?.email||null,
+          });
+          setSubindo(false);
+          if(error){ await removerArquivoRH(path); toast('Erro ao registrar: '+error.message,'error'); return; }
+          toast('Documento salvo.');
+          setForm(p=>({...VAZIO_DOC_LEGAL,categoria:p.categoria})); setArquivo(null); setAberto(false);
+          carregar();
+        };
+        const remover = async (d) => {
+          if(!await confirmar(`Remover "${d.titulo}"?`,'Remover documento')) return;
+          await _supa.from('documentos_legais_empresa').delete().eq('id',d.id);
+          await removerArquivoRH(d.arquivo_path); carregar();
+        };
+
+        const hoje = new Date().toISOString().slice(0,10);
+        const em30d = new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+        const vencido = v => !!v && v < hoje;
+        const vencendo = v => !!v && !vencido(v) && v <= em30d;
+
+        return (
+          <div style={{...s.card, marginBottom:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <div style={{fontWeight:700,color:C.pri,fontSize:13,textTransform:'uppercase',letterSpacing:'0.05em'}}>📁 Documentos Legais da Empresa (PGR, PCMSO, LTCAT, licenças, relatórios da clínica...)</div>
+              <button type="button" style={btnMini} onClick={()=>setAberto(a=>!a)}>{aberto?'Fechar':'➕ Novo documento'}</button>
+            </div>
+            {erro && <div style={{padding:'8px 12px',borderRadius:6,background:'#FEE2E2',color:'#991B1B',fontSize:12,marginBottom:10}}>❌ {erro} — rode a migration <code>supabase/migrations/20261023120000_documentos_legais_empresa.sql</code> no Supabase.</div>}
+            {aberto && (
+              <div style={{padding:12,borderRadius:8,border:'1px dashed '+C.border,marginBottom:12}}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+                  <div>
+                    <label style={s.label}>Categoria</label>
+                    <select value={form.categoria} onChange={e=>setForm(p=>({...p,categoria:e.target.value}))} style={s.inputSm}>
+                      {CATEGORIAS_DOC_LEGAL.map(c=><option key={c.v} value={c.v}>{c.ico} {c.v}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={s.label}>Validade / renovação (opcional)</label>
+                    <input type="date" value={form.validade} onChange={e=>setForm(p=>({...p,validade:e.target.value}))} style={s.inputSm}/>
+                  </div>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <label style={s.label}>Título *</label>
+                    <input type="text" value={form.titulo} onChange={e=>setForm(p=>({...p,titulo:e.target.value}))} placeholder="Ex: PGR 2026 - Cantina em Casa" style={s.inputSm}/>
+                  </div>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <label style={s.label}>Observações (opcional)</label>
+                    <input type="text" value={form.observacoes} onChange={e=>setForm(p=>({...p,observacoes:e.target.value}))} style={s.inputSm}/>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+                  <input type="file" accept="application/pdf,image/*" onChange={e=>setArquivo(e.target.files[0]||null)} style={{fontSize:12}}/>
+                  <button type="button" style={s.btn} disabled={subindo} onClick={enviar}>{subindo?'Enviando...':'💾 Salvar'}</button>
+                </div>
+              </div>
+            )}
+            {loading ? <div style={{color:C.muted,fontSize:12}}>Carregando...</div> : lista.length===0 ? (
+              <div style={{color:C.muted,fontSize:13}}>Nenhum documento cadastrado ainda. Use "➕ Novo documento" para anexar o PGR, PCMSO, LTCAT, licenças e outros relatórios.</div>
+            ) : (
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {lista.map(d=>{
+                  const cat = CATEGORIAS_DOC_LEGAL.find(c=>c.v===d.categoria)||{ico:'📄'};
+                  return (
+                    <div key={d.id} style={{padding:'8px 12px',borderRadius:7,background:'var(--c-subtle)',border:'1px solid '+C.border,display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:'#374151'}}>{cat.ico} {d.titulo} <span style={{fontSize:10,color:C.muted,fontWeight:400}}>({d.categoria})</span></div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+                          {d.validade && <span style={{color:vencido(d.validade)?C.danger:vencendo(d.validade)?'#B45309':C.muted,fontWeight:(vencido(d.validade)||vencendo(d.validade))?700:400}}>
+                            {vencido(d.validade)?'⚠️ Venceu em ':vencendo(d.validade)?'⏰ Vence em ':'Validade: '}{fmtDate(d.validade)}
+                          </span>}
+                          {d.observacoes && <span style={{marginLeft:8}}>{d.observacoes}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:6,flexShrink:0}}>
+                        <button type="button" style={{...btnMini,color:'#166534'}} onClick={()=>abrirArquivoRH(d.arquivo_path)}>📎 Abrir</button>
+                        <button type="button" style={{...btnMini,color:'#991B1B'}} onClick={()=>remover(d)}>✕</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{fontSize:11,color:C.muted,marginTop:8}}>🔒 Arquivos ficam em bucket privado, visível apenas para quem tem acesso ao RH.</div>
+          </div>
+        );
+      }
+
       function NormasPage({ empresaId }) {
         const [normas, setNormas] = React.useState([]);
         const [loadingNormas, setLoadingNormas] = React.useState(false);
@@ -7836,6 +7987,8 @@
               <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📕 Normas & NRs</div>
               <div style={{fontSize:13,color:C.muted}}>Biblioteca de normas regulamentadoras e demais obrigações legais, com leitura por parágrafo e destaques</div>
             </div>
+
+            <DocumentosLegaisEmpresa empresaId={empresaId}/>
 
             {erroNormas&&(
               <div style={{...s.warnBox,marginBottom:14}}>

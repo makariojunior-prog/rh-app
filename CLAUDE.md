@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index.html`
-(~11.250 linhas, 798 KB). Interface e lógica em português (BR).
+(~13.260 linhas, 917 KB). Interface e lógica em português (BR).
 
 ## ⚠️ Como trabalhar no index.html
 
@@ -12,16 +12,17 @@ SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index
 - Linhas abaixo são aproximadas (o arquivo cresce) — confirme com Grep antes de ler.
 - Edições: faça `Edit` pontual; não reescreva blocos grandes.
 
-Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 184–440 (`fmtBRL`, `fmtDate`,
-`maskCPF`, `validateCPF`, helpers de documentos/termos `enviarArquivoRH`/`preencherTermo` ~200–260,
-`parseCSV` 266, `parsePontoDetalhado` 303, `upsertRegistrosPonto` 329, `calcINSS` 408, `calcFGTS`,
-`calcPericulosidade`) · `DashboardPage` 481 · `AjudaPage` 1107 · `LoginPage` 1356 ·
-`DocumentosColaborador` 1612 · `ColaboradoresPage` 1752 · `AcessosPage` 2717 · `AtestadosPage` 3060 ·
-`FeriasPage` 3276 · `RecrutamentoPage` 3430 · `AdiantamentosPage` 4001 · `GratificacoesTab` 4489 ·
-`RelatoriosPage` 4843 · `ComprasPage` 5230 · `FuncoesPage` 5538 · `NormasPage` 5905 ·
-`ExamesPage` 6207 · `PontoPage` 7486 · `TermosPage` 7846 · `FolhaPage` 8106
-(`calcularColab` ~8431) · `PainelColaborador` 9359 · `OrcamentoPage` 9501 ·
-`ConfiguracoesPage` 9673 · `ComissoesPage` 9727 · `App()` 10184 (login, sidebar, roteamento, VT).
+Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 214–535 (`fmtBRL`, `fmtDate`,
+`maskCPF`, `validateCPF`, helpers de documentos/termos `enviarArquivoRH`/`preencherTermo` ~264–328,
+`parseCSV` 328, `parsePontoDetalhado` 365, `upsertRegistrosPonto` 391, `calcINSS` 470, `calcFGTS`,
+`calcPericulosidade`) · `DashboardPage` 543 · `AjudaPage` 1173 · `LoginPage` 1422 ·
+`DocumentosColaborador` 1678 · `ColaboradoresPage` 1844 · `AcessosPage` 2810 · `AtestadosPage` 3153 ·
+`FeriasPage` 3369 · `RecrutamentoPage` 3523 (`CampanhasRecrutamentoTab` 4378) ·
+`AdiantamentosPage` 5869 · `GratificacoesTab` 6357 · `RelatoriosPage` 6711 · `ComprasPage` 7098 ·
+`FuncoesPage` 7406 · `DocumentosLegaisEmpresa` 7779 · `NormasPage` 7896 · `ExamesPage` 8200 ·
+`PontoPage` 9479 · `TermosPage` 9839 · `FolhaPage` 10099 (`calcularColab` ~10424) ·
+`PainelColaborador` 11352 · `OrcamentoPage` 11494 · `ConfiguracoesPage` 11666 ·
+`ComissoesPage` 11720 · `App()` 12177 (login, sidebar, roteamento, VT).
 
 Vagas públicas: `vagas/index.html` (candidatos anônimos → tabela `candidatos` + bucket
 `curriculos`). Migrations SQL do RH em `sql/`; edge function em `supabase/functions/rh-usuarios`.
@@ -70,3 +71,20 @@ adicionou/removeu mais de ~100 linhas no `index.html`, rode** `Grep "^\s*functio
 `index.html`, compare com o mapa e, se alguma âncora estiver a mais de ~150 linhas do valor
 registrado, **avise o usuário** (uma frase) e ofereça atualizar o mapa e o total de linhas.
 Se este arquivo passar de ~80 linhas, avise também.
+
+## Supabase: GRANT explícito em tabelas novas (desde 30/10/2026)
+
+O Supabase deixou de conceder acesso à API de Dados (supabase-js, PostgREST, GraphQL) automaticamente a tabelas novas em `public`. Sem GRANT a API devolve "permission denied". Tabelas anteriores a essa data não mudam. Vale também para migrations que recriam o schema (projeto novo, branch de preview, `supabase db reset`).
+
+**Regra:** toda migration que cria tabela ou view em `public` traz os GRANTs na mesma migration.
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.minha_tabela TO authenticated, service_role;
+-- view: GRANT SELECT ON public.minha_view TO authenticated, service_role;
+-- só backend: REVOKE ALL ON public.minha_tabela FROM PUBLIC, anon, authenticated;
+--             GRANT ALL ON public.minha_tabela TO service_role;
+```
+
+- Não conceder nada a `anon`, a menos que a leitura pública seja intencional (a RLS continua sendo a proteção de linha).
+- Funções: `REVOKE ALL ... FROM PUBLIC` e `GRANT EXECUTE` só a quem precisa.
+- Se a migration antiga foi escrita sem GRANT e o schema for recriado, rode um GRANT em lote nas tabelas existentes.
