@@ -179,6 +179,11 @@
     html.dark .feriado-col { background: var(--c-feriado) !important; }
     pre { white-space: pre-wrap; word-break: break-all; }
     /* Celular: menu lateral vira gaveta aberta pelo botão ☰ (antes ocupava meia tela fixa). */
+    /* Barra de notícias do Comercial: a faixa tem o conteúdo duplicado e anda metade. */
+    @keyframes rh-ticker-rolar { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .rh-ticker-faixa { animation: rh-ticker-rolar var(--ticker-duracao, 60s) linear infinite; }
+    .rh-ticker-faixa:hover { animation-play-state: paused; }
+    @media (prefers-reduced-motion: reduce) { .rh-ticker-faixa { animation: none; } }
     .rh-menu-btn { display: none; }
     @media (max-width: 768px) {
       .rh-menu-btn { display: inline-flex; }
@@ -12174,6 +12179,80 @@
       );
     }
 
+    const NOTICIA_CATEGORIAS={
+      negocio:{rotulo:"Negócios",cor:"#34d399"}, visita:{rotulo:"Visitas",cor:"#fbbf24"},
+      problema:{rotulo:"Atenção",cor:"#f87171"}, logistica:{rotulo:"Logística",cor:"#38bdf8"},
+      varejo:{rotulo:"Varejo",cor:"#fb923c"}, demanda:{rotulo:"Demanda",cor:"#c084fc"},
+      destaque:{rotulo:"Destaque",cor:"#fde047"}
+    };
+
+    // Barra de notícias do Comercial (mesma do CRM). Lê a RPC crm_noticias_feed, liberada a membros do RH.
+    // Some quando não há notícia publicada. Atenção/problema ganha selo vermelho e título em negrito.
+    function NoticiasTicker(){
+      const [itens,setItens]=useState([]);
+      const [aberto,setAberto]=useState(false);
+      const carregar=useCallback(()=>{
+        _supa.rpc("crm_noticias_feed",{p_limite:15}).then(({data,error})=>{ if(!error) setItens(data||[]); });
+      },[]);
+      useEffect(()=>{
+        carregar();
+        const t=setInterval(()=>{ if(document.visibilityState==="visible") carregar(); },15*60000);
+        return ()=>clearInterval(t);
+      },[carregar]);
+      if(itens.length===0) return null;
+      const duracao=Math.max(30,itens.length*7)+"s";
+      const faixa=(chave)=>itens.map(n=>{
+        const cat=NOTICIA_CATEGORIAS[n.categoria]||NOTICIA_CATEGORIAS.destaque;
+        const atencao=n.categoria==="problema";
+        return (
+          <span key={chave+"-"+n.id} style={{display:"inline-flex",alignItems:"center",gap:8,padding:"0 20px",whiteSpace:"nowrap"}}>
+            {atencao
+              ? <span style={{background:"#ef4444",color:"#fff",fontWeight:700,borderRadius:4,padding:"2px 6px"}}>⚠ {cat.rotulo}</span>
+              : <span style={{fontWeight:700,color:cat.cor}}>{cat.rotulo}</span>}
+            <span style={atencao?{fontWeight:700,color:"#fecaca"}:{color:"#f1f5f9"}}>{n.titulo}</span>
+            <span style={{color:"#64748b"}}>·</span>
+          </span>
+        );
+      });
+      return (
+        <>
+          <div aria-label="Últimas do Comercial" style={{display:"flex",alignItems:"stretch",height:32,background:"#0f172a",borderBottom:"1px solid #1e293b",fontSize:12,flexShrink:0,overflow:"hidden"}}>
+            <div style={{position:"relative",flex:1,overflow:"hidden"}}>
+              <div className="rh-ticker-faixa" onClick={()=>setAberto(true)} style={{position:"absolute",top:0,bottom:0,left:0,display:"flex",alignItems:"center",width:"max-content",cursor:"pointer","--ticker-duracao":duracao}}>
+                {faixa("a")}{faixa("b")}
+              </div>
+            </div>
+          </div>
+          {aberto&&(
+            <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"64px 16px 16px"}}>
+              <div onClick={()=>setAberto(false)} style={{position:"absolute",inset:0,background:"rgba(0,0,0,.5)"}}/>
+              <div style={{position:"relative",width:"100%",maxWidth:520,background:"#fff",color:"#1e293b",borderRadius:16,boxShadow:"0 20px 50px rgba(0,0,0,.35)",maxHeight:"75vh",display:"flex",flexDirection:"column"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",borderBottom:"1px solid #f1f5f9"}}>
+                  <h2 style={{margin:0,fontSize:16,fontWeight:700}}>📰 Últimas do Comercial</h2>
+                  <button onClick={()=>setAberto(false)} aria-label="Fechar" style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#94a3b8"}}>✕</button>
+                </div>
+                <div style={{overflowY:"auto"}}>
+                  {itens.map(n=>{
+                    const cat=NOTICIA_CATEGORIAS[n.categoria]||NOTICIA_CATEGORIAS.destaque;
+                    const atencao=n.categoria==="problema";
+                    return (
+                      <div key={n.id} style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9",...(atencao?{background:"#fef2f2",borderLeft:"4px solid #ef4444"}:{})}}>
+                        <div style={{fontSize:11,color:"#94a3b8"}}>
+                          <b style={{color:atencao?"#dc2626":"#475569"}}>{cat.rotulo}</b> · {new Date(n.gerada_em).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                        </div>
+                        <div style={{fontSize:14,fontWeight:600,marginTop:2}}>{n.titulo}</div>
+                        {n.texto&&<div style={{fontSize:14,color:"#475569",marginTop:2}}>{n.texto}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      );
+    }
+
     function App(){
       const [page,setPage]=useState("dashboard");
       const [menuAberto,setMenuAberto]=useState(false);
@@ -13213,6 +13292,7 @@
               <button onClick={()=>_supa.auth.signOut()} style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.85)',borderRadius:7,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>Sair</button>
             </div>
           </header>
+          <NoticiasTicker/>
           <div style={s.body}>
             {menuAberto&&<div className="rh-backdrop" onClick={()=>setMenuAberto(false)}/>}
             <nav style={s.sidebar} className={'rh-sidebar'+(menuAberto?' aberto':'')}>
