@@ -20,7 +20,7 @@ ajuste da arte pela IA, alertas e análise de desempenho) · `AdiantamentosPage`
 (`calcularColab` ~10746) · `PainelColaborador` 11674 · `OrcamentoPage` 11816 · `ConfiguracoesPage` 11988 ·
 `ComissoesPage` 12042 · `App()` 12573 (login, sidebar, roteamento, VT).
 
-Vagas públicas: `vagas/index.html` é cópia; o site oficial (GitHub Pages) está no repo `vagas-cantina`
+Vagas públicas: o site (Vercel, projeto `vagas-cantina`) está no repo `vagas-cantina`; `/vagas` aqui só redireciona para ele
 (candidatos anônimos → `candidatos` + bucket `curriculos`). Migrations do RH em `supabase/migrations/`
 (as antigas em `sql/`); edge functions em `supabase/functions` (`rh-usuarios`, `rh-campanha-ia`,
 `rh-campanha-analise`). Backup do Supabase: `backup/` e `docs/backup/`.
@@ -30,8 +30,8 @@ Vagas públicas: `vagas/index.html` é cópia; o site oficial (GitHub Pages) est
 Dev sem build: abra `index.html` (ou `python3 -m http.server 4599`); o Babel do CDN transpila o JSX
 no navegador. Produção: a Vercel roda `npm run build` (`scripts/build.mjs`), que pré-compila o
 `<script type="text/babel">` com as mesmas opções do Babel do navegador e publica só `dist/` (index sem
-Babel + `app.<hash>.js` com cache imutável, `vagas/`, ícones). Testes: `npm test`. jsPDF carrega sob
-demanda (`carregarJsPDF`). Cabeçalhos em `vercel.json`.
+Babel + `app.<hash>.js` com cache imutável, ícones). Testes: `npm test`. jsPDF carrega sob
+demanda (`carregarJsPDF`). Cabeçalhos e redirecionamentos em `vercel.json`.
 
 ## Backend — Supabase compartilhado
 

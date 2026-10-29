@@ -52,10 +52,10 @@ function main() {
   const nomeJs = `app.${createHash('sha256').update(js).digest('hex').slice(0, 12)}.js`;
 
   rmSync(dist, { recursive: true, force: true });
-  mkdirSync(join(dist, 'vagas'), { recursive: true });
+  mkdirSync(dist, { recursive: true });
   writeFileSync(join(dist, nomeJs), js);
   writeFileSync(join(dist, 'index.html'), montarHtml(html, nomeJs));
-  for (const f of ['favicon.ico', 'favicon-32.png', 'apple-touch-icon.png', 'vagas/index.html']) {
+  for (const f of ['favicon.ico', 'favicon-32.png', 'apple-touch-icon.png']) {
     copyFileSync(join(raiz, f), join(dist, f));
   }
   console.log(`dist/ pronto: ${nomeJs} (${Math.round(js.length / 1024)} KB)`);

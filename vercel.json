@@ -1,6 +1,10 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "redirects": [
+    { "source": "/vagas", "destination": "https://vagas.cantinaemcasa.com/", "permanent": true },
+    { "source": "/vagas/:path*", "destination": "https://vagas.cantinaemcasa.com/", "permanent": true }
+  ],
   "headers": [
     {
       "source": "/(.*)",
