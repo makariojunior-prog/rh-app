@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index.html`
-(~13.260 linhas, 917 KB). Interface e lógica em português (BR).
+(~13.660 linhas, 944 KB). Interface e lógica em português (BR).
 
 ## ⚠️ Como trabalhar no index.html
 
@@ -12,20 +12,21 @@ SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index
 - Linhas abaixo são aproximadas (o arquivo cresce) — confirme com Grep antes de ler.
 - Edições: faça `Edit` pontual; não reescreva blocos grandes.
 
-Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 214–535 (`fmtBRL`, `fmtDate`,
-`maskCPF`, `validateCPF`, helpers de documentos/termos `enviarArquivoRH`/`preencherTermo` ~264–328,
-`parseCSV` 328, `parsePontoDetalhado` 365, `upsertRegistrosPonto` 391, `calcINSS` 470, `calcFGTS`,
-`calcPericulosidade`) · `DashboardPage` 543 · `AjudaPage` 1173 · `LoginPage` 1422 ·
-`DocumentosColaborador` 1678 · `ColaboradoresPage` 1844 · `AcessosPage` 2810 · `AtestadosPage` 3153 ·
-`FeriasPage` 3369 · `RecrutamentoPage` 3523 (`CampanhasRecrutamentoTab` 4378) ·
-`AdiantamentosPage` 5869 · `GratificacoesTab` 6357 · `RelatoriosPage` 6711 · `ComprasPage` 7098 ·
-`FuncoesPage` 7406 · `DocumentosLegaisEmpresa` 7779 · `NormasPage` 7896 · `ExamesPage` 8200 ·
-`PontoPage` 9479 · `TermosPage` 9839 · `FolhaPage` 10099 (`calcularColab` ~10424) ·
-`PainelColaborador` 11352 · `OrcamentoPage` 11494 · `ConfiguracoesPage` 11666 ·
-`ComissoesPage` 11720 · `App()` 12177 (login, sidebar, roteamento, VT).
+Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 214–535 (`fmtBRL` 233, `fmtDate`,
+`maskCPF`, `validateCPF`, helpers de documentos/termos `enviarArquivoRH` 269/`preencherTermo` 294,
+`parseCSV` 333, `parsePontoDetalhado` 370, `upsertRegistrosPonto` 396, `calcINSS` 475, `calcFGTS` 494,
+`calcPericulosidade` 497) · `DashboardPage` 548 · `AjudaPage` 1178 · `LoginPage` 1427 ·
+`DocumentosColaborador` 1683 · `ColaboradoresPage` 1856 · `AcessosPage` 2822 · `AtestadosPage` 3165 ·
+`FeriasPage` 3381 · `RecrutamentoPage` 3535 (`CampanhasRecrutamentoTab` 4390: publicar/pausar/excluir,
+ajuste da arte pela IA, alertas e análise de desempenho) ·
+`AdiantamentosPage` 6191 · `GratificacoesTab` 6679 · `RelatoriosPage` 7033 · `ComprasPage` 7420 ·
+`FuncoesPage` 7728 · `DocumentosLegaisEmpresa` 8101 · `NormasPage` 8218 · `ExamesPage` 8522 ·
+`PontoPage` 9801 · `TermosPage` 10161 · `FolhaPage` 10421 (`calcularColab` ~10746) ·
+`PainelColaborador` 11674 · `OrcamentoPage` 11816 · `ConfiguracoesPage` 11988 ·
+`ComissoesPage` 12042 · `App()` 12573 (login, sidebar, roteamento, VT).
 
-Vagas públicas: `vagas/index.html` (candidatos anônimos → tabela `candidatos` + bucket
-`curriculos`). Migrations SQL do RH em `sql/`; edge function em `supabase/functions/rh-usuarios`.
+Vagas públicas: `vagas/index.html` é cópia — o site oficial (GitHub Pages) está no repo `vagas-cantina` (candidatos anônimos → tabela `candidatos` + bucket
+`curriculos`). Migrations SQL do RH em `sql/`; edge functions em `supabase/functions` (`rh-usuarios`, `rh-campanha-ia`, `rh-campanha-analise`).
 Backup do Supabase: scripts em `backup/`, documentação em `docs/backup/`.
 
 ## Executar
