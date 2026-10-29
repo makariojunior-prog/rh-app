@@ -71,12 +71,6 @@ function resolverTokenMeta(contaKey: 'cantina' | 'lumar', credencialRef?: string
   )
 }
 
-// A partir da v24 a Meta exige is_adset_budget_sharing_enabled em campanhas com orçamento no conjunto
-function versaoGraphNumero(versao: string): number {
-  const m = /^v?(\d+)/.exec(versao.trim())
-  return m ? Number(m[1]) : 0
-}
-
 // UTMs dos anúncios do RH (url_tags do criativo): o site de vagas identifica a origem do candidato
 function utmTagsRecrutamento(contaKey: 'cantina' | 'lumar', slugVaga: string, formato: 'feed' | 'story'): string {
   return new URLSearchParams({
@@ -533,7 +527,11 @@ Deno.serve(async (req: Request) => {
       const ia_copy         = (b.ia_copy && typeof b.ia_copy === 'object') ? b.ia_copy : {}
 
       if (!vaga) return json({ error: 'Informe a vaga da campanha.' }, 400)
-      if (orcamento_total < 10) return json({ error: 'O valor de gasto total deve ser de pelo menos R$ 10,00.' }, 400)
+      // A Meta recusa conjuntos abaixo de ~R$ 5,13/dia; R$ 6/dia dá margem para a variação dela
+      const orcamentoMinimo = Math.max(10, 6 * dias_duracao)
+      if (orcamento_total < orcamentoMinimo) {
+        return json({ error: `Gasto total mínimo para ${dias_duracao} dia(s): R$ ${orcamentoMinimo.toFixed(2).replace('.', ',')} (R$ 6,00 por dia, exigência da Meta).` }, 400)
+      }
       if (!imagem_feed_b64) return json({ error: 'A imagem do criativo de Feed não foi enviada.' }, 400)
 
       // Convenção de nome exigida por rh_campanhas_recrutamento (~* '(vaga|emprego|recrut|curr[ií]culo|contrata|candidat)')
@@ -767,7 +765,8 @@ Deno.serve(async (req: Request) => {
           status: 'PAUSED',
           special_ad_categories: JSON.stringify(['EMPLOYMENT']),
           special_ad_category_country: JSON.stringify(['BR']),
-          ...(versaoGraphNumero(graphVersion) >= 24 ? { is_adset_budget_sharing_enabled: 'false' } : {}),
+          // Orçamento fica no conjunto; a Meta passou a exigir o campo explícito (inclusive na v23)
+          is_adset_budget_sharing_enabled: 'false',
         })
         campaignId = String(campRes.id)
 

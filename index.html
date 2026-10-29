@@ -5132,8 +5132,10 @@
             onStatusMsg?.({ ok: false, msg: '⚠️ Selecione ou digite o nome da vaga antes de gerar a prévia.' });
             return;
           }
-          if (orcamentoNum < 10) {
-            onStatusMsg?.({ ok: false, msg: '⚠️ Informe um valor de gasto total válido (mínimo R$ 10,00).' });
+          // A Meta recusa conjuntos abaixo de ~R$ 5,13/dia; R$ 6/dia dá margem para a variação dela
+          const orcamentoMinimo = Math.max(10, 6 * (Number(diasDuracao) || 1));
+          if (orcamentoNum < orcamentoMinimo) {
+            onStatusMsg?.({ ok: false, msg: `⚠️ Gasto total mínimo para ${diasDuracao} dia(s): ${fmtBRL(orcamentoMinimo)} (R$ 6,00 por dia, exigência da Meta).` });
             return;
           }
           setGerandoPrevia(true);
