@@ -6,7 +6,7 @@
 create table if not exists public.colaborador_documentos_dispensas (
   id uuid primary key default gen_random_uuid(),
   empresa_id text not null,
-  colaborador_id uuid not null,
+  colaborador_id text not null,
   tipo_id uuid not null references public.tipos_documento_colab(id) on delete cascade,
   motivo text,
   created_at timestamptz not null default now(),

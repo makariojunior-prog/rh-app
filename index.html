@@ -1825,14 +1825,21 @@
             {gerenciar && (
               <div style={{marginTop:14,padding:12,borderRadius:8,border:"1px dashed "+C.border}}>
                 <div style={{fontWeight:700,fontSize:12,color:C.pri,marginBottom:8}}>Tipos de documento do check-list (valem para todos os colaboradores)</div>
-                {tipos.map(t=>(
-                  <div key={t.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:12,marginBottom:4}}>
-                    <span style={{flex:1}}>{t.nome}{t.condicao?` — ${t.condicao}`:''}</span>
-                    <button type="button" style={btnMini} onClick={()=>toggleObrig(t)}>{t.obrigatorio?'Obrigatório':'Opcional'}</button>
-                    <button type="button" style={btnMini} onClick={()=>editarTipo(t)}>✏️</button>
-                    <button type="button" style={{...btnMini,color:"#991B1B"}} onClick={()=>removerTipo(t)}>✕</button>
-                  </div>
-                ))}
+                <div style={{display:"grid",gap:6,maxWidth:920}}>
+                  {tipos.map(t=>(
+                    <div key={t.id} style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"8px 10px",borderRadius:7,border:"1px solid "+C.border,background:"var(--c-subtle)"}}>
+                      <div style={{flex:"1 1 300px",minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:C.text||"#374151"}}>{t.nome}</div>
+                        {t.condicao && <div style={{fontSize:11,color:C.muted,marginTop:2}}>Condição: {t.condicao}</div>}
+                      </div>
+                      <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                        <button type="button" style={{...btnMini,color:t.obrigatorio?"#166534":C.muted,background:t.obrigatorio?"#F0FDF4":"transparent"}} onClick={()=>toggleObrig(t)} title="Alternar se este documento é obrigatório" aria-label={`${t.obrigatorio?'Obrigatório':'Opcional'}: ${t.nome}`}>{t.obrigatorio?'Obrigatório':'Opcional'}</button>
+                        <button type="button" style={btnMini} onClick={()=>editarTipo(t)} title={`Editar ${t.nome}`} aria-label={`Editar ${t.nome}`}>✏️ Editar</button>
+                        <button type="button" style={{...btnMini,color:"#991B1B"}} onClick={()=>removerTipo(t)} title={`Remover ${t.nome}`} aria-label={`Remover ${t.nome}`}>✕ Remover</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
                   <input style={{...s.inputSm,flex:2,minWidth:160}} placeholder="Novo tipo (ex: CNH)" value={novoTipo.nome} onChange={e=>setNovoTipo(p=>({...p,nome:e.target.value}))}/>
                   <input style={{...s.inputSm,flex:2,minWidth:160}} placeholder="Condição (opcional)" value={novoTipo.condicao} onChange={e=>setNovoTipo(p=>({...p,condicao:e.target.value}))}/>
@@ -4530,6 +4537,13 @@
           return [...s].sort((a, b) => a.localeCompare(b, 'pt-BR'));
         }, [vagasFormulario, vagasCandidatos, funcoesCat]);
 
+        const urlCandidatura = React.useMemo(() => {
+          const url = new URL('https://vagas.cantinaemcasa.com/');
+          url.searchParams.set('e', contaAnuncio === 'lumar' ? 'lumar' : 'cantina');
+          if (vaga.trim()) url.searchParams.set('vaga', vaga.trim());
+          return url.toString();
+        }, [contaAnuncio, vaga]);
+
         const aoEscolherVaga = (nomeVaga) => {
           setVaga(nomeVaga);
           const fn = funcoesCat.find(f => (f.nome || '').toLowerCase() === (nomeVaga || '').toLowerCase());
@@ -5132,6 +5146,7 @@
                 acao: 'gerar_previa',
                 conta_anuncio: contaAnuncio,
                 vaga: vaga.trim(),
+                url_destino: urlCandidatura,
                 divulgar_salario: divulgarSalario,
                 salario_texto: salarioTexto.trim(),
                 gratificacao_fixa: gratificacaoFixa.trim(),
@@ -5222,7 +5237,7 @@
               whatsapp_contato: whatsappContato,
               instagram_handle: instagramHandle,
               titulo_link: `Vaga: ${vaga} — Envie seu currículo`,
-              legenda: `🚀 VAGA DE EMPREGO: ${vaga.toUpperCase()}!\n\nVenha fazer parte da equipe ${nomeMarca} em ${localTexto || 'Goiânia - GO'}.\n\n📋 Requisitos:\n${reqLocal.map(r => '• ' + r).join('\n')}\n\n${divulgarSalario ? `💰 Remuneração:\n${remLocal.map(r => '• ' + r.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarBeneficios && beneficiosSel.length ? `🎁 Benefícios:\n${beneficiosSel.map(b => '• ' + b.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarHorario ? `⏰ Horário: ${horarioTexto}\n` : ''}📲 WhatsApp: ${whatsappContato}\n👉 Candidate-se também em: https://vagas.cantinaemcasa.com`
+            legenda: `🚀 VAGA DE EMPREGO: ${vaga.toUpperCase()}!\n\nVenha fazer parte da equipe ${nomeMarca} em ${localTexto || 'Goiânia - GO'}.\n\n📋 Requisitos:\n${reqLocal.map(r => '• ' + r).join('\n')}\n\n${divulgarSalario ? `💰 Remuneração:\n${remLocal.map(r => '• ' + r.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarBeneficios && beneficiosSel.length ? `🎁 Benefícios:\n${beneficiosSel.map(b => '• ' + b.replace(/\*\*/g, '')).join('\n')}\n\n` : ''}${divulgarHorario ? `⏰ Horário: ${horarioTexto}\n` : ''}📲 WhatsApp: ${whatsappContato}\n👉 Candidate-se também em: ${urlCandidatura}`
             });
             setAvisoIA(`Prévia montada com o template oficial local (${err.message}).`);
             setPreviaPronta(true);
@@ -5292,7 +5307,7 @@
                 dias_duracao: Number(diasDuracao) || 7,
                 orcamento_total: orcamentoNum,
                 data_inicio: dataIniIso,
-                url_destino: 'https://vagas.cantinaemcasa.com',
+                url_destino: urlCandidatura,
                 ia_copy: iaCopy,
                 imagem_base64: b64Feed,
                 imagem_feed_base64: b64Feed,

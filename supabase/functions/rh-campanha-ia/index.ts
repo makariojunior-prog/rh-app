@@ -142,6 +142,7 @@ function gerarCopyFallback(params: {
   requisitos_texto: string
   whatsapp_contato: string
   instagram_handle: string
+  url_candidatura: string
 }) {
   const nomeMarca = params.conta === 'lumar' ? 'Lumar Alimentos' : 'Cantina em Casa'
 
@@ -218,7 +219,7 @@ function gerarCopyFallback(params: {
   }
   linhasLegenda.push(
     ``,
-    `👉 Candidate-se também pelo link: https://vagas.cantinaemcasa.com`
+    `👉 Candidate-se também pelo link: ${params.url_candidatura}`
   )
 
   return {
@@ -280,6 +281,10 @@ Deno.serve(async (req: Request) => {
       const conta: 'cantina' | 'lumar' = b.conta_anuncio === 'lumar' ? 'lumar' : 'cantina'
       const vaga = String(b.vaga ?? '').trim()
       if (!vaga) return json({ error: 'Informe o nome da vaga para gerar a prévia.' }, 400)
+      const urlCandidatura = new URL('https://vagas.cantinaemcasa.com/')
+      urlCandidatura.searchParams.set('e', conta)
+      urlCandidatura.searchParams.set('vaga', vaga)
+      const linkCandidatura = urlCandidatura.toString()
 
       const divulgar_salario         = Boolean(b.divulgar_salario)
       const salario_texto            = String(b.salario_texto ?? '').trim()
@@ -320,6 +325,7 @@ Deno.serve(async (req: Request) => {
         requisitos_texto,
         whatsapp_contato,
         instagram_handle,
+        url_candidatura: linkCandidatura,
       })
 
       let copy = { ...fallback }
@@ -362,7 +368,7 @@ Deno.serve(async (req: Request) => {
             `   - "**Vale-transporte**;"`,
             `   - "**Alimentação completa na empresa:** café da manhã, almoço e lanche da tarde."`,
             `5. "titulo_link": título curto do anúncio no Meta Ads (ex: "Vaga: ${vaga} — Candidate-se").`,
-            `6. "legenda": legenda completa e persuasiva para o post do Instagram e Facebook, contendo os dados da vaga, WhatsApp (${whatsapp_contato}) e link https://vagas.cantinaemcasa.com.`,
+            `6. "legenda": legenda completa e persuasiva para o post do Instagram e Facebook, contendo os dados da vaga, WhatsApp (${whatsapp_contato}) e o link exato ${linkCandidatura}.`,
             `7. "prompt_foto_funcao": descrição detalhada em INGLÊS para gerar uma fotografia ilustrativa da função "${vaga}" (foco nas mãos/profissional executando a atividade típica do cargo, ex: padeiro segurando pão artesanal rústico em mesa de madeira, cozinheiro preparando prato, motorista/estoquista em operação limpa; iluminação quente e apetitosa, estilo fotografia publicitária, SEM nenhum texto ou logotipo).`,
           ].filter(Boolean).join('\n')
 
@@ -499,7 +505,10 @@ Deno.serve(async (req: Request) => {
       const vaga            = String(b.vaga ?? '').trim()
       const dias_duracao    = Math.max(1, Math.min(90, Math.round(Number(b.dias_duracao) || 7)))
       const orcamento_total = Number(b.orcamento_total) || 0
-      const url_destino     = String(b.url_destino ?? 'https://vagas.cantinaemcasa.com').trim()
+      const urlCandidatura  = new URL('https://vagas.cantinaemcasa.com/')
+      urlCandidatura.searchParams.set('e', contaKey)
+      if (vaga) urlCandidatura.searchParams.set('vaga', vaga)
+      const url_destino     = urlCandidatura.toString()
       const imagem_feed_b64 = String(b.imagem_feed_base64 || b.imagem_base64 || '').replace(/^data:image\/\w+;base64,/, '').trim()
       const imagem_story_b64 = String(b.imagem_story_base64 || '').replace(/^data:image\/\w+;base64,/, '').trim()
       const ia_copy         = (b.ia_copy && typeof b.ia_copy === 'object') ? b.ia_copy : {}
@@ -671,8 +680,17 @@ Deno.serve(async (req: Request) => {
         })
         const j = await r.json().catch(() => ({}))
         if (!r.ok || j?.error) {
-          const detalhe = j?.error?.error_user_msg || j?.error?.message || JSON.stringify(j)
-          throw new Error(`Meta API (${edge}): ${redigirSegredos(String(detalhe), [metaToken])}`)
+          const erro = j?.error
+          const detalhe = erro?.error_user_msg || erro?.message || JSON.stringify(j)
+          const codigo = erro?.code != null
+            ? ` (código ${erro.code}${erro.error_subcode != null ? `/${erro.error_subcode}` : ''})`
+            : ''
+          const semAcessoConta = edge === 'adimages' &&
+            (Number(erro?.code) === 100 || /unsupported post request/i.test(String(detalhe)))
+          const dica = semAcessoConta
+            ? ` A resposta pode indicar ID de conta incorreto ou falta de acesso do token à conta ${contaCfg.conta_id_externo}; confirme o ativo atribuído e a permissão ads_management no Meta Business.`
+            : ''
+          throw new Error(`Meta API (${edge}, act_${contaCfg.conta_id_externo})${codigo}: ${redigirSegredos(String(detalhe), [metaToken])}${dica}`)
         }
         return j
       }

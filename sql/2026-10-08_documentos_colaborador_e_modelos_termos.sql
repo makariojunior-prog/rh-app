@@ -35,7 +35,7 @@ create index if not exists idx_tipos_doc_colab_empresa on public.tipos_documento
 create table if not exists public.colaborador_documentos (
   id uuid primary key default gen_random_uuid(),
   empresa_id text not null,
-  colaborador_id uuid not null,
+  colaborador_id text not null,
   tipo_id uuid references public.tipos_documento_colab(id) on delete set null,
   tipo_nome text not null,          -- snapshot: sobrevive a renomear/remover o tipo
   arquivo_path text not null,
@@ -47,42 +47,37 @@ create index if not exists idx_colab_docs_colab on public.colaborador_documentos
 
 alter table public.tipos_documento_colab enable row level security;
 alter table public.colaborador_documentos enable row level security;
-do $pol$
-begin
-  if not exists (select 1 from pg_policies where schemaname='public' and tablename='tipos_documento_colab') then
-    create policy "authenticated full access tipos_documento_colab"
-      on public.tipos_documento_colab for all to authenticated using (true) with check (true);
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='public' and tablename='colaborador_documentos') then
-    create policy "authenticated full access colaborador_documentos"
-      on public.colaborador_documentos for all to authenticated using (true) with check (true);
-  end if;
-end $pol$;
+drop policy if exists "authenticated full access tipos_documento_colab" on public.tipos_documento_colab;
+drop policy if exists rh_member_all on public.tipos_documento_colab;
+create policy rh_member_all on public.tipos_documento_colab for all to authenticated
+  using ((select public.rh_is_member())) with check ((select public.rh_is_member()));
+drop policy if exists "authenticated full access colaborador_documentos" on public.colaborador_documentos;
+drop policy if exists rh_member_all on public.colaborador_documentos;
+create policy rh_member_all on public.colaborador_documentos for all to authenticated
+  using ((select public.rh_is_member())) with check ((select public.rh_is_member()));
 
 -- Bucket PRIVADO (documentos pessoais): <empresa>/docs/..., <empresa>/modelos/..., <empresa>/assinados/...
 insert into storage.buckets (id, name, public)
 values ('rh-documentos', 'rh-documentos', false)
 on conflict (id) do nothing;
 
-do $pol$
-begin
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='rhdoc_authenticated_read') then
-    create policy "rhdoc_authenticated_read" on storage.objects
-      for select to authenticated using (bucket_id = 'rh-documentos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='rhdoc_authenticated_write') then
-    create policy "rhdoc_authenticated_write" on storage.objects
-      for insert to authenticated with check (bucket_id = 'rh-documentos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='rhdoc_authenticated_update') then
-    create policy "rhdoc_authenticated_update" on storage.objects
-      for update to authenticated using (bucket_id = 'rh-documentos');
-  end if;
-  if not exists (select 1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='rhdoc_authenticated_delete') then
-    create policy "rhdoc_authenticated_delete" on storage.objects
-      for delete to authenticated using (bucket_id = 'rh-documentos');
-  end if;
-end $pol$;
+drop policy if exists rhdoc_authenticated_read on storage.objects;
+drop policy if exists rhdoc_authenticated_write on storage.objects;
+drop policy if exists rhdoc_authenticated_update on storage.objects;
+drop policy if exists rhdoc_authenticated_delete on storage.objects;
+create policy rhdoc_authenticated_read on storage.objects for select to authenticated
+  using (bucket_id = 'rh-documentos' and (select public.rh_is_member()));
+create policy rhdoc_authenticated_write on storage.objects for insert to authenticated
+  with check (bucket_id = 'rh-documentos' and (select public.rh_is_member()));
+create policy rhdoc_authenticated_update on storage.objects for update to authenticated
+  using (bucket_id = 'rh-documentos' and (select public.rh_is_member()))
+  with check (bucket_id = 'rh-documentos' and (select public.rh_is_member()));
+create policy rhdoc_authenticated_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'rh-documentos' and (select public.rh_is_member()));
+
+revoke all on public.tipos_documento_colab, public.colaborador_documentos from anon;
+revoke truncate, trigger, references on public.tipos_documento_colab, public.colaborador_documentos from anon, authenticated;
+grant select, insert, update, delete on public.tipos_documento_colab, public.colaborador_documentos to authenticated, service_role;
 
 -- Check-list de admissão padrão (para cada empresa que ainda não tem catálogo)
 insert into public.tipos_documento_colab (empresa_id, nome, obrigatorio, condicao, ordem)

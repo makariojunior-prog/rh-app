@@ -348,6 +348,21 @@
     _vagaSel.appendChild(o);
   });
 
+  /* Campanhas podem apontar para uma vaga específica, inclusive fora da lista fixa. */
+  const _vagaParam = (_params.get('vaga') || '').trim();
+  if (_vagaParam && _vagaParam.length <= 120 && !/[\u0000-\u001F\u007F]/.test(_vagaParam)) {
+    let _vagaOption = Array.from(_vagaSel.options).find(o =>
+      o.value.toLocaleLowerCase('pt-BR') === _vagaParam.toLocaleLowerCase('pt-BR')
+    );
+    if (!_vagaOption) {
+      _vagaOption = document.createElement('option');
+      _vagaOption.value = _vagaParam;
+      _vagaOption.textContent = _vagaParam;
+      _vagaSel.appendChild(_vagaOption);
+    }
+    _vagaSel.value = _vagaOption.value;
+  }
+
   /* ── Helpers ── */
   function normStr(s) {
     return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]/g,'').toUpperCase();
