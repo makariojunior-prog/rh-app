@@ -1067,6 +1067,83 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true })
     }
 
+    // ── AÇÃO 4: EXCLUIR CAMPANHA (na Meta, se publicada, e do histórico do RH) ────
+    if (acao === 'excluir') {
+      const id = String((body as Record<string, unknown>).id ?? '')
+      if (!id) return json({ error: 'Informe o ID da campanha.' }, 400)
+
+      const { data: camp } = await admin
+        .from('rh_campanhas_criadas')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (!camp) return json({ error: 'Campanha não encontrada.' }, 404)
+      // 'publicando' há menos de 10 min ainda pode estar no meio da criação na Meta
+      const idadeMs = Date.now() - new Date(camp.atualizado_em || camp.criado_em || 0).getTime()
+      if (camp.status === 'publicando' && idadeMs < 10 * 60 * 1000) {
+        return json({ error: 'A campanha ainda está sendo publicada. Aguarde alguns minutos e tente de novo.' }, 409)
+      }
+
+      const contaKey: 'cantina' | 'lumar' = camp.conta_anuncio === 'lumar' ? 'lumar' : 'cantina'
+      const { data: mktContaE } = await admin
+        .from('mkt_contas').select('id, credencial_ref')
+        .eq('plataforma', 'meta').eq('id_externo', camp.conta_id_externo).maybeSingle()
+
+      // Publicada: exclui na Meta antes (para de veicular e de gastar); o histórico de gasto continua na Meta
+      if (camp.meta_campaign_id) {
+        const metaToken = resolverTokenMeta(contaKey, mktContaE?.credencial_ref)
+        if (!metaToken) {
+          return json({ error: 'Token da Meta não configurado: não foi possível excluir a campanha na Meta.' }, 500)
+        }
+        const graphVersion = Deno.env.get('META_GRAPH_VERSION') || 'v23.0'
+        const r = await fetch(`https://graph.facebook.com/${graphVersion}/${camp.meta_campaign_id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ status: 'DELETED', access_token: metaToken }).toString(),
+        })
+        const j = await r.json().catch(() => ({}))
+        // Já excluída direto no Gerenciador de Anúncios (objeto inexistente): segue com a exclusão no RH
+        const jaNaoExiste = Number(j?.error?.code) === 100 && Number(j?.error?.error_subcode) === 33
+        if ((!r.ok || j?.error) && !jaNaoExiste) {
+          const detalhe = j?.error?.error_user_msg || j?.error?.message || JSON.stringify(j)
+          return json({ error: `Falha ao excluir na Meta: ${redigirSegredos(String(detalhe).slice(0, 300), [metaToken])}` }, 502)
+        }
+
+        await admin
+          .from('mkt_campanhas')
+          .update({ status: 'removida', status_efetivo: 'DELETED', atualizado_em: new Date().toISOString() })
+          .eq('id_externo', camp.meta_campaign_id)
+      }
+
+      if (mktContaE?.id) {
+        await admin.from('mkt_auditoria').insert({
+          usuario_id: caller.id,
+          conta_id: mktContaE.id,
+          comando_id: camp.mkt_comando_id ?? null,
+          acao: 'excluir_campanha_rh',
+          entidade_tipo: 'campanha',
+          entidade_id_externo: camp.meta_campaign_id ?? null,
+          antes: {
+            rh_campanha_id: camp.id,
+            nome_campanha: camp.nome_campanha,
+            vaga: camp.vaga,
+            status: camp.status,
+            orcamento_total: camp.orcamento_total,
+          },
+          depois: null,
+          origem: 'app',
+        })
+      }
+
+      const arquivos = [camp.criativo_url, camp.criativo_story_url].filter(Boolean) as string[]
+      if (arquivos.length) await admin.storage.from('rh-documentos').remove(arquivos)
+
+      const { error: delErr } = await admin.from('rh_campanhas_criadas').delete().eq('id', id)
+      if (delErr) return json({ error: 'Falha ao excluir do histórico: ' + delErr.message }, 500)
+
+      return json({ ok: true, excluida_na_meta: Boolean(camp.meta_campaign_id) })
+    }
+
     return json({ error: 'Ação inválida.' }, 400)
   } catch (err) {
     return json({ error: String(err) }, 500)

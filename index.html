@@ -1577,7 +1577,7 @@
           <div style={{position:'fixed',inset:0,zIndex:9000,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center'}}>
             <div style={{background:'#fff',borderRadius:14,padding:'28px 28px 22px',maxWidth:420,width:'90%',boxShadow:'0 8px 40px rgba(0,0,0,0.18)'}}>
               <div style={{fontWeight:800,fontSize:15,color:C.pri,marginBottom:10}}>{st.titulo}</div>
-              <div style={{fontSize:13,color:'#374151',lineHeight:1.55,marginBottom:22}}>{st.msg}</div>
+              <div style={{fontSize:13,color:'#374151',lineHeight:1.55,marginBottom:22,whiteSpace:'pre-line'}}>{st.msg}</div>
               <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
                 <button style={{...s.btnOutline,padding:'8px 20px',fontSize:13}} onClick={()=>responder(false)}>Cancelar</button>
                 <button style={{background:C.danger,color:'#fff',border:'none',borderRadius:7,padding:'8px 20px',fontWeight:700,fontSize:13,cursor:'pointer'}} onClick={()=>responder(true)}>Confirmar</button>
@@ -5349,6 +5349,22 @@
           }
         };
 
+        const excluirCampanha = async (camp) => {
+          const msg = camp.meta_campaign_id
+            ? `Excluir a campanha "${camp.nome_campanha}"?\n\nEla será EXCLUÍDA na Meta Ads (para de veicular e de gastar, sem como reativar) e removida deste histórico. O gasto já realizado continua no Gerenciador de Anúncios e no app de Marketing.`
+            : `Excluir "${camp.nome_campanha}" do histórico?\n\nEla não chegou a ser publicada na Meta; serão apagados só o registro e as artes no RH.`;
+          if (!await confirmar(msg, 'Excluir Campanha')) return;
+          const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+            body: { acao: 'excluir', id: camp.id }
+          });
+          if (error || data?.error) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + (data?.error || error?.message) });
+          } else {
+            toast(data?.excluida_na_meta ? 'Campanha excluída na Meta e no RH.' : 'Campanha excluída do histórico.', 'success');
+            carregarTudo();
+          }
+        };
+
         const cfgAtual = CONTAS_INFO[contaAnuncio] || CONTAS_INFO.cantina;
 
         return (
@@ -5873,6 +5889,11 @@
                                 ⏸️ Pausar
                               </button>
                             )}
+                            <button onClick={()=>excluirCampanha(c)}
+                              style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginLeft:4}}
+                              title={c.meta_campaign_id ? 'Excluir na Meta Ads e do histórico' : 'Excluir do histórico'}>
+                              🗑️ Excluir
+                            </button>
                           </td>
                         </tr>
                       );
