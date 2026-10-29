@@ -4482,6 +4482,7 @@
         const [observacoesIA, setObservacoesIA]       = React.useState('');
         const [diasDuracao, setDiasDuracao]           = React.useState(7);
         const [orcamentoTotal, setOrcamentoTotal]     = React.useState('140,00');
+        const [otimizarPara, setOtimizarPara]         = React.useState('cliques');
         const [dataInicio, setDataInicio]             = React.useState(() => new Date().toISOString().slice(0,10));
         const [gerarFotoIA, setGerarFotoIA]           = React.useState(true);
 
@@ -5394,6 +5395,7 @@
                 observacoes_ia: observacoesIA.trim(),
                 dias_duracao: Number(diasDuracao) || 7,
                 orcamento_total: orcamentoNum,
+                otimizar_para: otimizarPara,
                 data_inicio: dataIniIso,
                 url_destino: urlCandidatura,
                 ia_copy: iaCopy,
@@ -5578,6 +5580,18 @@
                       style={s.input}/>
                     <div style={{fontSize:10,color:C.green,fontWeight:700,marginTop:3}}>
                       ≈ {fmtBRL(gastoDiarioEstimado)} / dia
+                    </div>
+                  </div>
+                  <div>
+                    <label style={s.label}>Otimizar anúncio para</label>
+                    <select value={otimizarPara} onChange={e=>setOtimizarPara(e.target.value)} style={s.input}>
+                      <option value="cliques">Cliques no link (recomendado até o pixel ter histórico)</option>
+                      <option value="candidaturas">Candidaturas concluídas (pixel do site de vagas)</option>
+                    </select>
+                    <div style={{fontSize:10,color:C.muted,marginTop:3}}>
+                      {otimizarPara === 'candidaturas'
+                        ? 'A Meta busca quem tem mais chance de se candidatar. Precisa de volume: com orçamento baixo ou poucas candidaturas medidas, a entrega pode oscilar.'
+                        : 'Entrega mais estável com orçamento baixo. A Meta busca quem mais clica, não necessariamente quem se candidata.'}
                     </div>
                   </div>
                   <div>

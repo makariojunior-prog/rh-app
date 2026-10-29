@@ -56,6 +56,9 @@ const CONTAS_META: Record<'cantina' | 'lumar', {
   },
 }
 
+// Pixel "Formulário Vagas" (compartilhado com as duas contas de anúncios): recebe o evento Lead do site de vagas
+const PIXEL_VAGAS = '1379390730611008'
+
 // Token de escrita da Meta para a conta (mesma ordem em publicar e pausar)
 function resolverTokenMeta(contaKey: 'cantina' | 'lumar', credencialRef?: string | null): string {
   const sufixo = contaKey === 'lumar' ? '_LUMAR' : '_CANTINA'
@@ -555,6 +558,10 @@ Deno.serve(async (req: Request) => {
 
       const vaga            = String(b.vaga ?? '').trim()
       const dias_duracao    = Math.max(1, Math.min(90, Math.round(Number(b.dias_duracao) || 7)))
+      // 'candidaturas': a Meta otimiza pelo evento Lead do pixel (precisa de eventos para aprender);
+      // 'cliques': otimiza por cliques no link (padrão enquanto o pixel não tem histórico)
+      const otimizar_para   = b.otimizar_para === 'candidaturas' ? 'candidaturas' : 'cliques'
+      const objetivoMeta    = otimizar_para === 'candidaturas' ? 'OUTCOME_LEADS' : 'OUTCOME_TRAFFIC'
       const orcamento_total = Number(b.orcamento_total) || 0
       const urlCandidatura  = new URL('https://vagas.cantinaemcasa.com/')
       urlCandidatura.searchParams.set('e', contaKey)
@@ -676,6 +683,7 @@ Deno.serve(async (req: Request) => {
               nome_campanha,
               vaga,
               formatos: ['feed_1x1', 'story_9x16'],
+              otimizar_para,
               dias_duracao,
               orcamento_total,
               data_inicio: dataInicio.toISOString(),
@@ -799,7 +807,7 @@ Deno.serve(async (req: Request) => {
         // isso arriscava restrição da conta de anúncios inteira.
         const campRes = await postMeta('campaigns', {
           name: nome_campanha,
-          objective: 'OUTCOME_TRAFFIC',
+          objective: objetivoMeta,
           status: 'PAUSED',
           special_ad_categories: JSON.stringify(['EMPLOYMENT']),
           special_ad_category_country: JSON.stringify(['BR']),
@@ -827,7 +835,10 @@ Deno.serve(async (req: Request) => {
           name: `Conjunto Feed + Story — ${vaga} (${dias_duracao}d)`,
           campaign_id: campaignId,
           billing_event: 'IMPRESSIONS',
-          optimization_goal: 'LINK_CLICKS',
+          optimization_goal: otimizar_para === 'candidaturas' ? 'OFFSITE_CONVERSIONS' : 'LINK_CLICKS',
+          ...(otimizar_para === 'candidaturas'
+            ? { promoted_object: JSON.stringify({ pixel_id: PIXEL_VAGAS, custom_event_type: 'LEAD' }) }
+            : {}),
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
           lifetime_budget: lifetimeBudgetCents,
           start_time: dataInicio.toISOString(),
@@ -942,7 +953,7 @@ Deno.serve(async (req: Request) => {
               conta_id: mktConta.id,
               id_externo: campaignId,
               nome: nome_campanha,
-              objetivo: 'OUTCOME_TRAFFIC',
+              objetivo: objetivoMeta,
               status: 'ativa',
               status_efetivo: 'ACTIVE',
               orcamento_total,
@@ -952,7 +963,7 @@ Deno.serve(async (req: Request) => {
               payload: {
                 id: campaignId,
                 name: nome_campanha,
-                objective: 'OUTCOME_TRAFFIC',
+                objective: objetivoMeta,
                 status: 'ACTIVE',
                 effective_status: 'ACTIVE',
                 lifetime_budget: lifetimeBudgetCents,
