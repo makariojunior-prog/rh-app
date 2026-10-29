@@ -5845,7 +5845,7 @@
                               {st.l}
                             </span>
                             {c.erro_detalhe && (
-                              <div style={{fontSize:10,color:'#991B1B',marginTop:3,maxWidth:210,marginInline:'auto'}} title={c.erro_detalhe}>
+                              <div style={{fontSize:10,color:c.erro_detalhe.startsWith('Aviso:') ? '#92400E' : '#991B1B',marginTop:3,maxWidth:210,marginInline:'auto'}} title={c.erro_detalhe}>
                                 {c.erro_detalhe.slice(0, 65)}{c.erro_detalhe.length > 65 ? '…' : ''}
                               </div>
                             )}

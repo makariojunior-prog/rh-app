@@ -59,14 +59,33 @@ const CONTAS_META: Record<'cantina' | 'lumar', {
 // Token de escrita da Meta para a conta (mesma ordem em publicar e pausar)
 function resolverTokenMeta(contaKey: 'cantina' | 'lumar', credencialRef?: string | null): string {
   const sufixo = contaKey === 'lumar' ? '_LUMAR' : '_CANTINA'
+  // trim: quem cola o token no painel costuma levar junto uma quebra de linha
+  const ler = (nome?: string | null) => (nome ? Deno.env.get(nome)?.trim() : '') || ''
   return (
-    Deno.env.get(`META_ACCESS_TOKEN_ESCRITA${sufixo}`) ||
-    Deno.env.get('META_ACCESS_TOKEN_ESCRITA') ||
-    (credencialRef ? Deno.env.get(credencialRef) : '') ||
-    Deno.env.get(`META_ACCESS_TOKEN${sufixo}`) ||
-    Deno.env.get('META_ACCESS_TOKEN') ||
+    ler(`META_ACCESS_TOKEN_ESCRITA${sufixo}`) ||
+    ler('META_ACCESS_TOKEN_ESCRITA') ||
+    ler(credencialRef) ||
+    ler(`META_ACCESS_TOKEN${sufixo}`) ||
+    ler('META_ACCESS_TOKEN') ||
     ''
   )
+}
+
+// A partir da v24 a Meta exige is_adset_budget_sharing_enabled em campanhas com orçamento no conjunto
+function versaoGraphNumero(versao: string): number {
+  const m = /^v?(\d+)/.exec(versao.trim())
+  return m ? Number(m[1]) : 0
+}
+
+// UTMs dos anúncios do RH (url_tags do criativo): o site de vagas identifica a origem do candidato
+function utmTagsRecrutamento(contaKey: 'cantina' | 'lumar', slugVaga: string, formato: 'feed' | 'story'): string {
+  return new URLSearchParams({
+    utm_source: 'meta',
+    utm_medium: 'paid_social',
+    utm_campaign: `rh-${contaKey}-${slugVaga}`,
+    utm_content: formato,
+    utm_id: '{{campaign.id}}',
+  }).toString().replace(/%7B/gi, '{').replace(/%7D/gi, '}')
 }
 
 // Redige tokens de qualquer mensagem de erro antes de devolver ou salvar no banco
@@ -725,14 +744,17 @@ Deno.serve(async (req: Request) => {
 
         // Passo 4.1b: Upload da imagem de Story 9:16 (/adimages)
         let imageHashStory: string | null = null
+        const avisos: string[] = []
         if (imagem_story_b64) {
           try {
             const imgStoryRes = await postMeta('adimages', { bytes: imagem_story_b64 })
             const storyMap = imgStoryRes?.images || {}
             const storyKey = Object.keys(storyMap)[0]
             imageHashStory = storyMap[storyKey]?.hash ?? null
-          } catch (_eStory) {
+            if (!imageHashStory) avisos.push('Meta não retornou o hash da imagem de Story; só o anúncio de Feed foi criado.')
+          } catch (eStory) {
             imageHashStory = null
+            avisos.push(`Imagem de Story não enviada; só o anúncio de Feed foi criado. ${redigirSegredos(String(eStory), [metaToken])}`)
           }
         }
 
@@ -745,6 +767,7 @@ Deno.serve(async (req: Request) => {
           status: 'PAUSED',
           special_ad_categories: JSON.stringify(['EMPLOYMENT']),
           special_ad_category_country: JSON.stringify(['BR']),
+          ...(versaoGraphNumero(graphVersion) >= 24 ? { is_adset_budget_sharing_enabled: 'false' } : {}),
         })
         campaignId = String(campRes.id)
 
@@ -801,6 +824,7 @@ Deno.serve(async (req: Request) => {
         const creativeFeedRes = await postMeta('adcreatives', {
           name: `Criativo Feed (1:1) — ${vaga}`,
           object_story_spec: JSON.stringify(objectStorySpecFeed),
+          url_tags: utmTagsRecrutamento(contaKey, slugVaga, 'feed'),
         })
         const creativeId = String(creativeFeedRes.id)
 
@@ -834,6 +858,7 @@ Deno.serve(async (req: Request) => {
             const creativeStoryRes = await postMeta('adcreatives', {
               name: `Criativo Story (9:16) — ${vaga}`,
               object_story_spec: JSON.stringify(objectStorySpecStory),
+              url_tags: utmTagsRecrutamento(contaKey, slugVaga, 'story'),
             })
             creativeStoryId = String(creativeStoryRes.id)
 
@@ -844,8 +869,9 @@ Deno.serve(async (req: Request) => {
               status: 'ACTIVE',
             })
             adStoryId = String(adStoryRes.id)
-          } catch (_eStoryAd) {
+          } catch (eStoryAd) {
             // Se falhar apenas o 2º anúncio, o anúncio principal já está ativo
+            avisos.push(`Anúncio de Story não criado; o de Feed está ativo. ${redigirSegredos(String(eStoryAd), [metaToken])}`)
           }
         }
 
@@ -864,7 +890,7 @@ Deno.serve(async (req: Request) => {
             meta_creative_id: creativeId,
             meta_ad_id: adId,
             mkt_comando_id: comandoId,
-            erro_detalhe: null,
+            erro_detalhe: avisos.length ? `Aviso: ${avisos.join(' | ')}` : null,
             publicado_em: new Date().toISOString(),
             atualizado_em: new Date().toISOString(),
           })
