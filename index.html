@@ -4455,6 +4455,7 @@
         const [funcoesCat, setFuncoesCat]             = React.useState([]);
         const [campanhasMeta, setCampanhasMeta]       = React.useState([]);
         const [campanhasCriadas, setCampanhasCriadas] = React.useState([]);
+        const [alertasCamp, setAlertasCamp]           = React.useState([]);
         const [loadingLista, setLoadingLista]         = React.useState(true);
         const [mostrarCriador, setMostrarCriador]     = React.useState(false);
 
@@ -4510,14 +4511,16 @@
         const carregarTudo = React.useCallback(async () => {
           setLoadingLista(true);
           try {
-            const [fnRes, metaRes, rhRes] = await Promise.all([
+            const [fnRes, metaRes, rhRes, alRes] = await Promise.all([
               _supa.from('funcoes').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
               _supa.rpc('rh_campanhas_recrutamento'),
-              _supa.from('rh_campanhas_criadas').select('*').order('criado_em', { ascending: false }).limit(30)
+              _supa.from('rh_campanhas_criadas').select('*').order('criado_em', { ascending: false }).limit(30),
+              _supa.from('rh_campanha_alertas').select('*').is('resolvido_em', null).is('dispensado_em', null).order('criado_em', { ascending: false })
             ]);
             if (fnRes.data) setFuncoesCat(fnRes.data);
             if (metaRes.data) setCampanhasMeta(metaRes.data);
             if (rhRes.data) setCampanhasCriadas(rhRes.data);
+            if (alRes.data) setAlertasCamp(alRes.data);
           } catch (_e) {}
           setLoadingLista(false);
         }, [empresaId]);
@@ -4865,7 +4868,8 @@
           // ── 4. CAIXA CENTRAL CREME: REMUNERAÇÃO & BENEFÍCIOS ──
           const mainBoxY = topSectionBottom + (isStory ? 28 : 20);
           const footerH = isStory ? 132 : 108;
-          const footerY = isStory ? 1485 : (H - padX - footerH);
+          // Story: os ~340 px finais (y > 1580) ficam sob o botão/rodapé da Meta; o rodapé da arte termina antes disso
+          const footerY = isStory ? 1440 : (H - padX - footerH);
           const mainBoxH = footerY - mainBoxY - (isStory ? 28 : 18);
           const mainBoxW = W - padX * 2;
 
@@ -5438,6 +5442,25 @@
           }
         };
 
+        // Alertas gerados pela verificação periódica (reprovação, falta de entrega, token/conta com problema...)
+        const dispensarAlerta = async (alerta) => {
+          const { data: { user } } = await _supa.auth.getUser();
+          const { error } = await _supa.from('rh_campanha_alertas')
+            .update({ dispensado_em: new Date().toISOString(), dispensado_por: user?.id || null })
+            .eq('id', alerta.id);
+          if (error) { onStatusMsg?.({ ok: false, msg: '❌ ' + error.message }); return; }
+          setAlertasCamp(p => p.filter(a => a.id !== alerta.id));
+        };
+        const corAlerta = (sev) => sev === 'critico'
+          ? { bg: '#FEE2E2', bd: '#FCA5A5', c: '#991B1B', ic: '🚨' }
+          : { bg: '#FEF3C7', bd: '#FCD34D', c: '#92400E', ic: '⚠️' };
+        const alertasOrdenados = [...alertasCamp].sort((a, b) => (a.severidade === 'critico' ? 0 : 1) - (b.severidade === 'critico' ? 0 : 1));
+        const nomeCampanhaDoAlerta = (a) => {
+          if (!a.campanha_id) return `Conta de anúncios ${a.conta_id_externo === '462816038169791' ? 'Lumar Alimentos' : a.conta_id_externo === '338176501855182' ? 'Cantina em Casa' : (a.conta_id_externo || '')}`;
+          const c = campanhasCriadas.find(x => x.id === a.campanha_id);
+          return c ? `${c.vaga} — ${c.nome_campanha}` : 'Campanha';
+        };
+
         const cfgAtual = CONTAS_INFO[contaAnuncio] || CONTAS_INFO.cantina;
 
         return (
@@ -5891,6 +5914,29 @@
               )}
             </div>
 
+            {/* ── ALERTAS DAS CAMPANHAS (verificação automática a cada hora) ── */}
+            {alertasOrdenados.length > 0 && (
+              <div style={{marginBottom:14,display:'grid',gap:8}}>
+                {alertasOrdenados.map(a => {
+                  const cor = corAlerta(a.severidade);
+                  return (
+                    <div key={a.id} style={{background:cor.bg,border:`1px solid ${cor.bd}`,color:cor.c,borderRadius:8,padding:'10px 14px',display:'flex',gap:10,alignItems:'flex-start'}}>
+                      <span style={{fontSize:16,lineHeight:1.3}}>{cor.ic}</span>
+                      <div style={{flex:1,fontSize:12.5,lineHeight:1.5}}>
+                        <div style={{fontWeight:800}}>{nomeCampanhaDoAlerta(a)}</div>
+                        <div>{a.mensagem}</div>
+                        <div style={{fontSize:10.5,opacity:0.75,marginTop:2}}>Detectado em {new Date(a.criado_em).toLocaleString('pt-BR')}</div>
+                      </div>
+                      <button onClick={()=>dispensarAlerta(a)} title="Marcar como visto (some até a situação mudar)"
+                        style={{background:'none',border:`1px solid ${cor.bd}`,color:cor.c,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',whiteSpace:'nowrap'}}>
+                        Já vi
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ── HISTÓRICO DE CAMPANHAS CRIADAS PELO RH ── */}
             <div style={s.card}>
               <div style={{fontWeight:700,fontSize:13,color:C.pri,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12}}>
@@ -5959,6 +6005,16 @@
                             <span title={c.erro_detalhe || ''} style={{background:st.bg,color:st.c,padding:'3px 9px',borderRadius:10,fontSize:11,fontWeight:700}}>
                               {st.l}
                             </span>
+                            {alertasCamp.some(a => a.campanha_id === c.id) && (
+                              <div style={{marginTop:4}}>
+                                <span title={alertasCamp.filter(a => a.campanha_id === c.id).map(a => a.mensagem).join('\n')}
+                                  style={{background:alertasCamp.some(a => a.campanha_id === c.id && a.severidade === 'critico') ? '#FEE2E2' : '#FEF3C7',
+                                          color:alertasCamp.some(a => a.campanha_id === c.id && a.severidade === 'critico') ? '#991B1B' : '#92400E',
+                                          padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:700,cursor:'help'}}>
+                                  ⚠️ {alertasCamp.filter(a => a.campanha_id === c.id).length} alerta(s)
+                                </span>
+                              </div>
+                            )}
                             {c.erro_detalhe && (
                               <div style={{fontSize:10,color:c.erro_detalhe.startsWith('Aviso:') ? '#92400E' : '#991B1B',marginTop:3,maxWidth:210,marginInline:'auto'}} title={c.erro_detalhe}>
                                 {c.erro_detalhe.slice(0, 65)}{c.erro_detalhe.length > 65 ? '…' : ''}
