@@ -314,6 +314,10 @@ Deno.serve(async (req: Request) => {
       const whatsapp_contato         = String(b.whatsapp_contato ?? '62 9 9330-9428').trim()
       const instagram_handle         = String(b.instagram_handle ?? (conta === 'lumar' ? 'lumaralimentos' : 'cantina.em.casa')).trim()
       const gerar_foto_ia            = Boolean(b.gerar_foto_ia)
+      // Modo ajuste: a IA recebe a arte atual (com as edições do RH) e altera só o que foi pedido
+      const ajuste_ia                = String(b.ajuste_ia ?? '').trim().slice(0, 1000)
+      const copyAtualRaw             = (b.copy_atual && typeof b.copy_atual === 'object') ? b.copy_atual : null
+      const modoAjuste               = Boolean(ajuste_ia && copyAtualRaw)
 
       const geminiKey =
         Deno.env.get('RH_GEMINI_API_KEY') ??
@@ -341,7 +345,25 @@ Deno.serve(async (req: Request) => {
         url_candidatura: linkCandidatura,
       })
 
-      let copy = { ...fallback }
+      const listaTexto = (v: unknown) => Array.isArray(v) ? v.map(String).filter((s) => s.trim()) : []
+      const copyAtual = copyAtualRaw ? {
+        cargo_banner: String(copyAtualRaw.cargo_banner ?? ''),
+        requisitos_bullets: listaTexto(copyAtualRaw.requisitos_bullets),
+        remuneracao_bullets: listaTexto(copyAtualRaw.remuneracao_bullets),
+        beneficios_bullets: listaTexto(copyAtualRaw.beneficios_bullets),
+        titulo_link: String(copyAtualRaw.titulo_link ?? ''),
+        legenda: String(copyAtualRaw.legenda ?? ''),
+        prompt_foto_funcao: String(copyAtualRaw.prompt_foto_funcao ?? ''),
+      } : null
+      // No ajuste, o que a IA não devolver fica como o RH deixou (não volta ao template)
+      const base: typeof fallback = modoAjuste && copyAtual
+        ? {
+            ...fallback,
+            ...Object.fromEntries(Object.entries(copyAtual).filter(([, v]) => Array.isArray(v) ? v.length : String(v).trim())),
+          }
+        : fallback
+
+      let copy = { ...base }
       let usouIA = false
       let avisoIA: string | null = null
 
@@ -383,6 +405,17 @@ Deno.serve(async (req: Request) => {
             `5. "titulo_link": título curto do anúncio no Meta Ads (ex: "Vaga: ${vaga} — Candidate-se").`,
             `6. "legenda": legenda completa e persuasiva para o post do Instagram e Facebook, contendo os dados da vaga, WhatsApp (${whatsapp_contato}) e o link exato ${linkCandidatura}.`,
             `7. "prompt_foto_funcao": descrição detalhada em INGLÊS para gerar uma fotografia ilustrativa da função "${vaga}" (foco nas mãos/profissional executando a atividade típica do cargo, ex: padeiro segurando pão artesanal rústico em mesa de madeira, cozinheiro preparando prato, motorista/estoquista em operação limpa; iluminação quente e apetitosa, estilo fotografia publicitária, SEM nenhum texto ou logotipo).`,
+            ...(modoAjuste && copyAtual ? [
+              ``,
+              `MODO AJUSTE — a arte já existe e o RH pode tê-la editado à mão. Esta é a versão ATUAL (JSON):`,
+              JSON.stringify(copyAtual),
+              ``,
+              `PEDIDO DE AJUSTE DO RECRUTADOR: ${ajuste_ia}`,
+              ``,
+              `Aplique SOMENTE o que foi pedido. Todos os campos que o pedido não menciona devem voltar EXATAMENTE iguais à versão atual (mesmo texto, mesma ordem, mesmo **negrito**).`,
+              `Continue respeitando as regras acima (limites de tópicos, valores do RH, o que não deve ser divulgado). Se o pedido entrar em conflito com elas, siga as regras.`,
+              `Se o pedido for sobre a foto/imagem, reescreva "prompt_foto_funcao" de acordo; caso contrário, mantenha-o igual.`,
+            ] : []),
           ].filter(Boolean).join('\n')
 
           const schema = {
@@ -433,24 +466,24 @@ Deno.serve(async (req: Request) => {
             if (rawText) {
               const parsed = JSON.parse(rawText)
               copy = {
-                cargo_banner: String(parsed.cargo_banner || fallback.cargo_banner).toUpperCase().slice(0, 32),
+                cargo_banner: String(parsed.cargo_banner || base.cargo_banner).toUpperCase().slice(0, 32),
                 requisitos_bullets: Array.isArray(parsed.requisitos_bullets) && parsed.requisitos_bullets.length
                   ? parsed.requisitos_bullets.map(String).slice(0, 4)
-                  : fallback.requisitos_bullets,
+                  : base.requisitos_bullets,
                 remuneracao_bullets: Array.isArray(parsed.remuneracao_bullets) && parsed.remuneracao_bullets.length
                   ? parsed.remuneracao_bullets.map(String).slice(0, 4)
-                  : fallback.remuneracao_bullets,
+                  : base.remuneracao_bullets,
                 beneficios_bullets: !divulgar_beneficios
                   ? []
                   : Array.isArray(parsed.beneficios_bullets) && parsed.beneficios_bullets.length
                     ? parsed.beneficios_bullets.map(String).slice(0, 5)
-                    : fallback.beneficios_bullets,
-                horario_texto: fallback.horario_texto,
-                whatsapp_contato: whatsapp_contato || fallback.whatsapp_contato,
-                instagram_handle: instagram_handle || fallback.instagram_handle,
-                titulo_link: String(parsed.titulo_link || fallback.titulo_link).slice(0, 65),
-                legenda: String(parsed.legenda || fallback.legenda),
-                prompt_foto_funcao: String(parsed.prompt_foto_funcao || fallback.prompt_foto_funcao),
+                    : base.beneficios_bullets,
+                horario_texto: base.horario_texto,
+                whatsapp_contato: whatsapp_contato || base.whatsapp_contato,
+                instagram_handle: instagram_handle || base.instagram_handle,
+                titulo_link: String(parsed.titulo_link || base.titulo_link).slice(0, 65),
+                legenda: String(parsed.legenda || base.legenda),
+                prompt_foto_funcao: String(parsed.prompt_foto_funcao || base.prompt_foto_funcao),
               }
               usouIA = true
             }
@@ -463,6 +496,11 @@ Deno.serve(async (req: Request) => {
         }
       } else {
         avisoIA = 'Chave RH_GEMINI_API_KEY não encontrada nos secrets; prévia montada com o template oficial da empresa.'
+      }
+
+      // No ajuste, devolver o template no lugar da arte editada apagaria o trabalho do RH: melhor falhar
+      if (modoAjuste && !usouIA) {
+        return json({ error: `A IA não conseguiu aplicar o ajuste agora. A arte atual foi mantida. ${avisoIA ?? ''}`.trim() }, 502)
       }
 
       // Gera a fotografia ilustrativa da função (quadro superior direito) via Gemini Nano Banana 2.1

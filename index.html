@@ -4483,6 +4483,9 @@
 
         // Estado da prévia gerada pela IA e dos 2 Canvases (Feed 1:1 e Story 9:16)
         const [gerandoPrevia, setGerandoPrevia]       = React.useState(false);
+        const [pedidoAjusteIA, setPedidoAjusteIA]     = React.useState('');
+        const [ajusteNovaFoto, setAjusteNovaFoto]     = React.useState(false);
+        const [ajustandoIA, setAjustandoIA]           = React.useState(false);
         const [publicando, setPublicando]             = React.useState(false);
         const [previaPronta, setPreviaPronta]         = React.useState(false);
         const [avisoIA, setAvisoIA]                   = React.useState(null);
@@ -5193,7 +5196,8 @@
               whatsapp_contato: copyRecebida.whatsapp_contato || whatsappContato,
               instagram_handle: copyRecebida.instagram_handle || instagramHandle,
               titulo_link: copyRecebida.titulo_link || `Vaga: ${vaga} — Candidate-se`,
-              legenda: copyRecebida.legenda || ''
+              legenda: copyRecebida.legenda || '',
+              prompt_foto_funcao: copyRecebida.prompt_foto_funcao || ''
             });
             if (data?.aviso_ia) setAvisoIA(data.aviso_ia);
 
@@ -5244,6 +5248,75 @@
             setAvisoIA(`Prévia montada com o template oficial local (${err.message}).`);
             setPreviaPronta(true);
             setGerandoPrevia(false);
+          }
+        };
+
+        // Ajuste pedido em texto livre: a IA recebe a arte atual (com as edições manuais) e muda só o pedido
+        const ajustarArteIA = async () => {
+          const pedido = pedidoAjusteIA.trim();
+          if (!pedido) {
+            onStatusMsg?.({ ok: false, msg: '⚠️ Escreva o que a IA deve ajustar na arte.' });
+            return;
+          }
+          setAjustandoIA(true);
+          onStatusMsg?.(null);
+          try {
+            const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+              body: {
+                acao: 'gerar_previa',
+                conta_anuncio: contaAnuncio,
+                vaga: vaga.trim(),
+                divulgar_salario: divulgarSalario,
+                salario_texto: salarioTexto.trim(),
+                gratificacao_fixa: gratificacaoFixa.trim(),
+                gratificacoes_adicionais: gratificacoesAdic.trim(),
+                divulgar_beneficios: divulgarBeneficios,
+                beneficios: beneficiosSel,
+                divulgar_horario: divulgarHorario,
+                horario_texto: horarioTexto.trim(),
+                whatsapp_contato: whatsappContato.trim(),
+                instagram_handle: instagramHandle.trim(),
+                divulgar_local: divulgarLocal,
+                local_texto: localTexto.trim(),
+                requisitos_texto: requisitosTexto.trim(),
+                observacoes_ia: observacoesIA.trim(),
+                gerar_foto_ia: ajusteNovaFoto,
+                ajuste_ia: pedido,
+                copy_atual: iaCopy
+              }
+            });
+            if (data?.error) throw new Error(data.error);
+            if (error) throw new Error(error.message || 'Falha ao chamar função rh-campanha-ia');
+
+            const c = data?.copy || {};
+            // Rodapé (horário, WhatsApp, Instagram) continua como está na tela
+            setIaCopy(p => ({
+              ...p,
+              cargo_banner: c.cargo_banner || p.cargo_banner,
+              requisitos_bullets: Array.isArray(c.requisitos_bullets) && c.requisitos_bullets.length ? c.requisitos_bullets : p.requisitos_bullets,
+              remuneracao_bullets: Array.isArray(c.remuneracao_bullets) && c.remuneracao_bullets.length ? c.remuneracao_bullets : p.remuneracao_bullets,
+              beneficios_bullets: !divulgarBeneficios ? [] : (Array.isArray(c.beneficios_bullets) && c.beneficios_bullets.length ? c.beneficios_bullets : p.beneficios_bullets),
+              titulo_link: c.titulo_link || p.titulo_link,
+              legenda: c.legenda || p.legenda,
+              prompt_foto_funcao: c.prompt_foto_funcao || p.prompt_foto_funcao
+            }));
+
+            const b64Foto = data?.imagem_funcao_base64;
+            if (ajusteNovaFoto && b64Foto) {
+              await new Promise(res => {
+                const img = new Image();
+                img.onload = () => { setRoleImageObj(img); res(); };
+                img.onerror = () => res();
+                img.src = `data:${data?.imagem_funcao_mime || 'image/png'};base64,${b64Foto}`;
+              });
+            }
+            setAvisoIA(data?.aviso_ia || null);
+            setPedidoAjusteIA('');
+            toast(ajusteNovaFoto && !b64Foto ? 'Textos ajustados (a foto nova não foi gerada).' : 'Arte ajustada pela IA.', 'success');
+          } catch (err) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + err.message });
+          } finally {
+            setAjustandoIA(false);
           }
         };
 
@@ -5649,6 +5722,30 @@
 
                       {/* Coluna Direita: Editor Ao Vivo das Caixas da Arte + Botão Aprovar e Subir */}
                       <div>
+                        <div style={{...s.card,background:'var(--c-subtle)',marginBottom:14,border:`1px solid ${cfgAtual.corPri}`}}>
+                          <div style={{fontWeight:700,fontSize:12,color:C.pri,textTransform:'uppercase',marginBottom:4}}>
+                            🤖 Pedir ajuste à IA
+                          </div>
+                          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>
+                            A IA muda só o que você pedir e mantém o resto (inclusive suas edições abaixo).
+                          </div>
+                          <textarea rows={2} value={pedidoAjusteIA} disabled={ajustandoIA}
+                            onChange={e=>setPedidoAjusteIA(e.target.value)}
+                            onKeyDown={e=>{ if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ajustarArteIA(); }}
+                            placeholder="Ex: deixe os requisitos mais curtos; troque o título para 'Contratamos Padeiro'; legenda mais informal; foto do padeiro tirando pão do forno"
+                            style={{...s.input,resize:'vertical',fontFamily:'inherit',fontSize:12}}/>
+                          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginTop:8}}>
+                            <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:C.text,cursor:'pointer'}}>
+                              <input type="checkbox" checked={ajusteNovaFoto} disabled={ajustandoIA} onChange={e=>setAjusteNovaFoto(e.target.checked)}/>
+                              <span>Gerar também uma foto nova da função</span>
+                            </label>
+                            <button type="button" onClick={ajustarArteIA} disabled={ajustandoIA || !pedidoAjusteIA.trim()}
+                              style={{...s.btn, background:cfgAtual.corPri, padding:'7px 14px', fontSize:12, opacity:(ajustandoIA || !pedidoAjusteIA.trim()) ? 0.6 : 1}}>
+                              {ajustandoIA ? '⏳ Ajustando...' : '✨ Aplicar ajuste'}
+                            </button>
+                          </div>
+                        </div>
+
                         <div style={{...s.card,background:'var(--c-subtle)',marginBottom:14}}>
                           <div style={{fontWeight:700,fontSize:12,color:C.pri,textTransform:'uppercase',marginBottom:12}}>
                             ✏️ Ajuste Fino da Arte (Atualiza Feed e Story em tempo real)
