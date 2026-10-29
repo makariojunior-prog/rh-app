@@ -4459,6 +4459,13 @@
         const [analisesCamp, setAnalisesCamp]         = React.useState({});
         const [analiseAbertaId, setAnaliseAbertaId]   = React.useState(null);
         const [analisandoId, setAnalisandoId]         = React.useState(null);
+        const [ajusteAbertoId, setAjusteAbertoId]     = React.useState(null);
+        const [ajusteEstado, setAjusteEstado]         = React.useState(null);
+        const [ajusteCarregando, setAjusteCarregando] = React.useState(false);
+        const [ajusteOrc, setAjusteOrc]               = React.useState('');
+        const [ajusteDias, setAjusteDias]             = React.useState('');
+        const [ajusteReativar, setAjusteReativar]     = React.useState(false);
+        const [ajustando, setAjustando]               = React.useState(false);
         const [loadingLista, setLoadingLista]         = React.useState(true);
         const [mostrarCriador, setMostrarCriador]     = React.useState(false);
 
@@ -5476,6 +5483,54 @@
             setAnalisandoId(null);
           }
         };
+        // Ajuste de campanha no ar: aumentar orçamento, estender dias, reativar pausada/encerrada
+        const abrirAjuste = async (camp) => {
+          if (ajusteAbertoId === camp.id) { setAjusteAbertoId(null); return; }
+          setAjusteAbertoId(camp.id);
+          setAjusteEstado(null);
+          setAjusteOrc('');
+          setAjusteDias('');
+          setAjusteCarregando(true);
+          try {
+            const { data, error } = await _supa.functions.invoke('rh-campanha-ia', { body: { acao: 'estado', id: camp.id } });
+            if (data?.error) throw new Error(data.error);
+            if (error) throw new Error(error.message || 'Falha ao consultar a Meta');
+            setAjusteEstado(data.estado);
+            // Pausada ou encerrada: sugere reativar
+            setAjusteReativar(data.estado.status_campanha !== 'ACTIVE' || data.estado.encerrada);
+          } catch (err) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + err.message });
+            setAjusteAbertoId(null);
+          } finally {
+            setAjusteCarregando(false);
+          }
+        };
+        const numAjuste = (v) => parseFloat(String(v || '0').replace(/\./g, '').replace(',', '.')) || 0;
+        const aplicarAjuste = async (camp) => {
+          const orc = numAjuste(ajusteOrc);
+          const dias = Math.max(0, Math.round(Number(ajusteDias) || 0));
+          const partes = [];
+          if (orc > 0) partes.push(`adicionar ${fmtBRL(orc)} ao orçamento`);
+          if (dias > 0) partes.push(`${ajusteEstado?.encerrada ? 'rodar' : 'estender'} por mais ${dias} dia(s)`);
+          if (ajusteReativar) partes.push('reativar a campanha');
+          if (!partes.length) { onStatusMsg?.({ ok: false, msg: '⚠️ Informe orçamento ou dias a adicionar, ou marque para reativar.' }); return; }
+          if (!await confirmar(`Aplicar na Meta Ads agora: ${partes.join(', ')}?\n\nO gasto continua limitado ao novo orçamento total. A Meta aceita só uma alteração por campanha a cada 30 segundos.`, 'Ajustar Campanha')) return;
+          setAjustando(true);
+          try {
+            const { data, error } = await _supa.functions.invoke('rh-campanha-ia', {
+              body: { acao: 'ajustar', id: camp.id, adicionar_orcamento: orc, adicionar_dias: dias, reativar: ajusteReativar }
+            });
+            if (data?.error) throw new Error(data.error);
+            if (error) throw new Error(error.message || 'Falha ao ajustar a campanha');
+            toast('Campanha ajustada na Meta.', 'success');
+            setAjusteAbertoId(null);
+            carregarTudo();
+          } catch (err) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + err.message });
+          } finally {
+            setAjustando(false);
+          }
+        };
         const abrirAnalise = (camp) => {
           if (analiseAbertaId === camp.id) { setAnaliseAbertaId(null); return; }
           setAnaliseAbertaId(camp.id);
@@ -6089,6 +6144,13 @@
                                 ⏸️ Pausar
                               </button>
                             )}
+                            {c.meta_campaign_id && c.meta_adset_id && (c.status === 'ativa' || c.status === 'pausada') && (
+                              <button onClick={()=>abrirAjuste(c)}
+                                style={{background:ajusteAbertoId === c.id ? C.pri : 'none',color:ajusteAbertoId === c.id ? '#fff' : C.pri,border:`1px solid ${C.pri}`,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginLeft:4}}
+                                title="Aumentar orçamento, estender dias ou reativar">
+                                ✏️ Ajustar
+                              </button>
+                            )}
                             {c.meta_campaign_id && (
                               <button onClick={()=>abrirAnalise(c)}
                                 style={{background:analiseAbertaId === c.id ? C.pri : 'none',color:analiseAbertaId === c.id ? '#fff' : C.pri,border:`1px solid ${C.pri}`,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginLeft:4}}
@@ -6179,6 +6241,83 @@
                                         )}
                                         <div style={{fontSize:10,color:C.muted,marginTop:8}}>
                                           Os números da Meta chegam com algumas horas de atraso. Candidaturas contadas: só as que vieram pelo link do anúncio. A análise automática roda todo dia às 9h30.
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        )}
+                        {ajusteAbertoId === c.id && (
+                          <tr>
+                            <td colSpan={8} style={{padding:'0 8px 14px',background:'var(--c-subtle)'}}>
+                              {(() => {
+                                const e = ajusteEstado;
+                                const orc = numAjuste(ajusteOrc);
+                                const dias = Math.max(0, Math.round(Number(ajusteDias) || 0));
+                                const agoraMs = Date.now();
+                                let prev = null;
+                                if (e) {
+                                  const fimBase = e.encerrada ? agoraMs : new Date(e.termina_em).getTime();
+                                  const novoFim = new Date(fimBase + dias * 86400000);
+                                  const diasRest = Math.max(0, (novoFim.getTime() - agoraMs) / 86400000);
+                                  const restDepois = e.orcamento_restante + orc;
+                                  const minimo = Math.round(6 * diasRest * 100) / 100;
+                                  prev = {
+                                    novoFim: dias > 0 ? novoFim : new Date(e.termina_em),
+                                    novoTotal: e.orcamento_total + orc,
+                                    restDepois,
+                                    diasRest,
+                                    minimo,
+                                    insuficiente: diasRest > 0 && restDepois < minimo,
+                                    porDia: diasRest > 0 ? restDepois / diasRest : 0
+                                  };
+                                }
+                                const fmtDH = (d) => new Date(d).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+                                return (
+                                  <div style={{paddingTop:12}}>
+                                    <div style={{fontWeight:800,fontSize:13,color:C.pri,marginBottom:8}}>✏️ Ajustar campanha — {c.vaga}</div>
+                                    {ajusteCarregando || !e ? (
+                                      <div style={{fontSize:12,color:C.muted}}>Consultando a Meta...</div>
+                                    ) : (
+                                      <>
+                                        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:10,fontSize:12}}>
+                                          <span style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:8,padding:'6px 10px'}}>Orçamento total: <strong>{fmtBRL(e.orcamento_total)}</strong></span>
+                                          <span style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:8,padding:'6px 10px'}}>Ainda disponível: <strong>{fmtBRL(e.orcamento_restante)}</strong></span>
+                                          <span style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:8,padding:'6px 10px'}}>{e.encerrada ? 'Terminou em' : 'Termina em'}: <strong>{fmtDH(e.termina_em)}</strong></span>
+                                          <span style={{background:e.encerrada || e.status_campanha !== 'ACTIVE' ? '#FEF3C7' : '#DCFCE7',borderRadius:8,padding:'6px 10px'}}>
+                                            Situação: <strong>{e.encerrada ? 'encerrada' : e.status_campanha === 'ACTIVE' ? 'no ar' : 'pausada'}</strong>
+                                          </span>
+                                        </div>
+                                        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:10,marginBottom:10}}>
+                                          <div>
+                                            <label style={s.label}>Adicionar ao orçamento (R$)</label>
+                                            <input type="text" value={ajusteOrc} onChange={ev=>setAjusteOrc(ev.target.value)} placeholder="Ex: 50,00" style={s.input}/>
+                                          </div>
+                                          <div>
+                                            <label style={s.label}>{e.encerrada ? 'Rodar por mais (dias, a partir de agora)' : 'Estender por mais (dias)'}</label>
+                                            <input type="number" min="0" max="90" value={ajusteDias} onChange={ev=>setAjusteDias(ev.target.value)} placeholder="Ex: 7" style={s.input}/>
+                                          </div>
+                                          <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,alignSelf:'end',paddingBottom:8,cursor:'pointer'}}>
+                                            <input type="checkbox" checked={ajusteReativar} onChange={ev=>setAjusteReativar(ev.target.checked)}/>
+                                            <span>Reativar a campanha</span>
+                                          </label>
+                                        </div>
+                                        {(orc > 0 || dias > 0) && prev && (
+                                          <div style={{fontSize:12,background:prev.insuficiente ? '#FEE2E2' : '#DCFCE7',color:prev.insuficiente ? '#991B1B' : '#166534',borderRadius:8,padding:'8px 12px',marginBottom:10,lineHeight:1.5}}>
+                                            Novo total: <strong>{fmtBRL(prev.novoTotal)}</strong> · disponível: <strong>{fmtBRL(prev.restDepois)}</strong> · termina em <strong>{fmtDH(prev.novoFim)}</strong>
+                                            {prev.diasRest > 0 && <> · ≈ {fmtBRL(prev.porDia)}/dia</>}
+                                            {prev.insuficiente && <div>⚠️ Para esse período o disponível precisa ser de pelo menos {fmtBRL(prev.minimo)} (R$ 6,00 por dia, exigência da Meta).</div>}
+                                          </div>
+                                        )}
+                                        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                                          <button onClick={()=>aplicarAjuste(c)} disabled={ajustando || (prev && prev.insuficiente)}
+                                            style={{...s.btn,padding:'7px 16px',fontSize:12,opacity:(ajustando || (prev && prev.insuficiente)) ? 0.6 : 1}}>
+                                            {ajustando ? '⏳ Aplicando na Meta...' : '✅ Aplicar na Meta'}
+                                          </button>
+                                          <span style={{fontSize:10,color:C.muted}}>O orçamento só pode aumentar. Para reduzir, pause a campanha.</span>
                                         </div>
                                       </>
                                     )}

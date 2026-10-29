@@ -1116,6 +1116,131 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true })
     }
 
+    // ── AÇÕES 5 e 6: ESTADO E AJUSTE DE UMA CAMPANHA NO AR (orçamento, duração, reativar) ──
+    if (acao === 'estado' || acao === 'ajustar') {
+      const b = body as Record<string, any>
+      const id = String(b.id ?? '')
+      if (!id) return json({ error: 'Informe o ID da campanha.' }, 400)
+      const { data: camp } = await admin.from('rh_campanhas_criadas').select('*').eq('id', id).maybeSingle()
+      if (!camp) return json({ error: 'Campanha não encontrada.' }, 404)
+      if (!camp.meta_campaign_id || !camp.meta_adset_id) {
+        return json({ error: 'Esta campanha não foi publicada na Meta; não há o que ajustar.' }, 400)
+      }
+
+      const contaKey: 'cantina' | 'lumar' = camp.conta_anuncio === 'lumar' ? 'lumar' : 'cantina'
+      const { data: mktContaA } = await admin
+        .from('mkt_contas').select('id, credencial_ref')
+        .eq('plataforma', 'meta').eq('id_externo', camp.conta_id_externo).maybeSingle()
+      const metaToken = resolverTokenMeta(contaKey, mktContaA?.credencial_ref)
+      if (!metaToken) return json({ error: 'Token da Meta não configurado.' }, 500)
+      const graphVersion = Deno.env.get('META_GRAPH_VERSION') || 'v23.0'
+
+      const chamarMeta = async (path: string, params?: Record<string, string>) => {
+        const r = params
+          ? await fetch(`https://graph.facebook.com/${graphVersion}/${path}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ ...params, access_token: metaToken }).toString(),
+            })
+          : await fetch(`https://graph.facebook.com/${graphVersion}/${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(metaToken)}`)
+        const j = await r.json().catch(() => ({}))
+        if (!r.ok || j?.error) {
+          const e = j?.error
+          // 613: a Meta aceita uma alteração por conjunto a cada 30 s
+          if (Number(e?.code) === 613) throw new Error('A Meta limita alterações seguidas na mesma campanha. Aguarde 30 segundos e tente de novo.')
+          const detalhe = e?.error_user_msg || e?.message || JSON.stringify(j)
+          throw new Error(redigirSegredos(String(detalhe).slice(0, 300), [metaToken]))
+        }
+        return j
+      }
+
+      try {
+        const conj = await chamarMeta(`${camp.meta_adset_id}?fields=lifetime_budget,budget_remaining,end_time,status,effective_status`)
+        const cmp = await chamarMeta(`${camp.meta_campaign_id}?fields=status,effective_status`)
+        const agora = Date.now()
+        const fimAtual = conj.end_time ? new Date(conj.end_time).getTime() : new Date(camp.data_fim).getTime()
+        const encerrada = fimAtual <= agora
+        const estadoMeta = {
+          orcamento_total: Number(conj.lifetime_budget) / 100,
+          orcamento_restante: Number(conj.budget_remaining) / 100,
+          termina_em: new Date(fimAtual).toISOString(),
+          encerrada,
+          status_campanha: cmp.status,
+          status_conjunto: conj.status,
+          efetivo_campanha: cmp.effective_status,
+          efetivo_conjunto: conj.effective_status,
+        }
+        if (acao === 'estado') return json({ ok: true, estado: estadoMeta })
+
+        // ── ajustar ──
+        const adicionarOrcamento = Math.max(0, Number(b.adicionar_orcamento) || 0)
+        const adicionarDias = Math.max(0, Math.min(90, Math.round(Number(b.adicionar_dias) || 0)))
+        const reativar = Boolean(b.reativar)
+        if (adicionarOrcamento === 0 && adicionarDias === 0 && !reativar) {
+          return json({ error: 'Informe quanto orçamento ou quantos dias adicionar, ou marque para reativar.' }, 400)
+        }
+        if (encerrada && adicionarDias === 0) {
+          return json({ error: 'A campanha já terminou: informe quantos dias a mais ela deve rodar a partir de agora.' }, 400)
+        }
+
+        // Encerrada: os dias contam a partir de agora; no ar: a partir da data final atual
+        const novoFim = new Date((encerrada ? agora : fimAtual) + adicionarDias * 86400000)
+        const diasRestantes = Math.max(0, (novoFim.getTime() - agora) / 86400000)
+        const restanteDepois = estadoMeta.orcamento_restante + adicionarOrcamento
+        const minimoRestante = Math.round(6 * diasRestantes * 100) / 100
+        if (diasRestantes > 0 && restanteDepois < minimoRestante) {
+          const faltam = Math.ceil((minimoRestante - estadoMeta.orcamento_restante) * 100) / 100
+          return json({
+            error: `Para ${Math.ceil(diasRestantes)} dia(s) restante(s) o orçamento restante precisa ser de pelo menos R$ ${minimoRestante.toFixed(2).replace('.', ',')} (R$ 6,00 por dia, exigência da Meta). Hoje restam R$ ${estadoMeta.orcamento_restante.toFixed(2).replace('.', ',')}; adicione pelo menos R$ ${faltam.toFixed(2).replace('.', ',')}.`,
+          }, 400)
+        }
+
+        // Uma única alteração no conjunto (a Meta barra alterações seguidas); a campanha é outro objeto
+        const paramsConjunto: Record<string, string> = {}
+        if (adicionarOrcamento > 0) paramsConjunto.lifetime_budget = String(Math.round((estadoMeta.orcamento_total + adicionarOrcamento) * 100))
+        if (adicionarDias > 0) paramsConjunto.end_time = novoFim.toISOString()
+        if (reativar) paramsConjunto.status = 'ACTIVE'
+        if (Object.keys(paramsConjunto).length) await chamarMeta(camp.meta_adset_id, paramsConjunto)
+        if (reativar) await chamarMeta(camp.meta_campaign_id, { status: 'ACTIVE' })
+
+        const novoOrcamento = Number(camp.orcamento_total) + adicionarOrcamento
+        const fimFinal = adicionarDias > 0 ? novoFim : new Date(fimAtual)
+        const diasTotais = Math.max(1, Math.ceil((fimFinal.getTime() - new Date(camp.data_inicio).getTime()) / 86400000))
+        const { data: campAtualizada } = await admin.from('rh_campanhas_criadas').update({
+          orcamento_total: novoOrcamento,
+          data_fim: fimFinal.toISOString(),
+          dias_duracao: diasTotais,
+          status: 'ativa',
+          erro_detalhe: null,
+          atualizado_em: new Date().toISOString(),
+        }).eq('id', id).select('*').single()
+
+        await admin.from('mkt_campanhas').update({
+          orcamento_total: novoOrcamento,
+          fim: fimFinal.toISOString(),
+          ...(reativar ? { status: 'ativa', status_efetivo: 'ACTIVE' } : {}),
+          atualizado_em: new Date().toISOString(),
+        }).eq('id_externo', camp.meta_campaign_id)
+
+        if (mktContaA?.id) {
+          await admin.from('mkt_auditoria').insert({
+            usuario_id: caller.id,
+            conta_id: mktContaA.id,
+            comando_id: camp.mkt_comando_id ?? null,
+            acao: 'ajustar_campanha_rh',
+            entidade_tipo: 'campanha',
+            entidade_id_externo: camp.meta_campaign_id,
+            antes: { orcamento_total: Number(camp.orcamento_total), data_fim: camp.data_fim, encerrada },
+            depois: { orcamento_total: novoOrcamento, data_fim: fimFinal.toISOString(), adicionar_orcamento: adicionarOrcamento, adicionar_dias: adicionarDias, reativar },
+            origem: 'app',
+          })
+        }
+        return json({ ok: true, campanha: campAtualizada })
+      } catch (err) {
+        return json({ error: redigirSegredos(String((err as Error)?.message ?? err), [metaToken]) }, 502)
+      }
+    }
+
     // ── AÇÃO 4: EXCLUIR CAMPANHA (na Meta, se publicada, e do histórico do RH) ────
     if (acao === 'excluir') {
       const id = String((body as Record<string, unknown>).id ?? '')
