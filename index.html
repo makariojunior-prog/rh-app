@@ -4456,6 +4456,9 @@
         const [campanhasMeta, setCampanhasMeta]       = React.useState([]);
         const [campanhasCriadas, setCampanhasCriadas] = React.useState([]);
         const [alertasCamp, setAlertasCamp]           = React.useState([]);
+        const [analisesCamp, setAnalisesCamp]         = React.useState({});
+        const [analiseAbertaId, setAnaliseAbertaId]   = React.useState(null);
+        const [analisandoId, setAnalisandoId]         = React.useState(null);
         const [loadingLista, setLoadingLista]         = React.useState(true);
         const [mostrarCriador, setMostrarCriador]     = React.useState(false);
 
@@ -4511,12 +4514,18 @@
         const carregarTudo = React.useCallback(async () => {
           setLoadingLista(true);
           try {
-            const [fnRes, metaRes, rhRes, alRes] = await Promise.all([
+            const [fnRes, metaRes, rhRes, alRes, anRes] = await Promise.all([
               _supa.from('funcoes').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
               _supa.rpc('rh_campanhas_recrutamento'),
               _supa.from('rh_campanhas_criadas').select('*').order('criado_em', { ascending: false }).limit(30),
-              _supa.from('rh_campanha_alertas').select('*').is('resolvido_em', null).is('dispensado_em', null).order('criado_em', { ascending: false })
+              _supa.from('rh_campanha_alertas').select('*').is('resolvido_em', null).is('dispensado_em', null).order('criado_em', { ascending: false }),
+              _supa.from('rh_campanha_analises').select('*').order('gerada_em', { ascending: false }).limit(60)
             ]);
+            if (anRes.data) {
+              const ultimas = {};
+              anRes.data.forEach(a => { if (!ultimas[a.campanha_id]) ultimas[a.campanha_id] = a; });
+              setAnalisesCamp(ultimas);
+            }
             if (fnRes.data) setFuncoesCat(fnRes.data);
             if (metaRes.data) setCampanhasMeta(metaRes.data);
             if (rhRes.data) setCampanhasCriadas(rhRes.data);
@@ -5451,6 +5460,27 @@
           if (error) { onStatusMsg?.({ ok: false, msg: '❌ ' + error.message }); return; }
           setAlertasCamp(p => p.filter(a => a.id !== alerta.id));
         };
+        // Análise de desempenho: lê o que já existe (automática diária) e permite refazer na hora
+        const analisarCampanha = async (camp) => {
+          setAnalisandoId(camp.id);
+          try {
+            const { data, error } = await _supa.functions.invoke('rh-campanha-analise', { body: { acao: 'analisar', id: camp.id } });
+            if (data?.error) throw new Error(data.error);
+            if (error) throw new Error(error.message || 'Falha ao chamar a análise');
+            if (data?.analise) setAnalisesCamp(p => ({ ...p, [camp.id]: data.analise }));
+          } catch (err) {
+            onStatusMsg?.({ ok: false, msg: '❌ ' + err.message });
+          } finally {
+            setAnalisandoId(null);
+          }
+        };
+        const abrirAnalise = (camp) => {
+          if (analiseAbertaId === camp.id) { setAnaliseAbertaId(null); return; }
+          setAnaliseAbertaId(camp.id);
+          // Sem análise ou com mais de 6 h: refaz ao abrir
+          const ultima = analisesCamp[camp.id];
+          if (!ultima || Date.now() - new Date(ultima.gerada_em).getTime() > 6 * 3600 * 1000) analisarCampanha(camp);
+        };
         const corAlerta = (sev) => sev === 'critico'
           ? { bg: '#FEE2E2', bd: '#FCA5A5', c: '#991B1B', ic: '🚨' }
           : { bg: '#FEF3C7', bd: '#FCD34D', c: '#92400E', ic: '⚠️' };
@@ -5974,8 +6004,11 @@
                       // A Meta encerra sozinha no fim do período; o registro aqui continua 'ativa'.
                       const encerradaPorData = c.status === 'ativa' && c.data_fim && new Date(c.data_fim) < new Date();
                       const st = stMap[encerradaPorData ? 'encerrada' : c.status] || stMap.rascunho;
+                      const analiseC = analisesCamp[c.id];
+                      const sugestoesC = analiseC ? (analiseC.achados || []).filter(a => a.severidade === 'aviso' || a.severidade === 'critico').length : 0;
                       return (
-                        <tr key={c.id} style={{borderTop:`1px solid ${C.border}`}}>
+                        <React.Fragment key={c.id}>
+                        <tr style={{borderTop:`1px solid ${C.border}`}}>
                           <td style={{...s.td,fontSize:11,whiteSpace:'nowrap'}}>
                             {c.criado_em ? new Date(c.criado_em).toLocaleDateString('pt-BR') : '—'}
                           </td>
@@ -6042,6 +6075,13 @@
                                 ⏸️ Pausar
                               </button>
                             )}
+                            {c.meta_campaign_id && (
+                              <button onClick={()=>abrirAnalise(c)}
+                                style={{background:analiseAbertaId === c.id ? C.pri : 'none',color:analiseAbertaId === c.id ? '#fff' : C.pri,border:`1px solid ${C.pri}`,borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginLeft:4}}
+                                title="Ver como a campanha está performando e o que ajustar">
+                                📊 Análise{sugestoesC > 0 ? ` (${sugestoesC})` : ''}
+                              </button>
+                            )}
                             <button onClick={()=>excluirCampanha(c)}
                               style={{background:'none',border:'1px solid #FCA5A5',color:'#DC2626',borderRadius:5,fontSize:11,padding:'3px 8px',cursor:'pointer',marginLeft:4}}
                               title={c.meta_campaign_id ? 'Excluir na Meta Ads e do histórico' : 'Excluir do histórico'}>
@@ -6049,6 +6089,92 @@
                             </button>
                           </td>
                         </tr>
+                        {analiseAbertaId === c.id && (
+                          <tr>
+                            <td colSpan={8} style={{padding:'0 8px 14px',background:'var(--c-subtle)'}}>
+                              {(() => {
+                                const m = analiseC?.metricas || {};
+                                const sevCor = { critico:{bg:'#FEE2E2',c:'#991B1B',i:'🚨'}, aviso:{bg:'#FEF3C7',c:'#92400E',i:'⚠️'}, info:{bg:'#DBEAFE',c:'#1E40AF',i:'ℹ️'}, ok:{bg:'#DCFCE7',c:'#166534',i:'✅'} };
+                                const priCor = { alta:'#DC2626', media:'#D97706', baixa:'#6B7280' };
+                                const tile = (rot, val) => (
+                                  <div style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px',minWidth:96}}>
+                                    <div style={{fontSize:10,color:C.muted,textTransform:'uppercase',fontWeight:700}}>{rot}</div>
+                                    <div style={{fontSize:15,fontWeight:800,color:C.text}}>{val}</div>
+                                  </div>
+                                );
+                                const pct = (v) => v == null ? '—' : `${String(v).replace('.', ',')}%`;
+                                const rs = (v) => v == null ? '—' : fmtBRL(v);
+                                return (
+                                  <div style={{paddingTop:12}}>
+                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:10}}>
+                                      <div style={{fontWeight:800,fontSize:13,color:C.pri}}>
+                                        📊 Análise — {c.vaga}
+                                        {analiseC && <span style={{fontWeight:500,fontSize:11,color:C.muted}}> · {analiseC.origem === 'automatica' ? 'automática' : 'manual'}, {new Date(analiseC.gerada_em).toLocaleString('pt-BR')}</span>}
+                                      </div>
+                                      <button onClick={()=>analisarCampanha(c)} disabled={analisandoId === c.id}
+                                        style={{...s.btn,padding:'6px 14px',fontSize:12,opacity:analisandoId === c.id ? 0.6 : 1}}>
+                                        {analisandoId === c.id ? '⏳ Analisando...' : '🔄 Analisar agora'}
+                                      </button>
+                                    </div>
+                                    {!analiseC ? (
+                                      <div style={{fontSize:12,color:C.muted,padding:'10px 0'}}>
+                                        {analisandoId === c.id ? 'Lendo os números da Meta e as candidaturas...' : 'Ainda não há análise desta campanha. Clique em "Analisar agora".'}
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:12}}>
+                                          {tile('Impressões', (m.impressoes ?? 0).toLocaleString('pt-BR'))}
+                                          {tile('Cliques no link', (m.cliques_link ?? 0).toLocaleString('pt-BR'))}
+                                          {tile('Taxa de cliques', pct(m.ctr))}
+                                          {tile('Custo/clique', rs(m.cpc))}
+                                          {tile('Gasto', `${rs(m.gasto)} de ${rs(m.orcamento_total)}`)}
+                                          {tile('Candidaturas', m.candidatos ?? 0)}
+                                          {tile('Custo/candidato', rs(m.custo_por_candidato))}
+                                        </div>
+                                        {analiseC.resumo && (
+                                          <div style={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',fontSize:12.5,lineHeight:1.55,marginBottom:10}}>
+                                            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',marginBottom:3}}>{analiseC.usou_ia ? '🤖 Resumo da IA' : 'Resumo'}</div>
+                                            {analiseC.resumo}
+                                          </div>
+                                        )}
+                                        <div style={{display:'grid',gap:6,marginBottom:10}}>
+                                          {(analiseC.achados || []).map((a, i) => {
+                                            const k = sevCor[a.severidade] || sevCor.info;
+                                            return (
+                                              <div key={i} style={{background:k.bg,color:k.c,borderRadius:8,padding:'8px 12px',fontSize:12,lineHeight:1.5}}>
+                                                <div style={{fontWeight:800}}>{k.i} {a.titulo}</div>
+                                                <div>{a.detalhe}</div>
+                                                {a.sugestao && <div style={{marginTop:2}}>👉 {a.sugestao}</div>}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        {(analiseC.acoes || []).length > 0 && (
+                                          <div>
+                                            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',marginBottom:4}}>O que fazer</div>
+                                            <ol style={{margin:'0 0 0 18px',padding:0,fontSize:12.5,lineHeight:1.55}}>
+                                              {analiseC.acoes.map((a, i) => (
+                                                <li key={i} style={{marginBottom:4}}>
+                                                  <strong>{a.titulo}</strong>{' '}
+                                                  <span style={{fontSize:10,fontWeight:800,color:priCor[a.prioridade] || C.muted,textTransform:'uppercase'}}>({a.prioridade})</span>
+                                                  <div style={{color:C.muted}}>{a.motivo}</div>
+                                                </li>
+                                              ))}
+                                            </ol>
+                                          </div>
+                                        )}
+                                        <div style={{fontSize:10,color:C.muted,marginTop:8}}>
+                                          Os números da Meta chegam com algumas horas de atraso. Candidaturas contadas: só as que vieram pelo link do anúncio. A análise automática roda todo dia às 9h30.
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
