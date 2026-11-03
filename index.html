@@ -12874,7 +12874,11 @@
         while(dd<=end){ const k=WEEKDAY_MAP[dd.getDay()]; if(k&&k!=='DOM') m[k]=toISO(dd); dd.setDate(dd.getDate()+1); }
         return m;
       },[semanaIni,semanaFim]);
-      const atestadoVT=(emp,d)=>{ const iso=isoPorDiaVT[d]; return iso?atestadosVT[normNomeRH(emp.nome)]?.[iso]:undefined; };
+      const atestadoVT=(emp,d)=>{
+        const iso=isoPorDiaVT[d]; const st=iso?atestadosVT[normNomeRH(emp.nome)]?.[iso]:undefined;
+        // Atestado cadastrado como dia todo, mas que o RH marcou aqui como meio período → mantém o VT.
+        return (st==='atestado'&&emp.meioPeriodo?.[d])?'atestado_meio':st;
+      };
       const descontaVT=st=>st==='atestado'||st==='ferias';
       const diasAusenciaVT=(emp,tipo)=>{
         if(emp.afastado) return [];
@@ -12904,6 +12908,11 @@
 
       const toggleFeriado=(dia)=>setFeriadosDia(p=>({...p,[dia]:!p[dia]}));
       const toggleAtt=(id,dia)=>setEmployees(p=>p.map(e=>e.id===id?{...e,presente:{...e.presente,[dia]:!e.presente?.[dia]}}:e));
+      const toggleMeioPeriodo=(id,dia)=>setEmployees(p=>p.map(e=>{
+        if(e.id!==id) return e;
+        const ligar=!e.meioPeriodo?.[dia];
+        return {...e,meioPeriodo:{...e.meioPeriodo,[dia]:ligar},presente:{...e.presente,[dia]:ligar}};
+      }));
       const toggleAfastado=(id)=>setEmployees(p=>p.map(e=>e.id===id?{...e,afastado:!e.afastado}:e));
       const setValorPago=(id,val)=>setEmployees(p=>p.map(e=>e.id===id?{...e,valorPago:val}:e));
       const setAllDay=(dia,val)=>setEmployees(p=>p.map(e=>{ const dias=e.escala==="SEG-SAB"?DIAS_SS:DIAS_SF; if(!dias.includes(dia)) return e; return{...e,presente:{...e.presente,[dia]:val}}; }));
@@ -12943,6 +12952,7 @@
               nome:e.nome,
               escala:e.escala,
               presente:e.presente||{},
+              meioPeriodo:e.meioPeriodo||{},
               afastado:e.afastado||false,
               valorPago:e.valorPago||'',
               dias:getDias(e),
@@ -12976,6 +12986,7 @@
           nome:c.nome,
           escala:c.escala,
           presente:c.presente||{},
+          meioPeriodo:c.meioPeriodo||{},
           afastado:c.afastado||false,
           valorPago:c.valorPago||''
         })));
@@ -13410,13 +13421,15 @@
                                 return(
                                   <td key={d} style={{...s.tdC,background:bgCell,transition:"background 0.15s"}}>
                                     {atest==="atestado"?(
-                                      <span title="Atestado (dia todo) — VT descontado automaticamente" style={{fontSize:13}}>🏥</span>
+                                      <span onClick={()=>toggleMeioPeriodo(emp.id,d)} title="Atestado (dia todo) — VT descontado automaticamente. Clique se o atestado for só de meio período (manhã/tarde): o VT é mantido." style={{fontSize:13,cursor:"pointer"}}>🏥</span>
                                     ):atest==="ferias"?(
                                       <span title="Férias — VT descontado automaticamente" style={{fontSize:13}}>🏖️</span>
                                     ):works&&!isFeriado&&!emp.afastado?(
                                       <>
                                         <input type="checkbox" checked={checked} onChange={()=>toggleAtt(emp.id,d)} style={{width:15,height:15,cursor:"pointer"}}/>
-                                        {atest==="atestado_meio"&&<div title="Atestado de meio período — mantém o VT" style={{fontSize:8,color:"#B45309",fontWeight:700}}>½ATST</div>}
+                                        {atest==="atestado_meio"&&(emp.meioPeriodo?.[d]
+                                          ?<div onClick={()=>toggleMeioPeriodo(emp.id,d)} title="Marcado como meio período — mantém o VT. Clique para voltar a atestado de dia todo (desconta o VT)." style={{fontSize:8,color:"#B45309",fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>½ATST ↩</div>
+                                          :<div title="Atestado de meio período — mantém o VT" style={{fontSize:8,color:"#B45309",fontWeight:700}}>½ATST</div>)}
                                       </>
                                     ):isFeriado?(
                                       <span style={{color:"#C8A843",fontSize:13}}>🎌</span>
