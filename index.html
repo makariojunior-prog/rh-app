@@ -12723,6 +12723,66 @@
       );
     }
 
+    // ── Solicitação de compra: lança em compras_solicitacoes e cai direto no app de Compras ──
+    function SolicitarCompra({usuario,perfil}){
+      const [aberto,setAberto]=useState(false);
+      const vazio={item:"",setor:"RH",quantidade:"",unidade:"un",prazo:"",prioridade:"media",observacao:""};
+      const [f,setF]=useState(vazio);
+      const [enviando,setEnviando]=useState(false);
+      const [msg,setMsg]=useState(null);
+      const [ok,setOk]=useState(false);
+      const set=(k,v)=>setF(p=>({...p,[k]:v}));
+      const inp={width:"100%",boxSizing:"border-box",padding:"8px 10px",border:`1px solid ${C.border||"#d1d5db"}`,borderRadius:7,fontSize:13,fontFamily:"inherit"};
+      const lbl={display:"block",fontSize:11,fontWeight:700,color:C.muted,marginBottom:3};
+      function fechar(){ setAberto(false); if(ok){ setOk(false); setF(vazio); } setMsg(null); }
+      async function enviar(){
+        const qtd=parseFloat(String(f.quantidade).replace(",","."));
+        if(!f.item.trim()) return setMsg("Informe o item desejado.");
+        if(!qtd||qtd<=0) return setMsg("Informe a quantidade.");
+        if(!usuario?.id) return setMsg("Sessão inválida.");
+        setEnviando(true); setMsg(null);
+        const {error}=await _supa.from("compras_solicitacoes").insert({
+          item:f.item.trim(), setor:f.setor, quantidade:qtd, unidade:f.unidade, prazo:f.prazo||null, prioridade:f.prioridade,
+          observacao:f.observacao.trim()||null, origem:"rh", solicitante_id:usuario.id,
+          solicitante_nome:perfil?.nome||null, solicitante_email:usuario.email||null,
+        });
+        setEnviando(false);
+        if(error) return setMsg(error.message);
+        setOk(true);
+      }
+      const setores=["Produção","Logística","Comercial","Financeiro","RH","Marketing","Qualidade","Administrativo","Loja / Delivery","Manutenção","Outro"];
+      return (<>
+        <button onClick={()=>setAberto(true)} title="Solicitar compra" style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.9)',borderRadius:7,padding:'6px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}>🛒 Solicitar compra</button>
+        {aberto&&<div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={fechar}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.card||"#fff",color:C.text,borderRadius:14,padding:20,width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:16}}>🛒 Solicitar compra</div>
+              <button onClick={fechar} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.muted}}>✕</button>
+            </div>
+            {ok?<div style={{textAlign:"center",padding:"20px 0"}}>
+              <div style={{fontWeight:700,marginBottom:14}}>Solicitação enviada ao time de Compras ✅</div>
+              <button onClick={fechar} style={s.btnOutline}>Fechar</button>
+            </div>:<div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div><label style={lbl}>Item desejado *</label><input style={inp} value={f.item} onChange={e=>set("item",e.target.value)} autoFocus/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><label style={lbl}>Setor *</label><select style={inp} value={f.setor} onChange={e=>set("setor",e.target.value)}>{setores.map(x=><option key={x}>{x}</option>)}</select></div>
+                <div><label style={lbl}>Prioridade</label><select style={inp} value={f.prioridade} onChange={e=>set("prioridade",e.target.value)}><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></div>
+                <div><label style={lbl}>Quantidade *</label><input style={inp} inputMode="decimal" value={f.quantidade} onChange={e=>set("quantidade",e.target.value)}/></div>
+                <div><label style={lbl}>Unidade</label><select style={inp} value={f.unidade} onChange={e=>set("unidade",e.target.value)}>{["un","kg","L","cx","m"].map(x=><option key={x}>{x}</option>)}</select></div>
+              </div>
+              <div><label style={lbl}>Prazo para aquisição (opcional)</label><input type="date" style={inp} value={f.prazo} onChange={e=>set("prazo",e.target.value)}/></div>
+              <div><label style={lbl}>Observações</label><textarea style={{...inp,minHeight:64}} value={f.observacao} onChange={e=>set("observacao",e.target.value)}/></div>
+              {msg&&<div style={{color:"#dc2626",fontSize:13}}>{msg}</div>}
+              <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                <button onClick={fechar} style={s.btnOutline}>Cancelar</button>
+                <button onClick={enviar} disabled={enviando} style={{...s.btnOutline,background:C.pri,color:"#fff",opacity:enviando?0.6:1}}>{enviando?"Enviando…":"Enviar"}</button>
+              </div>
+            </div>}
+          </div>
+        </div>}
+      </>);
+    }
+
     function App(){
       const [page,setPage]=useState("dashboard");
       const [menuAberto,setMenuAberto]=useState(false);
@@ -13770,6 +13830,7 @@
                 <div style={{fontSize:12,fontWeight:600,color:'rgba(255,255,255,0.9)'}}>{perfil?.nome}</div>
                 <div style={{fontSize:10,color:'rgba(255,255,255,0.55)'}}>{perfil?.role==='admin'?'👑 Admin':'👤 Usuário'}</div>
               </div>
+              <SolicitarCompra usuario={usuario} perfil={perfil}/>
               <a href="https://portal.cantinaemcasa.com/home" title="Voltar ao Portal" style={{display:'inline-flex',alignItems:'center',gap:6,textDecoration:'none',background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.85)',borderRadius:7,padding:'6px 12px',cursor:'pointer',fontSize:12,fontWeight:600}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span className="rh-hdr-portal-txt">Portal</span></a>
               <button onClick={toggleDarkMode} title={darkMode?'Modo claro':'Modo escuro'} style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.85)',borderRadius:7,padding:'6px 10px',cursor:'pointer',fontSize:16,lineHeight:1}}>{darkMode?'☀️':'🌙'}</button>
               <button onClick={()=>_supa.auth.signOut()} style={{background:'rgba(255,255,255,0.12)',border:'1px solid rgba(255,255,255,0.25)',color:'rgba(255,255,255,0.85)',borderRadius:7,padding:'6px 14px',cursor:'pointer',fontSize:12,fontWeight:600}}>Sair</button>
