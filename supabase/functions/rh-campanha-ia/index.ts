@@ -86,6 +86,15 @@ function utmTagsRecrutamento(contaKey: 'cantina' | 'lumar', slugVaga: string, fo
 }
 
 // Redige tokens de qualquer mensagem de erro antes de devolver ou salvar no banco
+// Limita o texto sem cortar palavra ao meio (ex.: "...CARRO E MOT" -> "...CARRO E")
+function cortarNaPalavra(texto: string, max: number): string {
+  const t = texto.trim()
+  if (t.length <= max) return t
+  const corte = t.slice(0, max)
+  const ultimoEspaco = corte.lastIndexOf(' ')
+  return (ultimoEspaco > 0 ? corte.slice(0, ultimoEspaco) : corte).trim()
+}
+
 function redigirSegredos(msg: string, segredos: string[]): string {
   let out = msg.replace(/access_token=[^&\s"']+/gi, 'access_token=[REDACTED]')
   for (const s of segredos) {
@@ -394,7 +403,7 @@ Deno.serve(async (req: Request) => {
             observacoes_ia ? `- Instruções adicionais do recrutador: ${observacoes_ia}` : ``,
             ``,
             `Regras para o JSON de saída:`,
-            `1. "cargo_banner": nome do cargo em MAIÚSCULAS para a faixa branca principal (ex: "PADEIRO", "AUXILIAR DE COZINHA", máximo 24 caracteres).`,
+            `1. "cargo_banner": nome do cargo em MAIÚSCULAS para a faixa branca principal (ex: "PADEIRO", "AUXILIAR DE COZINHA", até 40 caracteres; cargos longos são quebrados em 2 linhas pela arte, então NUNCA corte nem abrevie palavras, mantenha o nome completo informado pelo RH).`,
             `2. "requisitos_bullets": lista com 3 ou 4 tópicos curtos e diretos de requisitos do cargo (ex: ["Experiência comprovada na função de padeiro", "Conhecimento em preparo de produtos de panificação em geral.", "Agilidade, organização e atenção aos detalhes", "Capacidade de trabalhar em equipe"]). Sem marcador "•" no início.`,
             `3. "remuneracao_bullets": lista de 1 a 3 tópicos para o bloco REMUNERAÇÃO. Use **negrito** (dois asteriscos) nos valores e palavras-chave importantes, exatamente neste estilo:`,
             `   - "Salário: **R$ 2.670,00**"`,
@@ -469,7 +478,7 @@ Deno.serve(async (req: Request) => {
             if (rawText) {
               const parsed = JSON.parse(rawText)
               copy = {
-                cargo_banner: String(parsed.cargo_banner || base.cargo_banner).toUpperCase().slice(0, 32),
+                cargo_banner: cortarNaPalavra(String(parsed.cargo_banner || base.cargo_banner).toUpperCase(), 48),
                 requisitos_bullets: Array.isArray(parsed.requisitos_bullets) && parsed.requisitos_bullets.length
                   ? parsed.requisitos_bullets.map(String).slice(0, 4)
                   : base.requisitos_bullets,

@@ -4662,6 +4662,34 @@
           return lines;
         };
 
+        // Divide um texto curto (cargo, horário) em até `maxLinhas` linhas, quebrando só entre palavras e
+        // equilibrando a largura das linhas. Respeita quebras manuais ("\n" ou "|"). Devolve null se não couber.
+        const quebrarTextoEmLinhas = (ctx, texto, maxW, maxLinhas) => {
+          const manual = String(texto || '').split(/\s*(?:\n|\|)\s*/).map(s => s.trim()).filter(Boolean);
+          if (manual.length > 1) {
+            return manual.length <= maxLinhas && manual.every(l => ctx.measureText(l).width <= maxW) ? manual : null;
+          }
+          const palavras = (manual[0] || '').split(/\s+/).filter(Boolean);
+          if (!palavras.length) return [''];
+          if (ctx.measureText(palavras.join(' ')).width <= maxW) return [palavras.join(' ')];
+          let melhor = null;
+          const tentar = (inicio, linhas) => {
+            if (inicio >= palavras.length) {
+              const maior = Math.max(...linhas.map(l => ctx.measureText(l).width));
+              if (!melhor || maior < melhor.maior) melhor = { linhas, maior };
+              return;
+            }
+            if (linhas.length >= maxLinhas) return;
+            for (let fim = inicio + 1; fim <= palavras.length; fim++) {
+              const linha = palavras.slice(inicio, fim).join(' ');
+              if (ctx.measureText(linha).width > maxW) break;
+              tentar(fim, [...linhas, linha]);
+            }
+          };
+          tentar(0, []);
+          return melhor ? melhor.linhas : null;
+        };
+
         // Renderiza o layout oficial da Cantina / Lumar em um Canvas específico ('feed' = 1080x1080 | 'story' = 1080x1920)
         const renderizarArteNoCanvas = React.useCallback((canvas, formato) => {
           if (!canvas) return null;
@@ -4784,15 +4812,26 @@
           ctx.fillStyle = cfg.corCargoTexto;
           const bannerCenterX = isStory ? (padX + reqBoxW / 2) : (leftColRightX / 2);
           const maxBannerTextW = (isStory ? reqBoxW : leftColRightX) - 44;
+          // Cargos longos quebram em até 2 linhas (3 em último caso); a fonte é a MAIOR em que tudo cabe na faixa.
+          const cargoAlturaMax = bannerH - 16;
           let cargoFontSize = isStory ? 66 : 64;
-          ctx.font = `900 ${cargoFontSize}px ${fontFam}`;
-          while (ctx.measureText(cargoTxt).width > maxBannerTextW && cargoFontSize > 30) {
-            cargoFontSize -= 3;
+          let cargoLinhas = [cargoTxt];
+          for (; cargoFontSize >= 22; cargoFontSize -= 2) {
             ctx.font = `900 ${cargoFontSize}px ${fontFam}`;
+            const maxLinhas = Math.max(1, Math.min(3, Math.floor(cargoAlturaMax / (cargoFontSize * 1.08))));
+            const linhas = quebrarTextoEmLinhas(ctx, cargoTxt, maxBannerTextW, maxLinhas);
+            if (linhas) { cargoLinhas = linhas; break; }
           }
+          if (cargoFontSize < 22) {
+            cargoFontSize = 22;
+            cargoLinhas = [cargoTxt];
+          }
+          ctx.font = `900 ${cargoFontSize}px ${fontFam}`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(cargoTxt, bannerCenterX, topSectionY + bannerH / 2 + 2);
+          const cargoLineH = cargoFontSize * 1.08;
+          const cargoY0 = topSectionY + bannerH / 2 + 2 - ((cargoLinhas.length - 1) * cargoLineH) / 2;
+          cargoLinhas.forEach((ln, i) => ctx.fillText(ln, bannerCenterX, cargoY0 + i * cargoLineH));
           ctx.restore();
 
           // ── 3B. CAIXA MARROM DE REQUISITOS (Coluna esquerda abaixo do cargo) ──
@@ -5014,8 +5053,8 @@
 
           // ── 5. RODAPÉ EM 3 CAIXAS (Horário | Entre em contato WhatsApp | Instagram) ──
           const fGap = 16;
-          const card1W = Math.round((mainBoxW - fGap * 2) * 0.37);
-          const card2W = Math.round((mainBoxW - fGap * 2) * 0.33);
+          const card1W = Math.round((mainBoxW - fGap * 2) * 0.41);
+          const card2W = Math.round((mainBoxW - fGap * 2) * 0.31);
           const card3W = mainBoxW - fGap * 2 - card1W - card2W;
           const card1X = padX;
           const card2X = card1X + card1W + fGap;
@@ -5044,20 +5083,39 @@
           ctx.fillStyle = '#1F1916';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = `900 ${isStory ? 26 : 24}px ${fontFam}`;
-          ctx.fillText('Horário:', card1X + card1W / 2, footerY + footerH * 0.34);
-
           const horStr = !divulgarHorario
             ? 'A combinar na entrevista'
             : (iaCopy.horario_texto || horarioTexto || 'Segunda à Sexta: 07:30 às 17:30');
-          let horFont = isStory ? 21 : 19;
-          ctx.font = `600 ${horFont}px ${fontFam}`;
-          while (ctx.measureText(horStr).width > card1W - 24 && horFont > 13) {
-            horFont -= 1;
-            ctx.font = `600 ${horFont}px ${fontFam}`;
+          // Horário em fonte grande: cabe numa linha se der; senão quebra em 2 linhas (ex.: "Segunda à Sexta:" / "09:00 às 18:00")
+          const horMaxW = card1W - 28;
+          let horFont = isStory ? 29 : 25;
+          let horLinhas = [horStr];
+          for (; horFont >= 14; horFont -= 1) {
+            ctx.font = `700 ${horFont}px ${fontFam}`;
+            // Prefere quebrar depois dos dois-pontos ("Segunda à Sexta:" / "09:00 às 18:00")
+            const partes = horStr.match(/^(.+?:)\s+(.+)$/);
+            let linhas = null;
+            if (partes && ctx.measureText(horStr).width > horMaxW &&
+                ctx.measureText(partes[1]).width <= horMaxW && ctx.measureText(partes[2]).width <= horMaxW) {
+              linhas = [partes[1], partes[2]];
+            } else {
+              linhas = quebrarTextoEmLinhas(ctx, horStr, horMaxW, 2);
+            }
+            if (linhas) { horLinhas = linhas; break; }
           }
+          if (horFont < 14) horFont = 14;
+          const horDuas = horLinhas.length > 1;
+          ctx.font = `900 ${horDuas ? (isStory ? 24 : 21) : (isStory ? 26 : 24)}px ${fontFam}`;
+          ctx.fillStyle = '#1F1916';
+          ctx.fillText('Horário:', card1X + card1W / 2, footerY + footerH * (horDuas ? 0.23 : 0.34));
+          ctx.font = `700 ${horFont}px ${fontFam}`;
           ctx.fillStyle = '#2B221E';
-          ctx.fillText(horStr, card1X + card1W / 2, footerY + footerH * 0.68);
+          if (horDuas) {
+            ctx.fillText(horLinhas[0], card1X + card1W / 2, footerY + footerH * 0.52);
+            ctx.fillText(horLinhas[1], card1X + card1W / 2, footerY + footerH * 0.79);
+          } else {
+            ctx.fillText(horLinhas[0], card1X + card1W / 2, footerY + footerH * 0.68);
+          }
           ctx.restore();
 
           // Card 2: Entre em contato (WhatsApp)
