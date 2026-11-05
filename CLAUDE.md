@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index.html`
-(~13.660 linhas, 944 KB). Interface e lógica em português (BR).
+(~13.970 linhas, 970 KB). Interface e lógica em português (BR).
 
 ## ⚠️ Como trabalhar no index.html
 
@@ -9,16 +9,18 @@ SPA de RH da **Cantina em Casa / Lumar Alimentos**, em um único arquivo: `index
 leia com `offset`/`limit`. As linhas abaixo são aproximadas (o arquivo cresce): confirme com Grep.
 Edições: `Edit` pontual; não reescreva blocos grandes.
 
-Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 214–535 (`fmtBRL` 233, `enviarArquivoRH` 269,
-`preencherTermo` 294, `parseCSV` 333, `parsePontoDetalhado` 370, `upsertRegistrosPonto` 396, `calcINSS` 475,
-`calcFGTS` 494, `calcPericulosidade` 497) · `DashboardPage` 548 · `AjudaPage` 1178 · `LoginPage` 1427 ·
-`DocumentosColaborador` 1683 · `ColaboradoresPage` 1856 · `AcessosPage` 2822 · `AtestadosPage` 3165 ·
-`FeriasPage` 3381 · `RecrutamentoPage` 3535 (`CampanhasRecrutamentoTab` 4390: publicar/pausar/excluir,
-ajuste da arte pela IA, alertas e análise de desempenho) · `AdiantamentosPage` 6191 · `GratificacoesTab` 6679 ·
-`RelatoriosPage` 7033 · `ComprasPage` 7420 · `FuncoesPage` 7728 · `DocumentosLegaisEmpresa` 8101 ·
-`NormasPage` 8218 · `ExamesPage` 8522 · `PontoPage` 9801 · `TermosPage` 10161 · `FolhaPage` 10421
-(`calcularColab` ~10746) · `PainelColaborador` 11674 · `OrcamentoPage` 11816 · `ConfiguracoesPage` 11988 ·
-`ComissoesPage` 12042 · `App()` 12573 (login, sidebar, roteamento, VT).
+Mapa (linha aprox.): constantes/Supabase 1–125 · utilitários 244–525 (`fmtBRL` 244, `enviarArquivoRH` 280,
+`preencherTermo` 305, `parseCSV` 344, `parsePontoDetalhado` 381, `upsertRegistrosPonto` 407, `calcINSS` 486,
+`calcFGTS` 505, `calcPericulosidade` 508) · `DashboardPage` 559 · `AjudaPage` 1189 · `LoginPage` 1438 ·
+`DocumentosColaborador` 1694 · `ColaboradoresPage` 1867 · `AcessosPage` 2833 · `AtestadosPage` 3176 ·
+`FeriasPage` 3392 · `RecrutamentoPage` 3546 (`CampanhasRecrutamentoTab` 4401: publicar/pausar/excluir,
+ajuste da arte pela IA, alertas e análise de desempenho; arte Feed/Story desenhada em canvas por
+`renderizarArteNoCanvas` 4694, com quebra de linha/auto-fonte) · `AdiantamentosPage` 6426 · `GratificacoesTab` 6914 ·
+`RelatoriosPage` 7268 · `ComprasPage` 7655 · `FuncoesPage` 7963 · `DocumentosLegaisEmpresa` 8336 ·
+`NormasPage` 8453 · `ExamesPage` 8757 · `PontoPage` 10036 · `TermosPage` 10396 · `FolhaPage` 10656
+(`calcularColab` ~10981) · `PainelColaborador` 11909 · `OrcamentoPage` 12051 · `ConfiguracoesPage` 12223 ·
+`ComissoesPage` 12277 · `NoticiasTicker` 12743 · `SolicitarCompra` 12809 (botão do cabeçalho, envia ao app de
+Compras) · `App()` 12868 (login, sidebar fixa/recolhível, roteamento, VT).
 
 Vagas públicas: o site (Vercel, projeto `vagas-cantina`) está no repo `vagas-cantina`; `/vagas` aqui só redireciona para ele
 (candidatos anônimos → `candidatos` + bucket `curriculos`). Migrations do RH em `supabase/migrations/`
