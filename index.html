@@ -337,6 +337,33 @@
     function toISO(date){
       return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
     }
+    // Soma 'anos' anos a uma data ISO (AAAA-MM-DD). Usado no cálculo de períodos aquisitivos de férias.
+    function addAnosISO(iso, anos){
+      if(!iso) return '';
+      const [y,m,d] = iso.split('-').map(Number);
+      return toISO(new Date(y+anos, m-1, d));
+    }
+    // Calcula os ciclos de 12 meses (período aquisitivo) de férias a partir da admissão.
+    // Cada ciclo: aqIni→aqFim é o período aquisitivo (direito a 30 dias); aqFim→concFim é o
+    // período concessivo (prazo legal para gozar). Retorna os ciclos já encerrados (completo:true)
+    // mais o ciclo em andamento (completo:false), na ordem do mais antigo para o mais recente.
+    function calcCiclosAquisitivos(admissaoISO){
+      if(!admissaoISO) return [];
+      const hoje = toISO(new Date());
+      const ciclos = [];
+      let n = 0;
+      while(true){
+        const aqIni = addAnosISO(admissaoISO, n);
+        if(aqIni > hoje) break;
+        const aqFim = addAnosISO(admissaoISO, n+1);
+        const concFim = addAnosISO(admissaoISO, n+2);
+        const completo = aqFim <= hoje;
+        ciclos.push({ n, aqIni, aqFim, concFim, completo });
+        if(!completo) break;
+        n++;
+      }
+      return ciclos;
+    }
     function isPresente(bat1){
       if(!bat1||bat1.trim()===""||bat1.trim()==="00:00") return false;
       return true;
@@ -466,7 +493,7 @@
     async function carregarMapaFerias(empresaId, ini, fim) {
       if (!empresaId || !ini || !fim) return {};
       const { data, error } = await _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status')
-        .eq('empresa_id', empresaId).neq('status', 'cancelado').lte('gozo_inicio', fim).gte('gozo_fim', ini);
+        .eq('empresa_id', empresaId).not('status', 'in', '(cancelado,nao_gozado)').lte('gozo_inicio', fim).gte('gozo_fim', ini);
       if (error) throw error;
       const mapa = {};
       (data || []).forEach(f => {
@@ -2652,13 +2679,14 @@
                             <th style={{...s.th,textAlign:"center"}}>Dias</th><th style={{...s.th,textAlign:"center"}}>Status</th>
                           </tr></thead>
                           <tbody>{historicoFerias.map(f=>{
-                            const cores={agendado:{bg:"#EFF6FF",c:"#1D4ED8"},em_gozo:{bg:"#FEF9C3",c:"#92400E"},concluido:{bg:"#DCFCE7",c:"#166534"},cancelado:{bg:"#FEE2E2",c:"#991B1B"}};
+                            const cores={agendado:{bg:"#EFF6FF",c:"#1D4ED8"},em_gozo:{bg:"#FEF9C3",c:"#92400E"},concluido:{bg:"#DCFCE7",c:"#166534"},cancelado:{bg:"#FEE2E2",c:"#991B1B"},nao_gozado:{bg:"#F3F4F6",c:"#374151"}};
                             const cor=cores[f.status]||cores.agendado;
+                            const rotulos={agendado:"Agendado",em_gozo:"Em gozo",concluido:"Concluído",cancelado:"Cancelado",nao_gozado:"Não gozado"};
                             return(<tr key={f.id} style={{borderTop:"1px solid "+C.border}}>
                               <td style={{...s.td,fontSize:12}}>{f.gozo_inicio?new Date(f.gozo_inicio+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
                               <td style={{...s.td,fontSize:12}}>{f.gozo_fim?new Date(f.gozo_fim+'T12:00:00').toLocaleDateString("pt-BR"):"—"}</td>
                               <td style={{...s.td,textAlign:"center",fontWeight:700}}>{f.dias}</td>
-                              <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{f.status}</span></td>
+                              <td style={{...s.td,textAlign:"center"}}><span style={{background:cor.bg,color:cor.c,padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700}}>{rotulos[f.status]||f.status}</span></td>
                             </tr>);
                           })}</tbody>
                         </table>
@@ -3437,10 +3465,71 @@
         };
 
         const CORES = {
-          agendado: {bg:"#EFF6FF",c:"#1D4ED8",l:"Agendado"},
-          em_gozo:  {bg:"#FEF9C3",c:"#92400E",l:"Em gozo"},
-          concluido:{bg:"#DCFCE7",c:"#166534",l:"Concluído"},
-          cancelado:{bg:"#FEE2E2",c:"#991B1B",l:"Cancelado"},
+          agendado:  {bg:"#EFF6FF",c:"#1D4ED8",l:"Agendado"},
+          em_gozo:   {bg:"#FEF9C3",c:"#92400E",l:"Em gozo"},
+          concluido: {bg:"#DCFCE7",c:"#166534",l:"Concluído"},
+          cancelado: {bg:"#FEE2E2",c:"#991B1B",l:"Cancelado"},
+          nao_gozado:{bg:"#F3F4F6",c:"#374151",l:"Não gozado"},
+        };
+
+        // ── Previsão de férias: períodos aquisitivos a partir da admissão ──
+        const previsoes = React.useMemo(() => {
+          const hoje = toISO(new Date());
+          const result = [];
+          (colabAPI||[]).forEach(c => {
+            if(!c.admissao) return;
+            const ciclos = calcCiclosAquisitivos(c.admissao);
+            const feriasDoColab = lista.filter(f => f.nome === c.nome);
+            let alvo = null;
+            for(const ciclo of ciclos.filter(x=>x.completo)){
+              const usados = feriasDoColab
+                .filter(f => f.status!=='cancelado' && f.status!=='nao_gozado' && f.gozo_inicio>=ciclo.aqIni && f.gozo_inicio<ciclo.concFim)
+                .reduce((s,f)=>s+(Number(f.dias)||0),0);
+              const pendente = Math.max(0,30-usados);
+              const marcadoNaoGozado = feriasDoColab.some(f=>f.status==='nao_gozado'&&f.gozo_inicio===ciclo.aqIni&&f.gozo_fim===ciclo.aqFim);
+              if(pendente>0 && !marcadoNaoGozado){ alvo = {...ciclo, pendente, tipo:'pendente'}; break; }
+              if(pendente>0 && marcadoNaoGozado){ if(!alvo) alvo = {...ciclo, pendente, tipo:'nao_gozado'}; }
+            }
+            if(!alvo){
+              const atual = ciclos[ciclos.length-1];
+              if(atual && !atual.completo) alvo = {...atual, pendente:30, tipo:'andamento'};
+            }
+            if(!alvo) return;
+            let situacao = alvo.tipo;
+            if(situacao==='pendente'){
+              const diasAteVencer = Math.round((new Date(alvo.concFim+'T12:00:00')-new Date(hoje+'T12:00:00'))/86400000);
+              situacao = diasAteVencer<0 ? 'vencido' : diasAteVencer<=60 ? 'vence_em_breve' : 'pendente';
+            }
+            result.push({ nome:c.nome, admissao:c.admissao, ...alvo, situacao });
+          });
+          const ordem = {vencido:0, vence_em_breve:1, pendente:2, nao_gozado:3, andamento:4};
+          return result.sort((a,b)=>(ordem[a.situacao]??9)-(ordem[b.situacao]??9) || a.nome.localeCompare(b.nome,'pt'));
+        }, [colabAPI, lista]);
+
+        const SITUACAO = {
+          vencido:        {bg:"#FEE2E2",c:"#991B1B",l:"⚠️ Vencido"},
+          vence_em_breve: {bg:"#FFEDD5",c:"#9A3412",l:"Vence em breve"},
+          pendente:       {bg:"#DBEAFE",c:"#1D4ED8",l:"Dentro do prazo"},
+          nao_gozado:     {bg:"#F3F4F6",c:"#374151",l:"Não gozado (registrado)"},
+          andamento:      {bg:"#DCFCE7",c:"#166534",l:"Em aquisição"},
+        };
+
+        const agendarParaColab = (nome) => {
+          setForm({...VAZIO, colaboradorNome:nome});
+          setStatus(null); setMostrarForm(true);
+        };
+
+        const marcarNaoGozado = async (p) => {
+          if(!await confirmar('Registrar que '+p.nome+' NÃO gozou o período aquisitivo de '+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+' ('+p.pendente+' dias pendentes)?\n\nIsso não agenda férias nem afeta a folha — apenas documenta a decisão para fins de controle.','Registrar Não Gozado')) return;
+          setLoading(true);
+          const {error} = await _supa.from('ferias').insert({
+            empresa_id:empresaId, nome:p.nome,
+            gozo_inicio:p.aqIni, gozo_fim:p.aqFim, dias:p.pendente,
+            status:'nao_gozado',
+            observacoes:'Período aquisitivo de '+fmtDate(p.aqIni)+' a '+fmtDate(p.aqFim)+' registrado como não gozado ('+p.pendente+' dias pendentes).'
+          });
+          if(error){ setStatus({ok:false,msg:'❌ '+error.message}); setLoading(false); }
+          else { setStatus({ok:true,msg:'✅ Registrado: período não gozado.'}); carregar(); }
         };
 
         return (
@@ -3453,6 +3542,45 @@
               <button onClick={()=>{setMostrarForm(true);setForm(VAZIO);setStatus(null);}} style={s.btn}>➕ Agendar Férias</button>
             </div>
             {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',marginBottom:16}}>{status.msg}</div>}
+
+            <div style={{...s.card,marginBottom:16}}>
+              <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:2}}>📅 Previsão de Férias — Períodos Aquisitivos</div>
+              <div style={{fontSize:12,color:C.muted,marginBottom:14}}>Calculado automaticamente a partir da data de admissão de cada colaborador (1 período aquisitivo = 12 meses; prazo legal para gozo = os 12 meses seguintes).</div>
+              {previsoes.length===0?(
+                <div style={{fontSize:13,color:C.muted}}>Nenhum colaborador ativo com data de admissão cadastrada.</div>
+              ):(
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:"var(--c-subtle)"}}>
+                    <th style={s.th}>Colaborador</th><th style={s.th}>Período Aquisitivo</th>
+                    <th style={{...s.th,textAlign:"center"}}>Dias Pendentes</th><th style={s.th}>Prazo Final (Concessivo)</th>
+                    <th style={{...s.th,textAlign:"center"}}>Situação</th><th style={{...s.th,textAlign:"right"}}>Ações</th>
+                  </tr></thead>
+                  <tbody>
+                    {previsoes.map(p=>{
+                      const cor = SITUACAO[p.situacao]||SITUACAO.pendente;
+                      return (
+                        <tr key={p.nome} style={{borderTop:"1px solid "+C.border}}>
+                          <td style={{...s.td,fontWeight:600}}>{p.nome}</td>
+                          <td style={{...s.td,fontSize:12}}>{fmtDate(p.aqIni)} – {fmtDate(p.aqFim)}</td>
+                          <td style={{...s.td,textAlign:"center",fontWeight:700}}>{p.tipo==='andamento'?'—':p.pendente}</td>
+                          <td style={{...s.td,fontSize:12}}>{p.tipo==='andamento'?('completa em '+fmtDate(p.aqFim)):fmtDate(p.concFim)}</td>
+                          <td style={{...s.td,textAlign:"center"}}>
+                            <span style={{background:cor.bg,color:cor.c,padding:"3px 10px",borderRadius:10,fontSize:11,fontWeight:700}}>{cor.l}</span>
+                          </td>
+                          <td style={{...s.td,textAlign:"right",whiteSpace:"nowrap"}}>
+                            {p.tipo!=='andamento'&&p.tipo!=='nao_gozado'&&(<>
+                              <button onClick={()=>agendarParaColab(p.nome)} style={{...s.btnOutline,fontSize:11,padding:"3px 8px",marginRight:6}}>🗓️ Agendar</button>
+                              <button onClick={()=>marcarNaoGozado(p)} style={{background:"none",border:"1px solid "+C.border,color:C.muted,borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>Não gozou</button>
+                            </>)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
             {mostrarForm&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:16}}>Agendar Férias</div>
@@ -3526,6 +3654,7 @@
                             <option value="em_gozo">Em gozo</option>
                             <option value="concluido">Concluído</option>
                             <option value="cancelado">Cancelado</option>
+                            <option value="nao_gozado">Não gozado</option>
                           </select>
                           <button onClick={()=>excluir(f.id,f.colaborador_nome)}
                             style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
@@ -10781,7 +10910,7 @@
           };
           Promise.all([
             _supa.from('atestados').select('colaborador_nome,inicio,fim,periodo').eq('empresa_id',empresaId).lte('inicio',fimPer).gte('fim',iniPer),
-            _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status').eq('empresa_id',empresaId).neq('status','cancelado').lte('gozo_inicio',fimPer).gte('gozo_fim',iniPer),
+            _supa.from('ferias').select('nome,gozo_inicio,gozo_fim,status').eq('empresa_id',empresaId).not('status','in','(cancelado,nao_gozado)').lte('gozo_inicio',fimPer).gte('gozo_fim',iniPer),
           ]).then(([atRes,feRes])=>{
             const mapa = {};
             const marcar = (nome, iso, st) => {
