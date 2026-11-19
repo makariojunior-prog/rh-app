@@ -3424,6 +3424,7 @@
         const [form, setForm] = React.useState(VAZIO);
         const [mostrarForm, setMostrarForm] = React.useState(false);
         const [status, setStatus] = React.useState(null);
+        const [editandoId, setEditandoId] = React.useState(null);
 
         const calcDias = (ini,fim) => {
           if(!ini||!fim) return 0;
@@ -3443,14 +3444,23 @@
           if(!form.colaboradorNome||!form.inicio||!form.fim){ setStatus({ok:false,msg:'Preencha colaborador, início e fim.'}); return; }
           if(form.fim < form.inicio){ setStatus({ok:false,msg:'A data de fim não pode ser anterior ao início.'}); return; }
           setLoading(true);
-          const {error} = await _supa.from('ferias').insert({
-            empresa_id:empresaId, nome:form.colaboradorNome,
+          const dados = {
+            nome:form.colaboradorNome,
             gozo_inicio:form.inicio, gozo_fim:form.fim, dias:calcDias(form.inicio,form.fim),
             status:form.status, observacoes:form.observacoes||null
-          });
+          };
+          const {error} = editandoId
+            ? await _supa.from('ferias').update({...dados,atualizado_em:new Date().toISOString()}).eq('id',editandoId).eq('empresa_id',empresaId)
+            : await _supa.from('ferias').insert({empresa_id:empresaId,...dados});
           if(error){ setStatus({ok:false,msg:'❌ '+error.message}); }
-          else { setStatus({ok:true,msg:'✅ Férias agendadas!'}); setMostrarForm(false); carregar(); }
+          else { setStatus({ok:true,msg:editandoId?'✅ Férias atualizadas!':'✅ Férias agendadas!'}); setMostrarForm(false); setEditandoId(null); carregar(); }
           setLoading(false);
+        };
+
+        const editar = (f) => {
+          setForm({colaboradorId:'',colaboradorNome:f.nome||'',inicio:f.gozo_inicio||'',fim:f.gozo_fim||'',status:f.status||'agendado',observacoes:f.observacoes||''});
+          setEditandoId(f.id); setMostrarForm(true); setStatus(null);
+          window.scrollTo({top:0,behavior:'smooth'});
         };
 
         const alterarStatus = async (id, novoStatus) => {
@@ -3539,7 +3549,7 @@
                 <div style={{fontSize:20,fontWeight:800,color:C.pri}}>🏖️ Férias</div>
                 <div style={{fontSize:13,color:C.muted}}>Agendamento e controle de férias</div>
               </div>
-              <button onClick={()=>{setMostrarForm(true);setForm(VAZIO);setStatus(null);}} style={s.btn}>➕ Agendar Férias</button>
+              <button onClick={()=>{setMostrarForm(true);setEditandoId(null);setForm(VAZIO);setStatus(null);}} style={s.btn}>➕ Agendar Férias</button>
             </div>
             {status&&<div style={{...s.card,background:status.ok?'#DCFCE7':'#FEE2E2',color:status.ok?'#166534':'#991B1B',marginBottom:16}}>{status.msg}</div>}
 
@@ -3583,13 +3593,14 @@
 
             {mostrarForm&&(
               <div style={{...s.card,marginBottom:16}}>
-                <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:16}}>Agendar Férias</div>
+                <div style={{fontSize:15,fontWeight:700,color:C.pri,marginBottom:16}}>{editandoId?'Editar Férias':'Agendar Férias'}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
                   <div style={{marginBottom:14,gridColumn:"1/-1"}}>
                     <label style={s.label}>Colaborador *</label>
                     <select value={form.colaboradorNome} onChange={e=>setForm(p=>({...p,colaboradorNome:e.target.value}))} style={{...s.input,width:"100%"}}>
                       <option value="">Selecione...</option>
                       {[...colabAPI].sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).map(c=>(<option key={c.nome} value={c.nome}>{c.nome}</option>))}
+                      {form.colaboradorNome&&!colabAPI.some(c=>c.nome===form.colaboradorNome)&&<option value={form.colaboradorNome}>{form.colaboradorNome}</option>}
                     </select>
                   </div>
                   <div style={{marginBottom:14}}>
@@ -3620,7 +3631,7 @@
                 </div>
                 <div style={{display:"flex",gap:10}}>
                   <button onClick={salvar} style={s.btn} disabled={loading}>{loading?'Salvando...':'💾 Salvar'}</button>
-                  <button onClick={()=>setMostrarForm(false)} style={s.btnOutline}>Cancelar</button>
+                  <button onClick={()=>{setMostrarForm(false);setEditandoId(null);}} style={s.btnOutline}>Cancelar</button>
                 </div>
               </div>
             )}
@@ -3656,7 +3667,9 @@
                             <option value="cancelado">Cancelado</option>
                             <option value="nao_gozado">Não gozado</option>
                           </select>
-                          <button onClick={()=>excluir(f.id,f.colaborador_nome)}
+                          <button onClick={()=>editar(f)} title="Editar férias"
+                            style={{background:"none",border:"1px solid "+C.border,color:C.pri,borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer",marginRight:6}}>✏️</button>
+                          <button onClick={()=>excluir(f.id,f.nome)} title="Excluir férias"
                             style={{background:"none",border:"1px solid #FCA5A5",color:"#DC2626",borderRadius:4,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
                         </td>
                       </tr>
