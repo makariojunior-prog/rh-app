@@ -2876,6 +2876,7 @@
           {k:'orcamento',    l:'📊 Orçamento Folha'},
           {k:'relatorios',   l:'📈 Relatórios'},
           {k:'comissoes',    l:'💰 Comissões'},
+          {k:'ouvidoria',    l:'📢 Ouvidoria'},
           {k:'termos',       l:'📝 Termos de Assinatura'},
         ];
 
@@ -12416,6 +12417,270 @@
       );
     }
 
+    function OuvidoriaPage({empresaId}){
+      const TIPOS={denuncia:{l:'Denúncia',ico:'🚨'},sugestao:{l:'Sugestão',ico:'💡'},reclamacao:{l:'Reclamação',ico:'📣'},elogio:{l:'Elogio',ico:'👏'}};
+      const STATUS={
+        nova:{l:'Nova / Não lida',bg:'#FEE2E2',c:'#991B1B'},
+        em_analise:{l:'Em análise',bg:'#FEF9C3',c:'#92400E'},
+        tratada:{l:'Tratada',bg:'#DCFCE7',c:'#166534'},
+        arquivada:{l:'Arquivada',bg:'#E5E7EB',c:'#374151'},
+      };
+      const SETORES=['Produção / Fábrica','Expedição / Logística','Loja / Vendas','Administrativo','Geral / Outro'];
+      const [aba,setAba]=useState('caixa');
+      const [itens,setItens]=useState([]);
+      const [loading,setLoading]=useState(true);
+      const [erro,setErro]=useState(null);
+      const [fStatus,setFStatus]=useState('');
+      const [fTipo,setFTipo]=useState('');
+      const [fSetor,setFSetor]=useState('');
+      const [fMes,setFMes]=useState('');
+      const [sel,setSel]=useState(null);
+      const [trats,setTrats]=useState([]);
+      const [nota,setNota]=useState('');
+      const [ocupado,setOcupado]=useState(false);
+      const hoje=new Date();
+      const [mesRel,setMesRel]=useState(`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`);
+
+      const mesDe=(iso)=>{ const d=new Date(iso); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; };
+      const fmtDH=(iso)=>iso?new Date(iso).toLocaleString('pt-BR'):'—';
+
+      const carregar=async()=>{
+        if(!empresaId) return;
+        setLoading(true); setErro(null);
+        const {data,error}=await _supa.from('ouvidoria_manifestacoes').select('*').eq('empresa_id',empresaId).order('created_at',{ascending:false}).limit(2000);
+        if(error){ setErro(error.message); setItens([]); }
+        else setItens(data||[]);
+        setLoading(false);
+      };
+      useEffect(()=>{ carregar(); },[empresaId]);
+
+      const carregarTrats=async(id)=>{
+        const {data}=await _supa.from('ouvidoria_tratativas').select('*').eq('manifestacao_id',id).order('created_at',{ascending:true});
+        setTrats(data||[]);
+      };
+      const abrir=(m)=>{ setSel(m); setNota(''); setTrats([]); carregarTrats(m.id); };
+
+      const meuEmail=async()=>{ const {data}=await _supa.auth.getUser(); return data?.user?.email||null; };
+
+      const registrar=async(m,tipo,texto,campos)=>{
+        setOcupado(true);
+        const autor=await meuEmail();
+        const agora=new Date().toISOString();
+        const {data:upd,error}=await _supa.from('ouvidoria_manifestacoes').update({...(campos||{}),atualizado_em:agora}).eq('id',m.id).select().single();
+        if(error){ setOcupado(false); toast('Erro: '+error.message,'error'); return; }
+        const {error:e2}=await _supa.from('ouvidoria_tratativas').insert({manifestacao_id:m.id,empresa_id:m.empresa_id,tipo,texto,autor});
+        if(e2) toast('Salvo, mas o histórico falhou: '+e2.message,'error');
+        setItens(p=>p.map(x=>x.id===m.id?upd:x));
+        setSel(upd); await carregarTrats(m.id); setOcupado(false);
+      };
+
+      const marcarLida=async(m)=>{
+        if(m.lida_em) return;
+        const autor=await meuEmail();
+        await registrar(m,'leitura','Marcada como lida',{lida_em:new Date().toISOString(),lida_por:autor});
+      };
+      const mudarStatus=async(m,novo)=>{
+        if(novo===m.status) return;
+        const campos={status:novo};
+        if(!m.lida_em){ campos.lida_em=new Date().toISOString(); campos.lida_por=await meuEmail(); }
+        await registrar(m,'status',`Status: ${STATUS[m.status]?.l||m.status} → ${STATUS[novo].l}`,campos);
+      };
+      const salvarNota=async(m)=>{
+        const txt=nota.trim(); if(!txt) return;
+        await registrar(m,'nota',txt,{});
+        setNota('');
+      };
+      const abrirAnexo=async(path)=>{
+        const {data,error}=await _supa.storage.from('ouvidoria-anexos').createSignedUrl(path,300);
+        if(error||!data?.signedUrl){ toast('Não foi possível abrir a foto: '+(error?.message||''),'error'); return; }
+        window.open(data.signedUrl,'_blank','noopener');
+      };
+
+      const filtrados=useMemo(()=>itens.filter(m=>
+        (!fStatus||m.status===fStatus)&&(!fTipo||m.tipo===fTipo)&&(!fSetor||m.setor===fSetor)&&(!fMes||mesDe(m.created_at)===fMes)
+      ),[itens,fStatus,fTipo,fSetor,fMes]);
+      const qtdNovas=itens.filter(m=>m.status==='nova').length;
+
+      // Relatório do mês
+      const rel=useMemo(()=>{
+        const doMes=itens.filter(m=>mesDe(m.created_at)===mesRel);
+        const cont=(arr,f)=>{ const o={}; arr.forEach(x=>{ const k=f(x); o[k]=(o[k]||0)+1; }); return o; };
+        const porTipo=cont(doMes,m=>m.tipo);
+        const porSetor=cont(doMes,m=>m.setor);
+        const porStatus=cont(doMes,m=>m.status);
+        const matriz={}; doMes.forEach(m=>{ matriz[m.setor]=matriz[m.setor]||{}; matriz[m.setor][m.tipo]=(matriz[m.setor][m.tipo]||0)+1; });
+        const PARADAS=new Set(['sobre','porque','quando','ainda','muito','pouco','nunca','sempre','aqui','esta','esse','essa','isso','mais','para','como','você','vocês','todos','todas','fazer','fazem','estão','estamos','tambem','também','apenas','algum','alguns','outros','outras','nosso','nossa','nossos','nossas','onde','pelo','pela','pelos','pelas','depois','antes','durante','então','entao','cada','tudo','coisa','coisas','dentro','sendo','temos','tenho','tinha','estava','estao','pessoal','empresa']);
+        const norm=(w)=>w.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const freq={};
+        doMes.forEach(m=>{
+          const palavras=new Set(String(m.descricao||'').toLowerCase().split(/[^a-zà-ú0-9]+/i).filter(w=>w.length>=5&&!PARADAS.has(w)).map(norm));
+          palavras.forEach(w=>{ freq[w]=(freq[w]||0)+1; });
+        });
+        const recorrentes=Object.entries(freq).filter(([,n])=>n>=2).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,10);
+        const meses=[]; const [ay,am]=mesRel.split('-').map(Number);
+        for(let i=5;i>=0;i--){ const d=new Date(ay,am-1-i,1); const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; meses.push([k,itens.filter(m=>mesDe(m.created_at)===k).length]); }
+        return {total:doMes.length,porTipo,porSetor,porStatus,matriz,recorrentes,meses,pendentes:doMes.filter(m=>m.status==='nova'||m.status==='em_analise').length};
+      },[itens,mesRel]);
+
+      const exportarResumo=()=>{
+        const L=[]; const q=(v)=>`"${String(v).replace(/"/g,'""')}"`;
+        L.push(['Resumo da Ouvidoria',mesRel].map(q).join(';'));
+        L.push(['Total',rel.total].map(q).join(';'));
+        L.push(''); L.push(['Tipo','Quantidade'].map(q).join(';'));
+        Object.entries(TIPOS).forEach(([k,v])=>L.push([v.l,rel.porTipo[k]||0].map(q).join(';')));
+        L.push(''); L.push(['Setor','Quantidade'].map(q).join(';'));
+        SETORES.forEach(st=>L.push([st,rel.porSetor[st]||0].map(q).join(';')));
+        L.push(''); L.push(['Status','Quantidade'].map(q).join(';'));
+        Object.entries(STATUS).forEach(([k,v])=>L.push([v.l,rel.porStatus[k]||0].map(q).join(';')));
+        L.push(''); L.push(['Assunto recorrente','Manifestações'].map(q).join(';'));
+        rel.recorrentes.forEach(([w,n])=>L.push([w,n].map(q).join(';')));
+        const blob=new Blob(["\uFEFF"+L.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`ouvidoria_resumo_${mesRel}.csv`; a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+      };
+
+      const chipStatus=(st)=>{ const x=STATUS[st]||STATUS.nova; return <span style={{display:'inline-block',padding:'3px 9px',borderRadius:20,fontSize:11,fontWeight:700,background:x.bg,color:x.c}}>{x.l}</span>; };
+      const barra=(n,max,cor)=><div style={{background:C.border,borderRadius:6,height:10,flex:1}}><div style={{width:`${max?Math.round(n/max*100):0}%`,background:cor||C.acc,height:10,borderRadius:6}}/></div>;
+
+      return(
+        <div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:14}}>
+            <div>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📢 Ouvidoria</div>
+              <div style={{fontSize:12,color:C.muted}}>Denúncias e sugestões anônimas enviadas pelo QR Code. Link público do formulário: <b>/ouvidoria</b></div>
+            </div>
+            <button style={s.btnOutline} onClick={carregar}>🔄 Atualizar</button>
+          </div>
+          <div style={{display:'flex',gap:8,marginBottom:14}}>
+            {[['caixa',`📥 Caixa de entrada${qtdNovas?` (${qtdNovas} nova${qtdNovas>1?'s':''})`:''}`],['relatorio','📊 Relatório mensal']].map(([k,l])=>(
+              <button key={k} onClick={()=>setAba(k)} style={aba===k?s.btn:s.btnOutline}>{l}</button>
+            ))}
+          </div>
+
+          {erro&&<div style={{...s.card,borderColor:C.danger,color:C.danger}}>Não foi possível carregar: {erro}. Se a mensagem fala em "permission denied" ou "relation does not exist", a migration da Ouvidoria ainda não foi aplicada no Supabase.</div>}
+
+          {aba==='caixa'&&(
+            <div>
+              <div style={{...s.card,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+                <div><label style={s.label}>Status</label>
+                  <select style={s.select} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
+                    <option value="">Todos</option>{Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.l}</option>)}
+                  </select></div>
+                <div><label style={s.label}>Tipo</label>
+                  <select style={s.select} value={fTipo} onChange={e=>setFTipo(e.target.value)}>
+                    <option value="">Todos</option>{Object.entries(TIPOS).map(([k,v])=><option key={k} value={k}>{v.ico} {v.l}</option>)}
+                  </select></div>
+                <div><label style={s.label}>Setor</label>
+                  <select style={s.select} value={fSetor} onChange={e=>setFSetor(e.target.value)}>
+                    <option value="">Todos</option>{SETORES.map(x=><option key={x} value={x}>{x}</option>)}
+                  </select></div>
+                <div><label style={s.label}>Mês</label>
+                  <input type="month" style={{...s.input,width:160}} value={fMes} onChange={e=>setFMes(e.target.value)}/></div>
+                {(fStatus||fTipo||fSetor||fMes)&&<button style={s.btnOutline} onClick={()=>{setFStatus('');setFTipo('');setFSetor('');setFMes('');}}>Limpar filtros</button>}
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:sel?'minmax(0,1fr) minmax(0,1fr)':'1fr',gap:16,alignItems:'start'}}>
+                <div style={{...s.card,padding:0,overflow:'hidden'}}>
+                  {loading?<div style={{padding:24,color:C.muted}}>Carregando…</div>:
+                  filtrados.length===0?<div style={{padding:24,color:C.muted}}>Nenhuma manifestação encontrada.</div>:(
+                    <table style={s.table}>
+                      <thead><tr><th style={s.th}>Recebida</th><th style={s.th}>Tipo</th><th style={s.th}>Setor</th><th style={s.th}>Status</th></tr></thead>
+                      <tbody>
+                        {filtrados.map((m,i)=>(
+                          <tr key={m.id} onClick={()=>abrir(m)} style={{...s.row(i),cursor:'pointer',outline:sel?.id===m.id?`2px solid ${C.acc}`:'none'}}>
+                            <td style={s.td}>{!m.lida_em&&<span title="Não lida" style={{display:'inline-block',width:8,height:8,borderRadius:4,background:C.danger,marginRight:6}}/>}{fmtDH(m.created_at)}</td>
+                            <td style={s.td}>{TIPOS[m.tipo]?.ico} {TIPOS[m.tipo]?.l||m.tipo}</td>
+                            <td style={s.td}>{m.setor}</td>
+                            <td style={s.td}>{chipStatus(m.status)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {sel&&(
+                  <div style={s.card}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                      <div>
+                        <div style={{fontWeight:800,color:C.pri}}>{TIPOS[sel.tipo]?.ico} {TIPOS[sel.tipo]?.l} · {sel.protocolo}</div>
+                        <div style={{fontSize:12,color:C.muted}}>{sel.setor} · recebida em {fmtDH(sel.created_at)}</div>
+                        <div style={{fontSize:12,color:C.muted}}>{sel.lida_em?`Lida por ${sel.lida_por||'—'} em ${fmtDH(sel.lida_em)}`:'Ainda não lida'}</div>
+                      </div>
+                      <button style={s.btnOutline} onClick={()=>setSel(null)}>✕</button>
+                    </div>
+                    <div style={{whiteSpace:'pre-wrap',background:C.rowAlt,borderRadius:8,padding:12,margin:'12px 0',fontSize:14}}>{sel.descricao}</div>
+                    {sel.identificacao&&<div style={{fontSize:12,marginBottom:10}}><b>Identificação informada pela pessoa:</b> {sel.identificacao}</div>}
+                    {(sel.anexos||[]).length>0&&(
+                      <div style={{marginBottom:12,display:'flex',gap:8,flexWrap:'wrap'}}>
+                        {sel.anexos.map((p,i)=><button key={p} style={s.btnOutline} onClick={()=>abrirAnexo(p)}>📷 Foto {i+1}</button>)}
+                      </div>
+                    )}
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:14}}>
+                      {!sel.lida_em&&<button style={s.btn} disabled={ocupado} onClick={()=>marcarLida(sel)}>👁️ Marcar como lida</button>}
+                      <select style={s.select} value={sel.status} disabled={ocupado} onChange={e=>mudarStatus(sel,e.target.value)}>
+                        {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.l}</option>)}
+                      </select>
+                      {sel.status!=='arquivada'&&<button style={s.btnOutline} disabled={ocupado} onClick={()=>mudarStatus(sel,'arquivada')}>🗄️ Arquivar</button>}
+                    </div>
+                    <div style={s.cardTitle}>Histórico de tratativas</div>
+                    {trats.length===0?<div style={{fontSize:12,color:C.muted,marginBottom:10}}>Nenhum registro ainda.</div>:
+                      <div style={{marginBottom:10}}>{trats.map(t=>(
+                        <div key={t.id} style={{borderLeft:`3px solid ${t.tipo==='nota'?C.acc:C.border}`,padding:'4px 10px',marginBottom:8,fontSize:13}}>
+                          <div style={{whiteSpace:'pre-wrap'}}>{t.tipo==='nota'?'📝 ':''}{t.texto}</div>
+                          <div style={{fontSize:11,color:C.muted}}>{t.autor||'—'} · {fmtDH(t.created_at)}</div>
+                        </div>))}</div>}
+                    <textarea style={{...s.input,minHeight:70,marginBottom:8}} placeholder="Nota interna: o que foi feito, quem foi ouvido, próximos passos…" value={nota} onChange={e=>setNota(e.target.value)}/>
+                    <button style={s.btnAcc} disabled={ocupado||!nota.trim()} onClick={()=>salvarNota(sel)}>Registrar nota</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {aba==='relatorio'&&(
+            <div>
+              <div style={{...s.card,display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+                <div><label style={s.label}>Mês</label><input type="month" style={{...s.input,width:170}} value={mesRel} onChange={e=>setMesRel(e.target.value)}/></div>
+                <button style={s.btnOutline} onClick={exportarResumo}>⬇️ Exportar resumo (CSV)</button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:18}}>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Total no mês</div><div style={{fontSize:30,fontWeight:800,color:C.pri}}>{rel.total}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Pendentes (nova + em análise)</div><div style={{fontSize:30,fontWeight:800,color:rel.pendentes?C.danger:C.green}}>{rel.pendentes}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Tratadas</div><div style={{fontSize:30,fontWeight:800,color:C.green}}>{rel.porStatus.tratada||0}</div></div>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16}}>
+                <div style={s.card}>
+                  <div style={s.cardTitle}>Por tipo</div>
+                  {Object.entries(TIPOS).map(([k,v])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:130}}>{v.ico} {v.l}</span>{barra(rel.porTipo[k]||0,rel.total)}<b style={{width:28,textAlign:'right'}}>{rel.porTipo[k]||0}</b></div>))}
+                </div>
+                <div style={s.card}>
+                  <div style={s.cardTitle}>Por setor</div>
+                  {SETORES.map(st=>(<div key={st} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:150}}>{st}</span>{barra(rel.porSetor[st]||0,rel.total,C.pri)}<b style={{width:28,textAlign:'right'}}>{rel.porSetor[st]||0}</b></div>))}
+                </div>
+                <div style={s.card}>
+                  <div style={s.cardTitle}>Assuntos mais recorrentes (para a pauta do comitê)</div>
+                  {rel.recorrentes.length===0?<div style={{fontSize:13,color:C.muted}}>Ainda sem palavras repetidas em 2 ou mais manifestações neste mês.</div>:
+                    rel.recorrentes.map(([w,n])=>(<div key={w} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0',borderBottom:`1px solid ${C.border}`}}><span>{w}</span><b>{n} manifestações</b></div>))}
+                </div>
+                <div style={s.card}>
+                  <div style={s.cardTitle}>Últimos 6 meses</div>
+                  {rel.meses.map(([k,n])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:70}}>{k.split('-').reverse().join('/')}</span>{barra(n,Math.max(...rel.meses.map(x=>x[1]),1),C.acc)}<b style={{width:28,textAlign:'right'}}>{n}</b></div>))}
+                </div>
+              </div>
+              <div style={s.card}>
+                <div style={s.cardTitle}>Setor × tipo</div>
+                <table style={s.table}>
+                  <thead><tr><th style={s.th}>Setor</th>{Object.values(TIPOS).map(v=><th key={v.l} style={s.thC}>{v.l}</th>)}</tr></thead>
+                  <tbody>{SETORES.map((st,i)=>(<tr key={st} style={s.row(i)}><td style={s.td}>{st}</td>{Object.keys(TIPOS).map(k=><td key={k} style={s.tdC}>{rel.matriz[st]?.[k]||'—'}</td>)}</tr>))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function ComissoesPage({colabAPI,empresaId}){
       const [aba,setAba]=useState('comissoes');
       const [crmUsers,setCrmUsers]=useState([]);
@@ -14011,7 +14276,7 @@
 
       const isAdmin = perfil?.role === 'admin';
       const paginasPermitidas = isAdmin
-        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','normas','funcoes','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes']
+        ? ['dashboard','colaboradores','vt','folha','ferias','atestados','ponto','adiantamentos','compras','exames','normas','funcoes','recrutamento','relatorios','orcamento','termos','acessos','ajuda','config','comissoes','ouvidoria']
         : [...(perfil?.paginas||['dashboard']),'ajuda'];
 
       const navItems=[
@@ -14031,6 +14296,7 @@
         {k:'relatorios',l:'📈 Relatórios'},
         {k:'ponto',l:'📋 Banco de Ponto'},
         {k:'comissoes',l:'💰 Comissões'},
+        {k:'ouvidoria',l:'📢 Ouvidoria'},
         {k:'termos',l:'📝 Termos'},
         {k:'acessos',l:'🔐 Acessos'},
         {k:'ajuda',l:'❓ Ajuda'},
@@ -14093,6 +14359,7 @@
               {page==="relatorios"&&<RelatoriosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="ponto"&&<PontoPage colabAPI={colabAPI} empresaId={empresaId} isAdmin={isAdmin}/>}
               {page==="comissoes"&&<ComissoesPage colabAPI={colabAPI} empresaId={empresaId}/>}
+              {page==="ouvidoria"&&<OuvidoriaPage empresaId={empresaId}/>}
               {page==="termos"&&<TermosPage colabAPI={colabAPI} empresaId={empresaId}/>}
               {page==="acessos"&&<AcessosPage perfil={perfil} empresaId={empresaId}/>}
               {page==="config"&&isAdmin&&<ConfiguracoesPage empresa={empresa} setEmpresa={setEmpresa} responsavel={responsavel} setResponsavel={setResponsavel} passagemStr={passagemStr} setPassagemStr={setPassagemStr} empresaId={empresaId} valorDSR={valorDSR} setValorDSR={setValorDSR}/>}

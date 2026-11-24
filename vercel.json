@@ -5,6 +5,9 @@
     { "source": "/vagas", "destination": "https://vagas.cantinaemcasa.com/", "permanent": true },
     { "source": "/vagas/:path*", "destination": "https://vagas.cantinaemcasa.com/", "permanent": true }
   ],
+  "rewrites": [
+    { "source": "/ouvidoria", "destination": "/ouvidoria/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

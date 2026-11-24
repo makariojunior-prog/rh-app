@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Canal de Ouvidoria · Cantina em Casa / Lumar</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#F4F1EA;color:#1f2a24;font-family:'Segoe UI',system-ui,sans-serif;line-height:1.45}
+  header{background:#1B3A2B;color:#fff;padding:22px 18px;text-align:center}
+  header h1{margin:0;font-size:21px}
+  header p{margin:6px 0 0;font-size:14px;color:#E7D9A3}
+  main{max-width:560px;margin:0 auto;padding:18px}
+  .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .anon{background:#E7F3EC;border-left:4px solid #2E7D52;font-size:14px}
+  label.t{display:block;font-weight:700;font-size:13px;color:#1B3A2B;margin:14px 0 6px}
+  label.t:first-child{margin-top:0}
+  .opcional{font-weight:400;color:#6b7a72}
+  .tipos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .tipo input{position:absolute;opacity:0}
+  .tipo span{display:block;border:2px solid #D8D2C4;border-radius:10px;padding:12px 8px;text-align:center;font-weight:600;cursor:pointer;font-size:14px}
+  .tipo input:checked+span{border-color:#1B3A2B;background:#1B3A2B;color:#fff}
+  .tipo input:focus-visible+span{outline:3px solid #C8A843}
+  select,textarea,input[type=text]{width:100%;border:2px solid #D8D2C4;border-radius:10px;padding:11px 12px;font-size:16px;font-family:inherit;background:#fff}
+  textarea{min-height:150px;resize:vertical}
+  .cont{font-size:12px;color:#6b7a72;text-align:right}
+  .dica{font-size:12.5px;color:#6b7a72;margin:6px 0 0}
+  button{width:100%;border:0;border-radius:12px;padding:15px;font-size:16px;font-weight:700;cursor:pointer;background:#C8A843;color:#1B3A2B}
+  button:disabled{opacity:.6;cursor:wait}
+  button.sec{background:#fff;border:2px solid #1B3A2B;color:#1B3A2B;margin-top:10px}
+  .erro{background:#FDE8E8;color:#991B1B;border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:14px}
+  .fotos{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .fotos div{position:relative}
+  .fotos img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #D8D2C4}
+  .fotos b{position:absolute;top:-6px;right:-6px;background:#991B1B;color:#fff;border-radius:50%;width:22px;height:22px;text-align:center;line-height:22px;cursor:pointer;font-size:14px}
+  .ok{text-align:center;padding:30px 18px}
+  .ok .ico{font-size:52px}
+  .ok .prot{display:inline-block;margin:10px 0;padding:8px 16px;background:#F4F1EA;border-radius:8px;font-weight:700;letter-spacing:.06em}
+  .hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+  footer{text-align:center;font-size:12px;color:#6b7a72;padding:6px 18px 28px}
+</style>
+</head>
+<body>
+<header>
+  <h1>📢 Canal de Ouvidoria</h1>
+  <p>Cantina em Casa · Lumar Alimentos</p>
+</header>
+<main id="app"></main>
+<footer>Este canal é do RH. Não grava seu nome, telefone, IP nem localização.</footer>
+
+<script>
+(function () {
+  var SUPA_URL = '__SUPA_URL__';
+  var SUPA_KEY = '__SUPA_KEY__';
+  var SETORES = ['Produção / Fábrica', 'Expedição / Logística', 'Loja / Vendas', 'Administrativo', 'Geral / Outro'];
+  var TIPOS = [['denuncia', '🚨 Denúncia'], ['sugestao', '💡 Sugestão'], ['reclamacao', '📣 Reclamação'], ['elogio', '👏 Elogio']];
+  var MAX_FOTOS = 3;
+  var app = document.getElementById('app');
+  var fotos = []; // {blob, url}
+  var enviando = false;
+
+  function el(html) { var d = document.createElement('div'); d.innerHTML = html; return d.firstElementChild; }
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    var h = Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+
+  function formulario(erro) {
+    app.innerHTML =
+      '<div class="card anon"><b>🔒 100% anônimo.</b> Você não precisa se identificar. Escreva com calma e com o máximo de detalhes que puder (o quê, onde, quando).</div>' +
+      (erro ? '<div class="erro" role="alert">' + erro + '</div>' : '') +
+      '<form id="f" class="card" autocomplete="off" novalidate>' +
+      '<label class="t">O que você quer enviar? *</label><div class="tipos">' +
+      TIPOS.map(function (t, i) { return '<label class="tipo"><input type="radio" name="tipo" value="' + t[0] + '"' + (i === 0 ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') +
+      '</div>' +
+      '<label class="t" for="empresa">Empresa *</label><select id="empresa"><option value="lumar">Lumar Alimentos (fábrica)</option><option value="cantina">Cantina em Casa</option></select>' +
+      '<label class="t" for="setor">Setor relacionado *</label><select id="setor">' + SETORES.map(function (s) { return '<option>' + s + '</option>'; }).join('') + '</select>' +
+      '<label class="t" for="desc">Conte o que aconteceu *</label><textarea id="desc" maxlength="5000" placeholder="Descreva aqui…"></textarea><div class="cont"><span id="n">0</span>/5000</div>' +
+      '<label class="t">Fotos <span class="opcional">(opcional, até ' + MAX_FOTOS + ')</span></label><input type="file" id="arq" accept="image/*" multiple><div class="fotos" id="fotos"></div><p class="dica">Os dados da foto (local e aparelho) são apagados antes do envio.</p>' +
+      '<label class="t" for="ident">Quer se identificar? <span class="opcional">(opcional — deixe em branco para ficar anônimo)</span></label><input type="text" id="ident" maxlength="200" placeholder="Nome ou como falar com você">' +
+      '<div class="hp" aria-hidden="true"><label>Não preencha <input type="text" id="site" tabindex="-1" autocomplete="off"></label></div>' +
+      '<div style="margin-top:18px"><button type="submit" id="btn">Enviar</button></div></form>';
+    var desc = document.getElementById('desc');
+    desc.addEventListener('input', function () { document.getElementById('n').textContent = desc.value.length; });
+    document.getElementById('arq').addEventListener('change', onArquivos);
+    document.getElementById('f').addEventListener('submit', enviar);
+    desenharFotos();
+  }
+
+  function desenharFotos() {
+    var box = document.getElementById('fotos'); if (!box) return;
+    box.innerHTML = '';
+    fotos.forEach(function (f, i) {
+      var d = el('<div><img alt="Foto ' + (i + 1) + '"><b title="Remover" role="button">×</b></div>');
+      d.querySelector('img').src = f.url;
+      d.querySelector('b').onclick = function () { URL.revokeObjectURL(f.url); fotos.splice(i, 1); desenharFotos(); };
+      box.appendChild(d);
+    });
+  }
+
+  // Reencoda como JPEG no canvas: remove EXIF/GPS e padroniza o tipo.
+  function reencodar(file) {
+    return new Promise(function (ok, falha) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var max = 1600, r = Math.min(1, max / Math.max(img.width, img.height));
+        var c = document.createElement('canvas'); c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+        var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { b ? ok(b) : falha(new Error('foto')); }, 'image/jpeg', 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); falha(new Error('foto')); };
+      img.src = url;
+    });
+  }
+
+  function onArquivos(e) {
+    var lista = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';
+    var vagas = MAX_FOTOS - fotos.length;
+    lista.slice(0, Math.max(vagas, 0)).reduce(function (p, file) {
+      return p.then(function () {
+        return reencodar(file).then(function (b) {
+          if (b.size > 3 * 1024 * 1024) return;
+          fotos.push({ blob: b, url: URL.createObjectURL(b) });
+        }).catch(function () {});
+      });
+    }, Promise.resolve()).then(desenharFotos);
+  }
+
+  function enviar(e) {
+    e.preventDefault();
+    if (enviando) return;
+    if (document.getElementById('site').value) { sucesso('OUV-********'); return; } // robô: finge sucesso
+    var tipo = document.querySelector('input[name=tipo]:checked').value;
+    var empresa = document.getElementById('empresa').value;
+    var setor = document.getElementById('setor').value;
+    var desc = document.getElementById('desc').value.trim();
+    var ident = document.getElementById('ident').value.trim();
+    if (desc.length < 10) { formularioMantendo('Conte um pouco mais (mínimo de 10 letras).'); return; }
+    enviando = true;
+    var btn = document.getElementById('btn'); btn.disabled = true; btn.textContent = 'Enviando…';
+
+    var pasta = uuid(), paths = [];
+    fotos.reduce(function (p, f, i) {
+      return p.then(function () {
+        var path = pasta + '/' + i + '.jpg';
+        return fetch(SUPA_URL + '/storage/v1/object/ouvidoria-anexos/' + path, {
+          method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+          headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'false' },
+          body: f.blob
+        }).then(function (r) { if (!r.ok) throw new Error('upload'); paths.push(path); });
+      });
+    }, Promise.resolve()).then(function () {
+      return fetch(SUPA_URL + '/rest/v1/rpc/ouvidoria_enviar', {
+        method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+        headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_empresa_id: empresa, p_tipo: tipo, p_setor: setor, p_descricao: desc, p_identificacao: ident || null, p_anexos: paths })
+      });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('rpc');
+      return r.json();
+    }).then(function (protocolo) {
+      fotos.forEach(function (f) { URL.revokeObjectURL(f.url); }); fotos = [];
+      enviando = false; sucesso(protocolo);
+    }).catch(function () {
+      enviando = false;
+      formularioMantendo('Não foi possível enviar agora. Confira sua internet e tente de novo. Seu texto foi mantido.');
+    });
+  }
+
+  // Reabre o formulário com a mensagem de erro sem perder o que foi digitado.
+  function formularioMantendo(msg) {
+    var s = { tipo: (document.querySelector('input[name=tipo]:checked') || {}).value, empresa: document.getElementById('empresa').value, setor: document.getElementById('setor').value, desc: document.getElementById('desc').value, ident: document.getElementById('ident').value };
+    formulario(msg);
+    document.querySelector('input[name=tipo][value=' + s.tipo + ']').checked = true;
+    document.getElementById('empresa').value = s.empresa; document.getElementById('setor').value = s.setor;
+    document.getElementById('desc').value = s.desc; document.getElementById('n').textContent = s.desc.length;
+    document.getElementById('ident').value = s.ident;
+    window.scrollTo(0, 0);
+  }
+
+  function sucesso(protocolo) {
+    app.innerHTML = '<div class="card ok"><div class="ico">✅</div><h2>Recebemos. Obrigado!</h2>' +
+      '<p>Sua mensagem foi enviada ao RH com segurança e será analisada.</p>' +
+      '<div class="prot">' + String(protocolo).replace(/[^A-Z0-9\-*]/gi, '') + '</div>' +
+      '<p class="dica">Esse é o número do seu registro. Como o canal é anônimo, não há como consultar a resposta por aqui.</p>' +
+      '<button class="sec" id="outra">Enviar outra mensagem</button></div>';
+    document.getElementById('outra').onclick = function () { formulario(); };
+    window.scrollTo(0, 0);
+  }
+
+  formulario();
+})();
+</script>
+</body>
+</html>
