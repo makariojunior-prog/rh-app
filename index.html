@@ -12419,6 +12419,21 @@
 
     function OuvidoriaPage({empresaId}){
       const TIPOS={denuncia:{l:'Denúncia',ico:'🚨'},sugestao:{l:'Sugestão',ico:'💡'},reclamacao:{l:'Reclamação',ico:'📣'},elogio:{l:'Elogio',ico:'👏'}};
+      const CATEGORIAS={
+        assedio_moral:'Assédio moral',
+        assedio_sexual:'Assédio sexual',
+        discriminacao_violencia:'Discriminação / violência',
+        risco_psicossocial:'Risco psicossocial (NR-1)',
+        seguranca_saude:'Segurança / EPI / ergonomia',
+        conduta_etica:'Conduta / ética',
+        sugestao_melhoria:'Sugestão / elogio / outros',
+      };
+      const GRAVIDADES={
+        baixa:{l:'Baixa',bg:'#E5E7EB',c:'#374151'},
+        media:{l:'Média',bg:'#DBEAFE',c:'#1E40AF'},
+        alta:{l:'Alta',bg:'#FFEDD5',c:'#9A3412'},
+        critica:{l:'Crítica',bg:'#FEE2E2',c:'#991B1B'},
+      };
       const STATUS={
         nova:{l:'Nova / Não lida',bg:'#FEE2E2',c:'#991B1B'},
         em_analise:{l:'Em análise',bg:'#FEF9C3',c:'#92400E'},
@@ -12432,17 +12447,33 @@
       const [erro,setErro]=useState(null);
       const [fStatus,setFStatus]=useState('');
       const [fTipo,setFTipo]=useState('');
+      const [fCat,setFCat]=useState('');
       const [fSetor,setFSetor]=useState('');
       const [fMes,setFMes]=useState('');
+      const [fSoNr1,setFSoNr1]=useState(false);
+      const [fSoAtraso,setFSoAtraso]=useState(false);
       const [sel,setSel]=useState(null);
       const [trats,setTrats]=useState([]);
       const [nota,setNota]=useState('');
+      const [tipoMsg,setTipoMsg]=useState('nota');
+      const [edCat,setEdCat]=useState('sugestao_melhoria');
+      const [edGrav,setEdGrav]=useState('media');
+      const [edPsico,setEdPsico]=useState(false);
+      const [edCipa,setEdCipa]=useState(false);
+      const [edResp,setEdResp]=useState('');
+      const [edPlano,setEdPlano]=useState('');
       const [ocupado,setOcupado]=useState(false);
       const hoje=new Date();
       const [mesRel,setMesRel]=useState(`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`);
 
       const mesDe=(iso)=>{ const d=new Date(iso); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; };
+      const fmtD=(iso)=>iso?new Date(iso).toLocaleDateString('pt-BR'):'—';
       const fmtDH=(iso)=>iso?new Date(iso).toLocaleString('pt-BR'):'—';
+      const diasPrazo=(m)=>{
+        if(!m?.prazo_resposta||m.status==='tratada'||m.status==='arquivada') return null;
+        return Math.ceil((new Date(m.prazo_resposta)-Date.now())/86400000);
+      };
+      const atrasada=(m)=>{ const d=diasPrazo(m); return d!==null&&d<0; };
 
       const carregar=async()=>{
         if(!empresaId) return;
@@ -12458,17 +12489,26 @@
         const {data}=await _supa.from('ouvidoria_tratativas').select('*').eq('manifestacao_id',id).order('created_at',{ascending:true});
         setTrats(data||[]);
       };
-      const abrir=(m)=>{ setSel(m); setNota(''); setTrats([]); carregarTrats(m.id); };
+      const abrir=(m)=>{
+        setSel(m); setNota(''); setTipoMsg('nota'); setTrats([]);
+        setEdCat(m.categoria||'sugestao_melhoria');
+        setEdGrav(m.gravidade||'media');
+        setEdPsico(!!m.risco_psicossocial);
+        setEdCipa(!!m.encaminhado_cipa);
+        setEdResp(m.responsavel_apuracao||'');
+        setEdPlano(m.plano_acao_pgr||'');
+        carregarTrats(m.id);
+      };
 
       const meuEmail=async()=>{ const {data}=await _supa.auth.getUser(); return data?.user?.email||null; };
 
-      const registrar=async(m,tipo,texto,campos)=>{
+      const registrar=async(m,tipo,texto,campos,visivel=false)=>{
         setOcupado(true);
         const autor=await meuEmail();
         const agora=new Date().toISOString();
         const {data:upd,error}=await _supa.from('ouvidoria_manifestacoes').update({...(campos||{}),atualizado_em:agora}).eq('id',m.id).select().single();
         if(error){ setOcupado(false); toast('Erro: '+error.message,'error'); return; }
-        const {error:e2}=await _supa.from('ouvidoria_tratativas').insert({manifestacao_id:m.id,empresa_id:m.empresa_id,tipo,texto,autor});
+        const {error:e2}=await _supa.from('ouvidoria_tratativas').insert({manifestacao_id:m.id,empresa_id:m.empresa_id,tipo,texto,visivel_denunciante:!!visivel,autor});
         if(e2) toast('Salvo, mas o histórico falhou: '+e2.message,'error');
         setItens(p=>p.map(x=>x.id===m.id?upd:x));
         setSel(upd); await carregarTrats(m.id); setOcupado(false);
@@ -12477,17 +12517,31 @@
       const marcarLida=async(m)=>{
         if(m.lida_em) return;
         const autor=await meuEmail();
-        await registrar(m,'leitura','Marcada como lida',{lida_em:new Date().toISOString(),lida_por:autor});
+        await registrar(m,'leitura','Marcada como lida',{lida_em:new Date().toISOString(),lida_por:autor},false);
       };
       const mudarStatus=async(m,novo)=>{
         if(novo===m.status) return;
         const campos={status:novo};
         if(!m.lida_em){ campos.lida_em=new Date().toISOString(); campos.lida_por=await meuEmail(); }
-        await registrar(m,'status',`Status: ${STATUS[m.status]?.l||m.status} → ${STATUS[novo].l}`,campos);
+        if(novo==='tratada'&&!m.concluida_em){ campos.concluida_em=new Date().toISOString(); }
+        await registrar(m,'status',`Status atualizado: ${STATUS[m.status]?.l||m.status} → ${STATUS[novo].l}`,campos,true);
+      };
+      const salvarNr1=async(m)=>{
+        const resumo=`NR-1/PGR atualizado · Tema: ${CATEGORIAS[edCat]||edCat} · Gravidade: ${GRAVIDADES[edGrav]?.l||edGrav}${edPsico?' · Risco psicossocial (PGR)':''}${edCipa?' · CIPA envolvida':''}${edResp.trim()?` · Resp.: ${edResp.trim()}`:''}${edPlano.trim()?`\nPlano de ação PGR: ${edPlano.trim()}`:''}`;
+        await registrar(m,'plano_acao',resumo,{
+          categoria:edCat,
+          gravidade:edGrav,
+          risco_psicossocial:edPsico,
+          encaminhado_cipa:edCipa,
+          responsavel_apuracao:edResp.trim()||null,
+          plano_acao_pgr:edPlano.trim()||null,
+        },false);
+        toast('Classificação NR-1 e plano PGR salvos','success');
       };
       const salvarNota=async(m)=>{
         const txt=nota.trim(); if(!txt) return;
-        await registrar(m,'nota',txt,{});
+        const ehRetorno=tipoMsg==='retorno';
+        await registrar(m,ehRetorno?'retorno':'nota',txt,{},ehRetorno);
         setNota('');
       };
       const abrirAnexo=async(path)=>{
@@ -12497,15 +12551,17 @@
       };
 
       const filtrados=useMemo(()=>itens.filter(m=>
-        (!fStatus||m.status===fStatus)&&(!fTipo||m.tipo===fTipo)&&(!fSetor||m.setor===fSetor)&&(!fMes||mesDe(m.created_at)===fMes)
-      ),[itens,fStatus,fTipo,fSetor,fMes]);
+        (!fStatus||m.status===fStatus)&&(!fTipo||m.tipo===fTipo)&&(!fCat||m.categoria===fCat)&&(!fSetor||m.setor===fSetor)&&(!fMes||mesDe(m.created_at)===fMes)&&(!fSoNr1||m.risco_psicossocial)&&(!fSoAtraso||atrasada(m))
+      ),[itens,fStatus,fTipo,fCat,fSetor,fMes,fSoNr1,fSoAtraso]);
       const qtdNovas=itens.filter(m=>m.status==='nova').length;
+      const qtdAtrasadas=itens.filter(atrasada).length;
 
-      // Relatório do mês
+      // Relatório do mês + indicadores NR-1 / PGR
       const rel=useMemo(()=>{
         const doMes=itens.filter(m=>mesDe(m.created_at)===mesRel);
         const cont=(arr,f)=>{ const o={}; arr.forEach(x=>{ const k=f(x); o[k]=(o[k]||0)+1; }); return o; };
         const porTipo=cont(doMes,m=>m.tipo);
+        const porCat=cont(doMes,m=>m.categoria||'sugestao_melhoria');
         const porSetor=cont(doMes,m=>m.setor);
         const porStatus=cont(doMes,m=>m.status);
         const matriz={}; doMes.forEach(m=>{ matriz[m.setor]=matriz[m.setor]||{}; matriz[m.setor][m.tipo]=(matriz[m.setor][m.tipo]||0)+1; });
@@ -12519,13 +12575,31 @@
         const recorrentes=Object.entries(freq).filter(([,n])=>n>=2).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,10);
         const meses=[]; const [ay,am]=mesRel.split('-').map(Number);
         for(let i=5;i>=0;i--){ const d=new Date(ay,am-1-i,1); const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; meses.push([k,itens.filter(m=>mesDe(m.created_at)===k).length]); }
-        return {total:doMes.length,porTipo,porSetor,porStatus,matriz,recorrentes,meses,pendentes:doMes.filter(m=>m.status==='nova'||m.status==='em_analise').length};
+        const concluidas=doMes.filter(m=>m.concluida_em);
+        const tempoMedio=concluidas.length?Math.round(concluidas.reduce((acc,m)=>acc+Math.max(0,(new Date(m.concluida_em)-new Date(m.created_at))/86400000),0)/concluidas.length*10)/10:null;
+        return {
+          total:doMes.length,
+          porTipo,porCat,porSetor,porStatus,matriz,recorrentes,meses,
+          pendentes:doMes.filter(m=>m.status==='nova'||m.status==='em_analise').length,
+          atrasadas:doMes.filter(atrasada).length,
+          psicossocial:doMes.filter(m=>m.risco_psicossocial).length,
+          cipa:doMes.filter(m=>m.encaminhado_cipa).length,
+          tempoMedio,
+          planosPgr:doMes.filter(m=>m.risco_psicossocial||m.plano_acao_pgr),
+        };
       },[itens,mesRel]);
 
       const exportarResumo=()=>{
-        const L=[]; const q=(v)=>`"${String(v).replace(/"/g,'""')}"`;
-        L.push(['Resumo da Ouvidoria',mesRel].map(q).join(';'));
-        L.push(['Total',rel.total].map(q).join(';'));
+        const L=[]; const q=(v)=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+        L.push(['Relatório Ouvidoria / NR-1 (PGR & CIPA)',mesRel].map(q).join(';'));
+        L.push(['Total no mês',rel.total].map(q).join(';'));
+        L.push(['Pendentes',rel.pendentes].map(q).join(';'));
+        L.push(['Fora do prazo (30 dias)',rel.atrasadas].map(q).join(';'));
+        L.push(['Casos NR-1 (Psicossocial / Assédio)',rel.psicossocial].map(q).join(';'));
+        L.push(['Encaminhados à CIPA (Lei 14.457)',rel.cipa].map(q).join(';'));
+        L.push(['Tempo médio de conclusão (dias)',rel.tempoMedio??'—'].map(q).join(';'));
+        L.push(''); L.push(['Categoria NR-1','Quantidade'].map(q).join(';'));
+        Object.entries(CATEGORIAS).forEach(([k,l])=>L.push([l,rel.porCat[k]||0].map(q).join(';')));
         L.push(''); L.push(['Tipo','Quantidade'].map(q).join(';'));
         Object.entries(TIPOS).forEach(([k,v])=>L.push([v.l,rel.porTipo[k]||0].map(q).join(';')));
         L.push(''); L.push(['Setor','Quantidade'].map(q).join(';'));
@@ -12534,25 +12608,42 @@
         Object.entries(STATUS).forEach(([k,v])=>L.push([v.l,rel.porStatus[k]||0].map(q).join(';')));
         L.push(''); L.push(['Assunto recorrente','Manifestações'].map(q).join(';'));
         rel.recorrentes.forEach(([w,n])=>L.push([w,n].map(q).join(';')));
+        if(rel.planosPgr.length){
+          L.push(''); L.push(['Evidências PGR / NR-1 (sem identificação pessoal)','','','','','',''].map(q).join(';'));
+          L.push(['Protocolo','Data','Setor','Categoria NR-1','Gravidade','Status','CIPA','Responsável','Plano de Ação PGR'].map(q).join(';'));
+          rel.planosPgr.forEach(m=>L.push([
+            m.protocolo,fmtD(m.created_at),m.setor,CATEGORIAS[m.categoria]||m.categoria||'',
+            GRAVIDADES[m.gravidade]?.l||m.gravidade||'',STATUS[m.status]?.l||m.status,
+            m.encaminhado_cipa?'Sim':'Não',m.responsavel_apuracao||'',m.plano_acao_pgr||''
+          ].map(q).join(';')));
+        }
         const blob=new Blob(["\uFEFF"+L.join('\r\n')],{type:'text/csv;charset=utf-8;'});
-        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`ouvidoria_resumo_${mesRel}.csv`; a.click();
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`ouvidoria_nr1_${mesRel}.csv`; a.click();
         setTimeout(()=>URL.revokeObjectURL(a.href),2000);
       };
 
       const chipStatus=(st)=>{ const x=STATUS[st]||STATUS.nova; return <span style={{display:'inline-block',padding:'3px 9px',borderRadius:20,fontSize:11,fontWeight:700,background:x.bg,color:x.c}}>{x.l}</span>; };
+      const chipGrav=(g)=>{ const x=GRAVIDADES[g]||GRAVIDADES.media; return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:12,fontSize:10,fontWeight:700,background:x.bg,color:x.c}}>{x.l}</span>; };
+      const chipPrazo=(m)=>{
+        const d=diasPrazo(m);
+        if(d===null) return null;
+        if(d<0) return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:12,fontSize:10,fontWeight:700,background:'#FEE2E2',color:'#991B1B'}}>⚠️ Atrasada {Math.abs(d)}d</span>;
+        if(d<=5) return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:12,fontSize:10,fontWeight:700,background:'#FEF9C3',color:'#92400E'}}>⏳ {d}d</span>;
+        return <span style={{fontSize:11,color:C.muted}}>{d}d restantes</span>;
+      };
       const barra=(n,max,cor)=><div style={{background:C.border,borderRadius:6,height:10,flex:1}}><div style={{width:`${max?Math.round(n/max*100):0}%`,background:cor||C.acc,height:10,borderRadius:6}}/></div>;
 
       return(
         <div>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:14}}>
             <div>
-              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📢 Ouvidoria</div>
-              <div style={{fontSize:12,color:C.muted}}>Denúncias e sugestões anônimas enviadas pelo QR Code. Link público do formulário: <b>/ouvidoria</b></div>
+              <div style={{fontSize:20,fontWeight:800,color:C.pri}}>📢 Ouvidoria & Canal NR-1</div>
+              <div style={{fontSize:12,color:C.muted}}>Denúncias, riscos psicossociais (NR-1 / PGR) e CIPA (Lei 14.457). Formulário e acompanhamento anônimo: <b>/ouvidoria</b></div>
             </div>
             <button style={s.btnOutline} onClick={carregar}>🔄 Atualizar</button>
           </div>
-          <div style={{display:'flex',gap:8,marginBottom:14}}>
-            {[['caixa',`📥 Caixa de entrada${qtdNovas?` (${qtdNovas} nova${qtdNovas>1?'s':''})`:''}`],['relatorio','📊 Relatório mensal']].map(([k,l])=>(
+          <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+            {[['caixa',`📥 Caixa de entrada${qtdNovas?` (${qtdNovas} nova${qtdNovas>1?'s':''})`:''}${qtdAtrasadas?` · ⚠️ ${qtdAtrasadas} atrasada${qtdAtrasadas>1?'s':''}`:''}`],['relatorio','📊 Relatório mensal / NR-1']].map(([k,l])=>(
               <button key={k} onClick={()=>setAba(k)} style={aba===k?s.btn:s.btnOutline}>{l}</button>
             ))}
           </div>
@@ -12570,27 +12661,41 @@
                   <select style={s.select} value={fTipo} onChange={e=>setFTipo(e.target.value)}>
                     <option value="">Todos</option>{Object.entries(TIPOS).map(([k,v])=><option key={k} value={k}>{v.ico} {v.l}</option>)}
                   </select></div>
+                <div><label style={s.label}>Tema NR-1</label>
+                  <select style={s.select} value={fCat} onChange={e=>setFCat(e.target.value)}>
+                    <option value="">Todos</option>{Object.entries(CATEGORIAS).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                  </select></div>
                 <div><label style={s.label}>Setor</label>
                   <select style={s.select} value={fSetor} onChange={e=>setFSetor(e.target.value)}>
                     <option value="">Todos</option>{SETORES.map(x=><option key={x} value={x}>{x}</option>)}
                   </select></div>
                 <div><label style={s.label}>Mês</label>
-                  <input type="month" style={{...s.input,width:160}} value={fMes} onChange={e=>setFMes(e.target.value)}/></div>
-                {(fStatus||fTipo||fSetor||fMes)&&<button style={s.btnOutline} onClick={()=>{setFStatus('');setFTipo('');setFSetor('');setFMes('');}}>Limpar filtros</button>}
+                  <input type="month" style={{...s.input,width:155}} value={fMes} onChange={e=>setFMes(e.target.value)}/></div>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer',paddingBottom:8}}>
+                  <input type="checkbox" checked={fSoNr1} onChange={e=>setFSoNr1(e.target.checked)}/> Só NR-1 (Psicossocial/Assédio)
+                </label>
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer',paddingBottom:8}}>
+                  <input type="checkbox" checked={fSoAtraso} onChange={e=>setFSoAtraso(e.target.checked)}/> Só atrasadas
+                </label>
+                {(fStatus||fTipo||fCat||fSetor||fMes||fSoNr1||fSoAtraso)&&<button style={s.btnOutline} onClick={()=>{setFStatus('');setFTipo('');setFCat('');setFSetor('');setFMes('');setFSoNr1(false);setFSoAtraso(false);}}>Limpar filtros</button>}
               </div>
 
-              <div style={{display:'grid',gridTemplateColumns:sel?'minmax(0,1fr) minmax(0,1fr)':'1fr',gap:16,alignItems:'start'}}>
+              <div style={{display:'grid',gridTemplateColumns:sel?'minmax(0,1fr) minmax(0,1.1fr)':'1fr',gap:16,alignItems:'start'}}>
                 <div style={{...s.card,padding:0,overflow:'hidden'}}>
                   {loading?<div style={{padding:24,color:C.muted}}>Carregando…</div>:
                   filtrados.length===0?<div style={{padding:24,color:C.muted}}>Nenhuma manifestação encontrada.</div>:(
                     <table style={s.table}>
-                      <thead><tr><th style={s.th}>Recebida</th><th style={s.th}>Tipo</th><th style={s.th}>Setor</th><th style={s.th}>Status</th></tr></thead>
+                      <thead><tr><th style={s.th}>Recebida</th><th style={s.th}>Tipo / Tema NR-1</th><th style={s.th}>Setor</th><th style={s.th}>Prazo / Grav.</th><th style={s.th}>Status</th></tr></thead>
                       <tbody>
                         {filtrados.map((m,i)=>(
                           <tr key={m.id} onClick={()=>abrir(m)} style={{...s.row(i),cursor:'pointer',outline:sel?.id===m.id?`2px solid ${C.acc}`:'none'}}>
                             <td style={s.td}>{!m.lida_em&&<span title="Não lida" style={{display:'inline-block',width:8,height:8,borderRadius:4,background:C.danger,marginRight:6}}/>}{fmtDH(m.created_at)}</td>
-                            <td style={s.td}>{TIPOS[m.tipo]?.ico} {TIPOS[m.tipo]?.l||m.tipo}</td>
+                            <td style={s.td}>
+                              <div>{TIPOS[m.tipo]?.ico} {TIPOS[m.tipo]?.l||m.tipo}</div>
+                              <div style={{fontSize:11,color:C.muted}}>{CATEGORIAS[m.categoria]||m.categoria||'—'}{m.risco_psicossocial?' · PGR':''}{m.encaminhado_cipa?' · CIPA':''}</div>
+                            </td>
                             <td style={s.td}>{m.setor}</td>
+                            <td style={s.td}><div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-start'}}>{chipGrav(m.gravidade)}{chipPrazo(m)}</div></td>
                             <td style={s.td}>{chipStatus(m.status)}</td>
                           </tr>
                         ))}
@@ -12605,7 +12710,7 @@
                       <div>
                         <div style={{fontWeight:800,color:C.pri}}>{TIPOS[sel.tipo]?.ico} {TIPOS[sel.tipo]?.l} · {sel.protocolo}</div>
                         <div style={{fontSize:12,color:C.muted}}>{sel.setor} · recebida em {fmtDH(sel.created_at)}</div>
-                        <div style={{fontSize:12,color:C.muted}}>{sel.lida_em?`Lida por ${sel.lida_por||'—'} em ${fmtDH(sel.lida_em)}`:'Ainda não lida'}</div>
+                        <div style={{fontSize:12,color:C.muted}}>Prazo (30d): <b>{fmtD(sel.prazo_resposta)}</b> {chipPrazo(sel)} · {sel.lida_em?`Lida por ${sel.lida_por||'—'} em ${fmtDH(sel.lida_em)}`:'Ainda não lida'}</div>
                       </div>
                       <button style={s.btnOutline} onClick={()=>setSel(null)}>✕</button>
                     </div>
@@ -12623,15 +12728,51 @@
                       </select>
                       {sel.status!=='arquivada'&&<button style={s.btnOutline} disabled={ocupado} onClick={()=>mudarStatus(sel,'arquivada')}>🗄️ Arquivar</button>}
                     </div>
-                    <div style={s.cardTitle}>Histórico de tratativas</div>
+
+                    <div style={{background:C.rowAlt,borderRadius:10,padding:12,marginBottom:14}}>
+                      <div style={{fontWeight:700,fontSize:13,color:C.pri,marginBottom:8}}>🛡️ Classificação NR-1 (PGR) e CIPA</div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                        <div><label style={s.label}>Tema NR-1</label>
+                          <select style={s.select} value={edCat} onChange={e=>setEdCat(e.target.value)}>
+                            {Object.entries(CATEGORIAS).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                          </select></div>
+                        <div><label style={s.label}>Gravidade</label>
+                          <select style={s.select} value={edGrav} onChange={e=>setEdGrav(e.target.value)}>
+                            {Object.entries(GRAVIDADES).map(([k,v])=><option key={k} value={k}>{v.l}</option>)}
+                          </select></div>
+                      </div>
+                      <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:8,fontSize:12}}>
+                        <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}><input type="checkbox" checked={edPsico} onChange={e=>setEdPsico(e.target.checked)}/> Risco psicossocial / PGR (NR-1)</label>
+                        <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}}><input type="checkbox" checked={edCipa} onChange={e=>setEdCipa(e.target.checked)}/> Envolver CIPA (Lei 14.457)</label>
+                      </div>
+                      <div style={{marginBottom:8}}><label style={s.label}>Responsável / Comitê de apuração</label>
+                        <input style={s.input} value={edResp} onChange={e=>setEdResp(e.target.value)} maxLength={120} placeholder="Ex.: RH + CIPA, Comitê de Ética…"/></div>
+                      <div style={{marginBottom:8}}><label style={s.label}>Plano de ação preventivo/corretivo (PGR / NR-1)</label>
+                        <textarea style={{...s.input,minHeight:60}} value={edPlano} onChange={e=>setEdPlano(e.target.value)} maxLength={3000} placeholder="Medidas corretivas/preventivas, responsável e prazo para o inventário do PGR…"/></div>
+                      <button style={s.btnOutline} disabled={ocupado} onClick={()=>salvarNr1(sel)}>💾 Salvar classificação e plano PGR</button>
+                    </div>
+
+                    <div style={s.cardTitle}>Histórico de tratativas (trilha de auditoria)</div>
                     {trats.length===0?<div style={{fontSize:12,color:C.muted,marginBottom:10}}>Nenhum registro ainda.</div>:
-                      <div style={{marginBottom:10}}>{trats.map(t=>(
-                        <div key={t.id} style={{borderLeft:`3px solid ${t.tipo==='nota'?C.acc:C.border}`,padding:'4px 10px',marginBottom:8,fontSize:13}}>
-                          <div style={{whiteSpace:'pre-wrap'}}>{t.tipo==='nota'?'📝 ':''}{t.texto}</div>
-                          <div style={{fontSize:11,color:C.muted}}>{t.autor||'—'} · {fmtDH(t.created_at)}</div>
-                        </div>))}</div>}
-                    <textarea style={{...s.input,minHeight:70,marginBottom:8}} placeholder="Nota interna: o que foi feito, quem foi ouvido, próximos passos…" value={nota} onChange={e=>setNota(e.target.value)}/>
-                    <button style={s.btnAcc} disabled={ocupado||!nota.trim()} onClick={()=>salvarNota(sel)}>Registrar nota</button>
+                      <div style={{marginBottom:10}}>{trats.map(t=>{
+                        const cor=t.tipo==='retorno'?'#166534':t.tipo==='complemento'?'#1E40AF':t.tipo==='plano_acao'?C.pri:t.tipo==='nota'?C.acc:C.border;
+                        const tag=t.tipo==='retorno'?'💬 Retorno ao denunciante (visível no protocolo)':t.tipo==='complemento'?'👤 Complemento anônimo do denunciante':t.tipo==='plano_acao'?'📋 Registro NR-1 / PGR':t.tipo==='nota'?'🔒 Nota interna (sigilosa)':'ℹ️ Sistema';
+                        return(
+                          <div key={t.id} style={{borderLeft:`3px solid ${cor}`,padding:'5px 10px',marginBottom:8,fontSize:13}}>
+                            <div style={{fontSize:11,fontWeight:700,color:cor,marginBottom:2}}>{tag}</div>
+                            <div style={{whiteSpace:'pre-wrap'}}>{t.texto}</div>
+                            <div style={{fontSize:11,color:C.muted}}>{t.autor||'—'} · {fmtDH(t.created_at)}</div>
+                          </div>
+                        );
+                      })}</div>}
+
+                    <div style={{display:'flex',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+                      <button type="button" style={tipoMsg==='nota'?s.btn:s.btnOutline} onClick={()=>setTipoMsg('nota')}>🔒 Nota interna (sigilosa)</button>
+                      <button type="button" style={tipoMsg==='retorno'?s.btn:s.btnOutline} onClick={()=>setTipoMsg('retorno')}>💬 Retorno ao denunciante</button>
+                    </div>
+                    {tipoMsg==='retorno'&&<div style={{fontSize:12,color:'#166534',background:'#DCFCE7',padding:'8px 10px',borderRadius:8,marginBottom:8}}>Esta mensagem fica visível para quem consultar o protocolo em <b>/ouvidoria</b>. Não cite nomes de terceiros ou dados sigilosos.</div>}
+                    <textarea style={{...s.input,minHeight:70,marginBottom:8}} placeholder={tipoMsg==='retorno'?'Escreva o retorno oficial ou peça esclarecimentos adicionais ao denunciante…':'Nota interna: o que foi apurado, quem foi ouvido, evidências e próximos passos…'} value={nota} onChange={e=>setNota(e.target.value)}/>
+                    <button style={s.btnAcc} disabled={ocupado||!nota.trim()} onClick={()=>salvarNota(sel)}>{tipoMsg==='retorno'?'Enviar retorno ao protocolo':'Registrar nota interna'}</button>
                   </div>
                 )}
               </div>
@@ -12642,14 +12783,21 @@
             <div>
               <div style={{...s.card,display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
                 <div><label style={s.label}>Mês</label><input type="month" style={{...s.input,width:170}} value={mesRel} onChange={e=>setMesRel(e.target.value)}/></div>
-                <button style={s.btnOutline} onClick={exportarResumo}>⬇️ Exportar resumo (CSV)</button>
+                <button style={s.btnOutline} onClick={exportarResumo}>⬇️ Exportar resumo NR-1 / PGR (CSV)</button>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:18}}>
-                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Total no mês</div><div style={{fontSize:30,fontWeight:800,color:C.pri}}>{rel.total}</div></div>
-                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Pendentes (nova + em análise)</div><div style={{fontSize:30,fontWeight:800,color:rel.pendentes?C.danger:C.green}}>{rel.pendentes}</div></div>
-                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Tratadas</div><div style={{fontSize:30,fontWeight:800,color:C.green}}>{rel.porStatus.tratada||0}</div></div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:18}}>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Total no mês</div><div style={{fontSize:28,fontWeight:800,color:C.pri}}>{rel.total}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Pendentes</div><div style={{fontSize:28,fontWeight:800,color:rel.pendentes?C.danger:C.green}}>{rel.pendentes}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Fora do prazo (30d)</div><div style={{fontSize:28,fontWeight:800,color:rel.atrasadas?C.danger:C.green}}>{rel.atrasadas}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>NR-1 (Psicossocial/Assédio)</div><div style={{fontSize:28,fontWeight:800,color:C.pri}}>{rel.psicossocial}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Com CIPA (Lei 14.457)</div><div style={{fontSize:28,fontWeight:800,color:C.pri}}>{rel.cipa}</div></div>
+                <div style={{...s.card,marginBottom:0}}><div style={s.label}>Tempo médio (dias)</div><div style={{fontSize:28,fontWeight:800,color:C.green}}>{rel.tempoMedio??'—'}</div></div>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16}}>
+                <div style={s.card}>
+                  <div style={s.cardTitle}>Por tema NR-1 / Riscos Psicossociais</div>
+                  {Object.entries(CATEGORIAS).map(([k,l])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:170}}>{l}</span>{barra(rel.porCat[k]||0,rel.total,k.startsWith('assedio')||k==='discriminacao_violencia'?C.danger:C.pri)}<b style={{width:28,textAlign:'right'}}>{rel.porCat[k]||0}</b></div>))}
+                </div>
                 <div style={s.card}>
                   <div style={s.cardTitle}>Por tipo</div>
                   {Object.entries(TIPOS).map(([k,v])=>(<div key={k} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:130}}>{v.ico} {v.l}</span>{barra(rel.porTipo[k]||0,rel.total)}<b style={{width:28,textAlign:'right'}}>{rel.porTipo[k]||0}</b></div>))}
@@ -12659,7 +12807,7 @@
                   {SETORES.map(st=>(<div key={st} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,fontSize:13}}><span style={{width:150}}>{st}</span>{barra(rel.porSetor[st]||0,rel.total,C.pri)}<b style={{width:28,textAlign:'right'}}>{rel.porSetor[st]||0}</b></div>))}
                 </div>
                 <div style={s.card}>
-                  <div style={s.cardTitle}>Assuntos mais recorrentes (para a pauta do comitê)</div>
+                  <div style={s.cardTitle}>Assuntos mais recorrentes (pauta CIPA / Comitê)</div>
                   {rel.recorrentes.length===0?<div style={{fontSize:13,color:C.muted}}>Ainda sem palavras repetidas em 2 ou mais manifestações neste mês.</div>:
                     rel.recorrentes.map(([w,n])=>(<div key={w} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0',borderBottom:`1px solid ${C.border}`}}><span>{w}</span><b>{n} manifestações</b></div>))}
                 </div>
@@ -12674,6 +12822,9 @@
                   <thead><tr><th style={s.th}>Setor</th>{Object.values(TIPOS).map(v=><th key={v.l} style={s.thC}>{v.l}</th>)}</tr></thead>
                   <tbody>{SETORES.map((st,i)=>(<tr key={st} style={s.row(i)}><td style={s.td}>{st}</td>{Object.keys(TIPOS).map(k=><td key={k} style={s.tdC}>{rel.matriz[st]?.[k]||'—'}</td>)}</tr>))}</tbody>
                 </table>
+              </div>
+              <div style={{fontSize:12,color:C.muted,marginTop:8}}>
+                🛡️ <b>Guarda legal (NR-1 / PGR):</b> manifestações e tratativas não podem ser apagadas pelo app (histórico preservado para auditorias do MTE — guarda mínima de 20 anos do inventário de riscos do PGR). O CSV exportado omite qualquer identificação pessoal.
               </div>
             </div>
           )}
