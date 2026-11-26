@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Canal de Ouvidoria e Denúncias · Cantina em Casa / Lumar</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#F4F1EA;color:#1f2a24;font-family:'Segoe UI',system-ui,sans-serif;line-height:1.45}
+  header{background:#1B3A2B;color:#fff;padding:22px 18px;text-align:center}
+  header h1{margin:0;font-size:21px}
+  header p{margin:6px 0 0;font-size:14px;color:#E7D9A3}
+  main{max-width:580px;margin:0 auto;padding:18px}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+  .tabs button{padding:11px 10px;font-size:14px;border-radius:10px;border:2px solid #1B3A2B;background:#fff;color:#1B3A2B;font-weight:700;cursor:pointer}
+  .tabs button.ativo{background:#1B3A2B;color:#fff}
+  .card{background:#fff;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .anon{background:#E7F3EC;border-left:4px solid #2E7D52;font-size:13.5px}
+  .anon ul{margin:8px 0 0;padding-left:18px}
+  .anon li{margin-bottom:4px}
+  label.t{display:block;font-weight:700;font-size:13px;color:#1B3A2B;margin:14px 0 6px}
+  label.t:first-child{margin-top:0}
+  .opcional{font-weight:400;color:#6b7a72}
+  .tipos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .tipo input{position:absolute;opacity:0}
+  .tipo span{display:block;border:2px solid #D8D2C4;border-radius:10px;padding:12px 8px;text-align:center;font-weight:600;cursor:pointer;font-size:14px}
+  .tipo input:checked+span{border-color:#1B3A2B;background:#1B3A2B;color:#fff}
+  .tipo input:focus-visible+span{outline:3px solid #C8A843}
+  select,textarea,input[type=text]{width:100%;border:2px solid #D8D2C4;border-radius:10px;padding:11px 12px;font-size:16px;font-family:inherit;background:#fff}
+  textarea{min-height:140px;resize:vertical}
+  .cont{font-size:12px;color:#6b7a72;text-align:right}
+  .dica{font-size:12.5px;color:#6b7a72;margin:6px 0 0}
+  button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;background:#C8A843;color:#1B3A2B}
+  button:disabled{opacity:.6;cursor:wait}
+  button.sec{background:#fff;border:2px solid #1B3A2B;color:#1B3A2B;margin-top:10px}
+  button.sm{padding:10px 14px;font-size:14px}
+  .erro{background:#FDE8E8;color:#991B1B;border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:14px}
+  .aviso-ok{background:#DCFCE7;color:#166534;border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:14px}
+  .fotos{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .fotos div{position:relative}
+  .fotos img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #D8D2C4}
+  .fotos b{position:absolute;top:-6px;right:-6px;background:#991B1B;color:#fff;border-radius:50%;width:22px;height:22px;text-align:center;line-height:22px;cursor:pointer;font-size:14px}
+  .ok{text-align:center;padding:28px 18px}
+  .ok .ico{font-size:50px}
+  .ok .prot{display:inline-block;margin:10px 0;padding:10px 18px;background:#F4F1EA;border:2px dashed #1B3A2B;border-radius:10px;font-weight:800;font-size:20px;letter-spacing:.08em;color:#1B3A2B}
+  .chip{display:inline-block;padding:4px 11px;border-radius:20px;font-size:12px;font-weight:700}
+  .msg{border-left:4px solid #C8A843;background:#FAF8F3;border-radius:0 10px 10px 0;padding:10px 12px;margin-bottom:10px;font-size:14px}
+  .msg.eu{border-left-color:#2E7D52;background:#F1F8F4}
+  .msg small{display:block;font-size:11.5px;color:#6b7a72;margin-top:4px}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;font-size:13px;background:#F9F8F4;padding:12px;border-radius:10px}
+  .meta b{display:block;font-size:11px;color:#6b7a72;text-transform:uppercase}
+  .hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+  footer{text-align:center;font-size:12px;color:#6b7a72;padding:6px 18px 28px}
+</style>
+</head>
+<body>
+<header>
+  <h1>📢 Canal de Ouvidoria e Denúncias</h1>
+  <p>Cantina em Casa · Lumar Alimentos · NR-1 e Lei 14.457</p>
+</header>
+<main id="app"></main>
+<footer>Canal seguro e confidencial (NR-1 / CIPA). Não grava seu nome, telefone, IP nem localização.</footer>
+
+<script>
+(function () {
+  var SUPA_URL = '__SUPA_URL__';
+  var SUPA_KEY = '__SUPA_KEY__';
+  var SETORES = ['Produção / Fábrica', 'Expedição / Logística', 'Loja / Vendas', 'Administrativo', 'Geral / Outro'];
+  var TIPOS = [['denuncia', '🚨 Denúncia'], ['sugestao', '💡 Sugestão'], ['reclamacao', '📣 Reclamação'], ['elogio', '👏 Elogio']];
+  var CATEGORIAS = [
+    ['assedio_moral', 'Assédio moral (humilhação, perseguição, constrangimento)'],
+    ['assedio_sexual', 'Assédio sexual ou importunação'],
+    ['discriminacao_violencia', 'Discriminação ou violência no trabalho'],
+    ['risco_psicossocial', 'Risco psicossocial (sobrecarga, pressão excessiva, estresse, conflitos)'],
+    ['seguranca_saude', 'Segurança do trabalho, EPI, ergonomia ou ambiente'],
+    ['conduta_etica', 'Conduta, ética ou irregularidade interna'],
+    ['sugestao_melhoria', 'Sugestão de melhoria, elogio ou outros']
+  ];
+  var CAT_MAP = {};
+  CATEGORIAS.forEach(function (c) { CAT_MAP[c[0]] = c[1]; });
+  var TIPO_MAP = { denuncia: '🚨 Denúncia', sugestao: '💡 Sugestão', reclamacao: '📣 Reclamação', elogio: '👏 Elogio' };
+  var STATUS_MAP = {
+    nova: { l: 'Recebida (em triagem)', bg: '#FEE2E2', c: '#991B1B' },
+    em_analise: { l: 'Em apuração / análise', bg: '#FEF9C3', c: '#92400E' },
+    tratada: { l: 'Concluída / Tratada', bg: '#DCFCE7', c: '#166534' },
+    arquivada: { l: 'Encerrada / Arquivada', bg: '#E5E7EB', c: '#374151' }
+  };
+  var MAX_FOTOS = 3;
+  var app = document.getElementById('app');
+  var fotos = [];
+  var enviando = false;
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmtD(iso) { return iso ? new Date(iso).toLocaleDateString('pt-BR') : '—'; }
+  function fmtDH(iso) { return iso ? new Date(iso).toLocaleString('pt-BR') : '—'; }
+  function el(html) { var d = document.createElement('div'); d.innerHTML = html; return d.firstElementChild; }
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    var h = Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+  function barraAbas(ativa) {
+    return '<div class="tabs">' +
+      '<button type="button" id="tab-enviar" class="' + (ativa === 'enviar' ? 'ativo' : '') + '">📝 Enviar relato</button>' +
+      '<button type="button" id="tab-acompanhar" class="' + (ativa === 'acompanhar' ? 'ativo' : '') + '">🔍 Acompanhar protocolo</button>' +
+      '</div>';
+  }
+  function ligarAbas() {
+    var b1 = document.getElementById('tab-enviar');
+    var b2 = document.getElementById('tab-acompanhar');
+    if (b1) b1.onclick = function () { formulario(); };
+    if (b2) b2.onclick = function () { telaAcompanhar(''); };
+  }
+
+  function formulario(erro) {
+    app.innerHTML =
+      barraAbas('enviar') +
+      '<div class="card anon">' +
+      '<b>🔒 Garantia de anonimato e não retaliação (NR-1 / Lei 14.457)</b>' +
+      '<ul>' +
+      '<li><b>100% anônimo:</b> você não precisa se identificar. Não gravamos IP, aparelho nem localização.</li>' +
+      '<li><b>Proibida qualquer retaliação:</b> ninguém pode ser punido, perseguido ou prejudicado por relatar de boa-fé ou ser testemunha.</li>' +
+      '<li><b>Prazos e acompanhamento:</b> triagem em até 5 dias úteis e retorno em até 30 dias. Ao enviar, você recebe um <b>protocolo</b> para acompanhar sem se identificar.</li>' +
+      '</ul></div>' +
+      (erro ? '<div class="erro" role="alert">' + esc(erro) + '</div>' : '') +
+      '<form id="f" class="card" autocomplete="off" novalidate>' +
+      '<label class="t">O que você quer enviar? *</label><div class="tipos">' +
+      TIPOS.map(function (t, i) { return '<label class="tipo"><input type="radio" name="tipo" value="' + t[0] + '"' + (i === 0 ? ' checked' : '') + '><span>' + t[1] + '</span></label>'; }).join('') +
+      '</div>' +
+      '<label class="t" for="categoria">Tema principal (NR-1 / CIPA) *</label>' +
+      '<select id="categoria"><option value="">Selecione o tema…</option>' +
+      CATEGORIAS.map(function (c) { return '<option value="' + c[0] + '">' + esc(c[1]) + '</option>'; }).join('') +
+      '</select>' +
+      '<label class="t" for="empresa">Empresa *</label><select id="empresa"><option value="lumar">Lumar Alimentos (fábrica)</option><option value="cantina">Cantina em Casa</option></select>' +
+      '<label class="t" for="setor">Setor relacionado *</label><select id="setor">' + SETORES.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('') + '</select>' +
+      '<label class="t" for="desc">Conte o que aconteceu *</label><textarea id="desc" maxlength="5000" placeholder="Escreva com calma: o quê, onde, quando e quem presenciou (se souber)…"></textarea><div class="cont"><span id="n">0</span>/5000</div>' +
+      '<label class="t">Fotos ou evidências <span class="opcional">(opcional, até ' + MAX_FOTOS + ')</span></label><input type="file" id="arq" accept="image/*" multiple><div class="fotos" id="fotos"></div><p class="dica">Os dados da foto (local e aparelho) são apagados antes do envio.</p>' +
+      '<label class="t" for="ident">Quer se identificar? <span class="opcional">(opcional — deixe em branco para ficar anônimo)</span></label><input type="text" id="ident" maxlength="200" placeholder="Nome ou como falar com você">' +
+      '<div class="hp" aria-hidden="true"><label>Não preencha <input type="text" id="site" tabindex="-1" autocomplete="off"></label></div>' +
+      '<div style="margin-top:18px"><button type="submit" id="btn">Enviar com segurança</button></div></form>';
+
+    ligarAbas();
+    var desc = document.getElementById('desc');
+    var cat = document.getElementById('categoria');
+    desc.addEventListener('input', function () { document.getElementById('n').textContent = desc.value.length; });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=tipo]'), function (r) {
+      r.addEventListener('change', function () {
+        if ((r.value === 'sugestao' || r.value === 'elogio') && !cat.value) cat.value = 'sugestao_melhoria';
+      });
+    });
+    document.getElementById('arq').addEventListener('change', onArquivos);
+    document.getElementById('f').addEventListener('submit', enviar);
+    desenharFotos();
+  }
+
+  function desenharFotos() {
+    var box = document.getElementById('fotos'); if (!box) return;
+    box.innerHTML = '';
+    fotos.forEach(function (f, i) {
+      var d = el('<div><img alt="Foto ' + (i + 1) + '"><b title="Remover" role="button">×</b></div>');
+      d.querySelector('img').src = f.url;
+      d.querySelector('b').onclick = function () { URL.revokeObjectURL(f.url); fotos.splice(i, 1); desenharFotos(); };
+      box.appendChild(d);
+    });
+  }
+
+  function reencodar(file) {
+    return new Promise(function (ok, falha) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var max = 1600, r = Math.min(1, max / Math.max(img.width, img.height));
+        var c = document.createElement('canvas'); c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+        var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { b ? ok(b) : falha(new Error('foto')); }, 'image/jpeg', 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); falha(new Error('foto')); };
+      img.src = url;
+    });
+  }
+
+  function onArquivos(e) {
+    var lista = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';
+    var vagas = MAX_FOTOS - fotos.length;
+    lista.slice(0, Math.max(vagas, 0)).reduce(function (p, file) {
+      return p.then(function () {
+        return reencodar(file).then(function (b) {
+          if (b.size > 3 * 1024 * 1024) return;
+          fotos.push({ blob: b, url: URL.createObjectURL(b) });
+        }).catch(function () {});
+      });
+    }, Promise.resolve()).then(desenharFotos);
+  }
+
+  function enviar(e) {
+    e.preventDefault();
+    if (enviando) return;
+    if (document.getElementById('site').value) { sucesso('OUV-**********'); return; }
+    var tipo = document.querySelector('input[name=tipo]:checked').value;
+    var categoria = document.getElementById('categoria').value;
+    var empresa = document.getElementById('empresa').value;
+    var setor = document.getElementById('setor').value;
+    var desc = document.getElementById('desc').value.trim();
+    var ident = document.getElementById('ident').value.trim();
+    if (!categoria) { formularioMantendo('Escolha o tema principal da sua mensagem.'); return; }
+    if (desc.length < 10) { formularioMantendo('Conte um pouco mais (mínimo de 10 letras).'); return; }
+    enviando = true;
+    var btn = document.getElementById('btn'); btn.disabled = true; btn.textContent = 'Enviando…';
+
+    var pasta = uuid(), paths = [];
+    fotos.reduce(function (p, f, i) {
+      return p.then(function () {
+        var path = pasta + '/' + i + '.jpg';
+        return fetch(SUPA_URL + '/storage/v1/object/ouvidoria-anexos/' + path, {
+          method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+          headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'false' },
+          body: f.blob
+        }).then(function (r) { if (!r.ok) throw new Error('upload'); paths.push(path); });
+      });
+    }, Promise.resolve()).then(function () {
+      return fetch(SUPA_URL + '/rest/v1/rpc/ouvidoria_enviar', {
+        method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+        headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_empresa_id: empresa, p_tipo: tipo, p_categoria: categoria, p_setor: setor, p_descricao: desc, p_identificacao: ident || null, p_anexos: paths })
+      });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('rpc');
+      return r.json();
+    }).then(function (protocolo) {
+      fotos.forEach(function (f) { URL.revokeObjectURL(f.url); }); fotos = [];
+      enviando = false; sucesso(protocolo);
+    }).catch(function () {
+      enviando = false;
+      formularioMantendo('Não foi possível enviar agora. Confira sua internet e tente de novo. Seu texto foi mantido.');
+    });
+  }
+
+  function formularioMantendo(msg) {
+    var s = {
+      tipo: (document.querySelector('input[name=tipo]:checked') || {}).value,
+      categoria: document.getElementById('categoria').value,
+      empresa: document.getElementById('empresa').value,
+      setor: document.getElementById('setor').value,
+      desc: document.getElementById('desc').value,
+      ident: document.getElementById('ident').value
+    };
+    formulario(msg);
+    if (s.tipo) document.querySelector('input[name=tipo][value=' + s.tipo + ']').checked = true;
+    document.getElementById('categoria').value = s.categoria;
+    document.getElementById('empresa').value = s.empresa;
+    document.getElementById('setor').value = s.setor;
+    document.getElementById('desc').value = s.desc;
+    document.getElementById('n').textContent = s.desc.length;
+    document.getElementById('ident').value = s.ident;
+    window.scrollTo(0, 0);
+  }
+
+  function sucesso(protocolo) {
+    var protLimpo = String(protocolo).replace(/[^A-Z0-9\-*]/gi, '');
+    app.innerHTML = barraAbas('enviar') +
+      '<div class="card ok"><div class="ico">✅</div><h2>Recebemos seu relato!</h2>' +
+      '<p>Sua mensagem foi registrada com sigilo para análise do RH / Comitê (NR-1).</p>' +
+      '<div class="prot" id="prot-cod">' + esc(protLimpo) + '</div>' +
+      '<p class="dica"><b>Guarde este número (anote ou tire print).</b> Com ele você pode acompanhar o andamento e responder perguntas do comitê de forma 100% anônima.</p>' +
+      '<div style="margin-top:14px">' +
+      '<button type="button" class="sm" id="copiar">📋 Copiar protocolo</button>' +
+      '<button type="button" class="sec sm" id="ver">🔍 Acompanhar este protocolo</button>' +
+      '<button type="button" class="sec sm" id="outra">Enviar outra mensagem</button>' +
+      '</div></div>';
+    ligarAbas();
+    document.getElementById('copiar').onclick = function () {
+      var b = this;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(protLimpo).then(function () { b.textContent = '✓ Protocolo copiado!'; });
+      }
+    };
+    document.getElementById('ver').onclick = function () { telaAcompanhar(protLimpo); };
+    document.getElementById('outra').onclick = function () { formulario(); };
+    window.scrollTo(0, 0);
+  }
+
+  function telaAcompanhar(protInicial, erro, aviso, dados) {
+    app.innerHTML = barraAbas('acompanhar') +
+      '<div class="card">' +
+      '<label class="t" for="prot-in">Digite seu número de protocolo</label>' +
+      '<form id="f-cons">' +
+      '<input type="text" id="prot-in" value="' + esc(protInicial || '') + '" placeholder="Ex.: OUV-A1B2C3D4E5" maxlength="20" style="text-transform:uppercase;letter-spacing:.05em">' +
+      '<div style="margin-top:10px"><button type="submit" id="btn-cons" class="sm">Consultar andamento</button></div>' +
+      '</form>' +
+      '<p class="dica">Por segurança, o texto original do relato não aparece aqui — apenas o andamento e os retornos oficiais do comitê.</p>' +
+      '</div>' +
+      (erro ? '<div class="erro" role="alert">' + esc(erro) + '</div>' : '') +
+      (aviso ? '<div class="aviso-ok" role="status">' + esc(aviso) + '</div>' : '') +
+      (dados ? renderResultado(dados) : '');
+
+    ligarAbas();
+    document.getElementById('f-cons').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var cod = document.getElementById('prot-in').value.trim().toUpperCase();
+      consultarProtocolo(cod);
+    });
+    if (dados && dados.status !== 'arquivada') {
+      var fComp = document.getElementById('f-comp');
+      if (fComp) fComp.addEventListener('submit', function (e) {
+        e.preventDefault();
+        enviarComplemento(dados.protocolo);
+      });
+    }
+  }
+
+  function renderResultado(d) {
+    var st = STATUS_MAP[d.status] || STATUS_MAP.nova;
+    var msgs = d.mensagens || [];
+    var html = '<div class="card">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+      '<b>' + esc(d.protocolo) + '</b>' +
+      '<span class="chip" style="background:' + st.bg + ';color:' + st.c + '">' + esc(st.l) + '</span>' +
+      '</div>' +
+      '<div class="meta">' +
+      '<div><b>Tipo</b>' + esc(TIPO_MAP[d.tipo] || d.tipo) + '</div>' +
+      '<div><b>Tema (NR-1)</b>' + esc(CAT_MAP[d.categoria] || d.categoria || '—') + '</div>' +
+      '<div><b>Registrado em</b>' + esc(fmtD(d.created_at)) + '</div>' +
+      '<div><b>Prazo previsto</b>' + esc(fmtD(d.prazo_resposta)) + '</div>' +
+      '</div>' +
+      '<label class="t">Retornos e mensagens</label>';
+
+    if (msgs.length === 0) {
+      html += '<p class="dica" style="margin-bottom:12px">Ainda não há retorno registrado. Seu relato está na fila de análise dentro do prazo.</p>';
+    } else {
+      msgs.forEach(function (m) {
+        var ehEu = m.tipo === 'complemento';
+        var rotulo = ehEu ? '👤 Você (complemento anônimo)' : (m.tipo === 'retorno' ? '💬 Retorno do RH / Comitê' : 'ℹ️ Atualização');
+        html += '<div class="msg' + (ehEu ? ' eu' : '') + '"><b>' + rotulo + '</b><div style="white-space:pre-wrap;margin-top:4px">' + esc(m.texto) + '</div><small>' + esc(fmtDH(m.created_at)) + '</small></div>';
+      });
+    }
+
+    if (d.status !== 'arquivada') {
+      html += '<form id="f-comp" style="margin-top:14px">' +
+        '<label class="t" for="comp-txt">Quer acrescentar alguma informação ou responder ao comitê?</label>' +
+        '<textarea id="comp-txt" maxlength="2000" style="min-height:90px" placeholder="Escreva aqui de forma anônima…"></textarea>' +
+        '<div style="margin-top:8px"><button type="submit" id="btn-comp" class="sec sm">Enviar complemento anônimo</button></div>' +
+        '</form>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function consultarProtocolo(cod, avisoOk) {
+    if (!/^OUV-[A-Z0-9]{8,12}$/.test(cod)) {
+      telaAcompanhar(cod, 'Protocolo inválido. Confira o código (ex.: OUV-A1B2C3D4E5).');
+      return;
+    }
+    var btn = document.getElementById('btn-cons');
+    if (btn) { btn.disabled = true; btn.textContent = 'Consultando…'; }
+    fetch(SUPA_URL + '/rest/v1/rpc/ouvidoria_consultar', {
+      method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_protocolo: cod })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('rpc');
+      return r.json();
+    }).then(function (dados) {
+      if (!dados) {
+        telaAcompanhar(cod, 'Protocolo não encontrado. Confira se digitou todas as letras e números corretamente.');
+        return;
+      }
+      telaAcompanhar(cod, '', avisoOk || '', dados);
+    }).catch(function () {
+      telaAcompanhar(cod, 'Não foi possível consultar agora. Confira sua internet e tente de novo.');
+    });
+  }
+
+  function enviarComplemento(cod) {
+    var txtEl = document.getElementById('comp-txt');
+    var txt = (txtEl ? txtEl.value : '').trim();
+    if (txt.length < 5) { alert('Escreva pelo menos 5 letras no complemento.'); return; }
+    var btn = document.getElementById('btn-comp');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+    fetch(SUPA_URL + '/rest/v1/rpc/ouvidoria_complementar', {
+      method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_protocolo: cod, p_texto: txt })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('rpc');
+      return r.json();
+    }).then(function () {
+      consultarProtocolo(cod, 'Complemento enviado com sucesso! O comitê já pode visualizar.');
+    }).catch(function () {
+      if (btn) { btn.disabled = false; btn.textContent = 'Enviar complemento anônimo'; }
+      alert('Não foi possível enviar o complemento agora. Tente novamente.');
+    });
+  }
+
+  formulario();
+})();
+</script>
+</body>
+</html>

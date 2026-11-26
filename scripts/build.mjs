@@ -46,6 +46,15 @@ export function montarHtml(html, nomeJs) {
   return (antes + `<script defer src="/${nomeJs}"></script>` + depois).replace(BABEL_CDN, '');
 }
 
+// Formulário público da Ouvidoria (/ouvidoria): URL e chave pública (anon) do Supabase vêm do
+// próprio index.html, para não duplicar a chave no repositório.
+export function montarOuvidoria(modelo, html) {
+  const url = /SUPA_URL\s*=\s*'([^']+)'/.exec(html)?.[1];
+  const chave = /SUPA_KEY\s*=\s*'([^']+)'/.exec(html)?.[1];
+  if (!url || !chave) throw new Error('SUPA_URL/SUPA_KEY não encontrados no index.html');
+  return modelo.replace('__SUPA_URL__', url).replace('__SUPA_KEY__', chave);
+}
+
 function main() {
   const html = readFileSync(join(raiz, 'index.html'), 'utf8');
   const js = compilar(separarScriptBabel(html).codigo);
@@ -55,6 +64,8 @@ function main() {
   mkdirSync(dist, { recursive: true });
   writeFileSync(join(dist, nomeJs), js);
   writeFileSync(join(dist, 'index.html'), montarHtml(html, nomeJs));
+  mkdirSync(join(dist, 'ouvidoria'), { recursive: true });
+  writeFileSync(join(dist, 'ouvidoria', 'index.html'), montarOuvidoria(readFileSync(join(raiz, 'ouvidoria', 'index.template.html'), 'utf8'), html));
   for (const f of ['favicon.ico', 'favicon-32.png', 'apple-touch-icon.png']) {
     copyFileSync(join(raiz, f), join(dist, f));
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { separarScriptBabel, compilar, montarHtml } from './build.mjs';
+import { separarScriptBabel, compilar, montarHtml, montarOuvidoria } from './build.mjs';
 
 const CDN = '<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>';
 const html = (corpo) => `<head>\n  ${CDN}\n  <script>var a=1;</script></head><body><div id="root"></div><script type="text/babel">${corpo}</script></body>`;
@@ -39,4 +39,10 @@ test('monta o html sem babel-standalone e com o js em defer', () => {
 
 test('falha se a tag do CDN do babel sumir', () => {
   assert.throws(() => montarHtml('<script type="text/babel">x</script>', 'a.js'), /babel-standalone/);
+});
+
+test('monta o formulário da ouvidoria com URL e chave do index.html', () => {
+  const r = montarOuvidoria("a='__SUPA_URL__';b='__SUPA_KEY__';", "SUPA_URL = 'https://x.supabase.co';\nSUPA_KEY = 'chave123';");
+  assert.equal(r, "a='https://x.supabase.co';b='chave123';");
+  assert.throws(() => montarOuvidoria('x', 'sem nada'), /não encontrados/);
 });
