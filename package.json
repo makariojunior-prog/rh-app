@@ -2,7 +2,7 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test scripts/build.test.mjs"
+    "test": "node --test \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1"
