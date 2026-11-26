@@ -536,6 +536,183 @@
       return Math.round((Number(salario) || 0) * 0.30 * 100) / 100;
     }
 
+    // ===== DOMINIO:INICIO =====
+    // Leiaute oficial "Importação Arquivo Texto | De Lançamentos" da Domínio Sistemas (Folha,
+    // solução 8813). Arquivo texto puro, largura fixa posicional, só dígitos nos campos
+    // numéricos com zeros à esquerda e quebra de linha CRLF.
+    //
+    //   REGISTRO 10 — lançamento (48 caracteres)
+    //   001-002 (02) fixo "10"            | 003-012 (10) código do empregado
+    //   013-018 (06) competência AAAAMM   | 019-027 (09) código da rubrica
+    //   028-029 (02) tipo do processo     | 030-038 (09) valor (2 decimais implícitas)
+    //   039-048 (10) código da empresa
+    //
+    //   REGISTRO 11 — dia de falta / reembolso de falta (11 caracteres), emitido logo abaixo
+    //   do registro 10 da rubrica de faltas
+    //   001-002 (02) fixo "11" | 003-010 (08) data AAAAMMDD | 011 (01) 1=normal, 2=DSR
+    //
+    // Este bloco é PURO de propósito (sem React, sem DOM, sem Supabase): scripts/dominio.test.mjs
+    // extrai exatamente estas linhas do index.html e roda os testes sobre o código que vai ao ar.
+    const DOMINIO_TIPOS_PROCESSO = [
+      { v: '11', l: '11 — Folha Mensal' },
+      { v: '41', l: '41 — Adiantamento' },
+      { v: '42', l: '42 — Complementar' },
+      { v: '51', l: '51 — Adiantamento do 13º' },
+      { v: '52', l: '52 — 13º Integral' },
+    ];
+
+    // Rubricas que o rh-app realmente calcula (calcularColab + dados da FolhaPage).
+    // origem: "valor" = reais · "horas" = horas centesimais · "dias" = quantidade de dias.
+    // Todas vão no mesmo campo de 9 dígitos com 2 decimais implícitas (10h30 → 000001050).
+    const DOMINIO_RUBRICAS = [
+      { chave:'horas_extras',            label:'Horas Extras',                   origem:'horas', desc:'Horas extras do ponto (líquido por dia, igual ao relógio)' },
+      { chave:'horas_faltas',            label:'Horas Faltas (parcial)',         origem:'horas', desc:'Débito de horas nos dias trabalhados' },
+      { chave:'faltas_dias',             label:'Faltas',                         origem:'dias',  desc:'Dias de falta no período — é esta rubrica que gera o registro 11' },
+      { chave:'dsr_dias',                label:'DSR sobre Faltas',               origem:'dias',  desc:'DSR + feriados perdidos nas semanas com falta' },
+      { chave:'dsr_valor',               label:'Desconto de DSR',                origem:'valor', desc:'DSR perdido × valor do DSR (⚙️ Configurações)' },
+      { chave:'atestados_dias',          label:'Atestados',                      origem:'dias',  desc:'Dias de atestado de dia inteiro' },
+      { chave:'ferias_dias',             label:'Férias',                         origem:'dias',  desc:'Dias de férias dentro do período' },
+      { chave:'dias_trabalhados',        label:'Dias Trabalhados',               origem:'dias',  desc:'Dias efetivamente trabalhados no período' },
+      { chave:'periculosidade',          label:'Adicional de Periculosidade',    origem:'valor', desc:'30% do salário base, para quem tem a marcação no cadastro' },
+      { chave:'caju100',                 label:'Caju R$ 100 (benefício diário)', origem:'valor', desc:'R$ 5,00 por dia trabalhado' },
+      { chave:'caju200',                 label:'Caju R$ 200 (assiduidade)',      origem:'valor', desc:'Pontualidade, proporcional aos dias fora da experiência/férias' },
+      { chave:'caju_total',              label:'Caju (total, rubrica única)',    origem:'valor', desc:'Caju 100 + Caju 200 — use só se a Domínio tiver uma rubrica só' },
+      { chave:'premio_assiduidade_dias', label:'Prêmio Assiduidade',             origem:'dias',  desc:'Dias de prêmio (0 se houve atraso injustificado)' },
+      { chave:'comissao',                label:'Comissão',                       origem:'valor', desc:'Comissões já confirmadas pelo RH no módulo Comissões' },
+      { chave:'adiantamento',            label:'Adiantamento / Antecipação',     origem:'valor', desc:'Adiantamentos avulsos + fixos a descontar nesta folha' },
+      { chave:'desconto_compras',        label:'Desconto de Compras',            origem:'valor', desc:'Compras de funcionário descontadas em folha' },
+      { chave:'vale_transporte',         label:'Desconto de Vale-Transporte',    origem:'valor', desc:'VT do cadastro, quando marcado para descontar' },
+    ];
+    // Rubrica à qual o registro 11 (datas de falta e de DSR) é anexado.
+    const DOMINIO_RUBRICA_FALTAS = 'faltas_dias';
+    const DOMINIO_ORIGEM_LABEL = { valor:'Valor (R$)', horas:'Horas (centesimais)', dias:'Dias' };
+
+    // Só dígitos, zeros à esquerda; se vier maior que o campo, mantém os dígitos menos
+    // significativos (a Domínio recusaria o registro com o tamanho errado).
+    function dominioZeros(valor, tamanho) {
+      const so = String(valor == null ? '' : valor).replace(/\D/g, '');
+      return so.slice(-tamanho).padStart(tamanho, '0');
+    }
+
+    // "11/2026" (formato da FolhaPage), "2026-11" ou "202611" → "202611"
+    function dominioCompetencia(ref) {
+      const str = String(ref || '').trim();
+      let m = /^(\d{1,2})\/(\d{4})$/.exec(str);
+      if (m) return m[2] + m[1].padStart(2, '0');
+      m = /^(\d{4})-(\d{1,2})/.exec(str);
+      if (m) return m[1] + m[2].padStart(2, '0');
+      return dominioZeros(str, 6);
+    }
+
+    // Valor/quantidade → centavos inteiros. Zero, negativo ou não-numérico = não exporta.
+    function dominioCentavos(valor) {
+      const n = Number(valor);
+      if (!isFinite(n) || n <= 0) return 0;
+      return Math.round(n * 100);
+    }
+
+    function dominioRegistro10(reg) {
+      return '10'
+        + dominioZeros(reg.empregado, 10)
+        + dominioCompetencia(reg.competencia)
+        + dominioZeros(reg.rubrica, 9)
+        + dominioZeros(reg.tipoProcesso, 2)
+        + dominioZeros(reg.centavos, 9)
+        + dominioZeros(reg.empresa, 10);
+    }
+
+    function dominioRegistro11(data, tipo) {
+      const d = String(data || '').replace(/\D/g, '');
+      return '11' + d.slice(0, 8).padStart(8, '0') + (String(tipo) === '2' ? '2' : '1');
+    }
+
+    // lancamentos: [{ nome, codigoDominio, valores:{<chave da rubrica>: número},
+    //                 diasFaltas:[{data:'AAAA-MM-DD', tipo:1|2}] }]
+    // cfg: { codigoEmpresa, tipoProcesso, rubricas:{<chave>:'<código na Domínio>'}, incluirDiasFalta }
+    function gerarArquivoDominio(opts) {
+      const cfg = (opts && opts.cfg) || {};
+      const catalogo = (opts && opts.catalogo) || DOMINIO_RUBRICAS;
+      const competencia = dominioCompetencia(opts && opts.competencia);
+      const tipoProcesso = dominioZeros(cfg.tipoProcesso || '11', 2);
+      const empresa = String(cfg.codigoEmpresa == null ? '' : cfg.codigoEmpresa).replace(/\D/g, '');
+      const rubricas = cfg.rubricas || {};
+      const incluirDiasFalta = cfg.incluirDiasFalta !== false;
+
+      const codigoRubrica = (chave) => String(rubricas[chave] == null ? '' : rubricas[chave]).trim();
+      const mapeadas = catalogo.filter(r => /^[0-9]{1,9}$/.test(codigoRubrica(r.chave)));
+      const pendencias = {
+        semCodigoEmpresa: !/^[0-9]{1,10}$/.test(empresa),
+        semRubricas: mapeadas.length === 0,
+        colabSemCodigo: [],
+        rubricasSemCodigo: [],
+      };
+
+      const linhas = [];
+      const porRubrica = [];
+      const porRubricaIdx = {};
+      const colaboradores = [];
+      let registros10 = 0, registros11 = 0;
+
+      (((opts && opts.lancamentos) || [])).forEach(l => {
+        const valores = l.valores || {};
+        // Rubrica com valor a lançar mas sem código configurado = pendência (não exporta).
+        catalogo.forEach(r => {
+          if (mapeadas.indexOf(r) === -1 && dominioCentavos(valores[r.chave]) > 0
+              && pendencias.rubricasSemCodigo.indexOf(r.chave) === -1) {
+            pendencias.rubricasSemCodigo.push(r.chave);
+          }
+        });
+        const itens = mapeadas
+          .map(r => ({ r: r, centavos: dominioCentavos(valores[r.chave]) }))
+          .filter(x => x.centavos > 0);
+        if (itens.length === 0) return;
+        const empregado = String(l.codigoDominio == null ? '' : l.codigoDominio).replace(/\D/g, '');
+        if (!/^[0-9]{1,10}$/.test(empregado)) { pendencias.colabSemCodigo.push(l.nome || ''); return; }
+        colaboradores.push(l.nome || '');
+        itens.forEach(it => {
+          linhas.push(dominioRegistro10({
+            empregado: empregado, competencia: competencia, rubrica: codigoRubrica(it.r.chave),
+            tipoProcesso: tipoProcesso, centavos: it.centavos, empresa: empresa,
+          }));
+          registros10++;
+          let ac = porRubricaIdx[it.r.chave];
+          if (!ac) {
+            ac = porRubricaIdx[it.r.chave] = {
+              chave: it.r.chave, label: it.r.label, origem: it.r.origem,
+              codigo: codigoRubrica(it.r.chave), qtd: 0, total: 0,
+            };
+            porRubrica.push(ac);
+          }
+          ac.qtd++; ac.total = Math.round((ac.total * 100 + it.centavos)) / 100;
+          if (incluirDiasFalta && it.r.chave === DOMINIO_RUBRICA_FALTAS) {
+            const vistos = {};
+            (l.diasFaltas || []).forEach(df => {
+              const data = String((df && df.data) || df || '').replace(/\D/g, '');
+              if (data.length !== 8) return;
+              const tipo = String(df && df.tipo) === '2' ? '2' : '1';
+              if (vistos[data + tipo]) return;
+              vistos[data + tipo] = true;
+              linhas.push(dominioRegistro11(data, tipo));
+              registros11++;
+            });
+          }
+        });
+      });
+
+      return {
+        texto: linhas.length ? linhas.join('\r\n') + '\r\n' : '',
+        linhas: linhas, registros10: registros10, registros11: registros11,
+        porRubrica: porRubrica, colaboradores: colaboradores,
+        competencia: competencia, tipoProcesso: tipoProcesso,
+        rubricasMapeadas: mapeadas.map(r => r.chave), pendencias: pendencias,
+      };
+    }
+
+    function dominioNomeArquivo(empresaId, competencia) {
+      return 'dominio_lancamentos_' + (empresaId || 'empresa') + '_' + dominioCompetencia(competencia) + '.txt';
+    }
+    // ===== DOMINIO:FIM =====
+
     const C={
       bg:"var(--c-bg)", card:"var(--c-card)", pri:"#1B3A2B", acc:"#C8A843",
       text:"var(--c-text)", muted:"var(--c-muted)", border:"var(--c-border)",
@@ -1942,6 +2119,7 @@
           nascimento:"", admissao:"", experiencia30:"", experiencia90:"", encerramento:"",
           bancoNome:"", bancoCodigo:"", bancoTipoConta:"", bancoAgencia:"", bancoConta:"",
           salario:"", transporte:"", periculosidade:false,
+          codigoDominio:"",
           jornada:"SEG-SAB",
           contaSalario:false, aditivoContrato:false, usoArmario:false,
           lgpd:false, imagem:false, camera:false, epiUniforme:false,
@@ -1960,6 +2138,7 @@
           bancoAgencia:c.banco_agencia||'', bancoConta:c.banco_conta||'',
           salario:Number(c.salario)||0, inss:calcINSS(c.salario), fgts:calcFGTS(c.salario),
           transporte:Number(c.transporte)||0, periculosidade:!!c.periculosidade,
+          codigoDominio:c.codigo_dominio||'',
           jornada:c.jornada||'SEG-SAB',
           contaSalario:!!c.conta_salario, aditivoContrato:!!c.aditivo_contrato,
           usoArmario:!!c.uso_armario, lgpd:!!c.lgpd, imagem:!!c.imagem,
@@ -2194,6 +2373,7 @@
               inss:calcINSS(parseFloat(String(form.salario).replace(",","."))||0),
               fgts:calcFGTS(parseFloat(String(form.salario).replace(",","."))||0),
               transporte:parseFloat(String(form.transporte).replace(",","."))||0,
+              codigo_dominio:String(form.codigoDominio||'').replace(/\D/g,'').slice(0,10)||null,
               jornada:form.jornada||'SEG-SAB',
               periculosidade:!!form.periculosidade,
               periculosidade_valor:form.periculosidade?calcPericulosidade(parseFloat(String(form.salario).replace(",","."))||0):0,
@@ -2472,6 +2652,13 @@
                 <div style={{marginBottom:14}}>
                   <label style={s.label}>FGTS (calculado)</label>
                   <div style={{...s.input,background:"var(--c-subtle)",color:C.muted,fontSize:13}}>{fmtBRL(calcFGTS(parseFloat(String(form.salario).replace(",","."))||0))} <span style={{fontSize:11,marginLeft:4}}>— 8% do salário</span></div>
+                </div>
+                {/* Código do empregado na Domínio Sistemas — usado na exportação de lançamentos da Folha */}
+                <div style={{marginBottom:14}}>
+                  <label style={s.label}>Cód. Domínio (opcional)</label>
+                  <input style={s.input} inputMode="numeric" value={form.codigoDominio||""} placeholder="Ex: 123"
+                    onChange={e=>setForm(p=>({...p,codigoDominio:e.target.value.replace(/\D/g,"").slice(0,10)}))}/>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>Código do empregado na Domínio Sistemas (só números, até 10 dígitos). Sem ele, o colaborador não entra na exportação 📄 Domínio da Folha.</div>
                 </div>
               </div>
               <div style={{marginTop:8,padding:"12px 14px",borderRadius:8,background:form.periculosidade?"#FEF9C3":"var(--c-subtle)",border:"1px solid "+(form.periculosidade?"#FCD34D":C.border)}}>
@@ -10794,6 +10981,281 @@
       }
 
       // ============================================================
+      // EXPORTAÇÃO DOMÍNIO SISTEMAS — Arquivo Texto de Lançamentos (Folha, solução 8813)
+      // Abre a partir da FolhaPage. A geração do arquivo em si é feita pelas funções puras do
+      // bloco DOMINIO (ver topo do arquivo), as mesmas testadas em scripts/dominio.test.mjs.
+      // ============================================================
+      function ModalExportacaoDominio({ empresaId, mesAno, periodoLabel, lancamentos, cfg, aviso, onSalvarCfg, onClose }) {
+        const [aba, setAba] = useState("exportar");
+        const [tipoProcesso, setTipoProcesso] = useState(cfg.tipoProcessoPadrao || "11");
+        const [incluirDiasFalta, setIncluirDiasFalta] = useState(cfg.incluirDiasFalta !== false);
+        const [rascunho, setRascunho] = useState(()=>({
+          codigoEmpresa: cfg.codigoEmpresa || "",
+          tipoProcessoPadrao: cfg.tipoProcessoPadrao || "11",
+          incluirDiasFalta: cfg.incluirDiasFalta !== false,
+          rubricas: {...(cfg.rubricas || {})},
+        }));
+        const [salvando, setSalvando] = useState(false);
+        const [msg, setMsg] = useState(null);
+
+        // A prévia usa SEMPRE a configuração salva (cfg) — o rascunho da aba De-Para só passa a
+        // valer depois de "Salvar configuração", para nunca gerar arquivo com algo não confirmado.
+        const res = gerarArquivoDominio({
+          lancamentos: lancamentos,
+          competencia: mesAno,
+          cfg: {
+            codigoEmpresa: cfg.codigoEmpresa,
+            tipoProcesso: tipoProcesso,
+            rubricas: cfg.rubricas,
+            incluirDiasFalta: incluirDiasFalta,
+          },
+        });
+        const pend = res.pendencias;
+        const rubricaLabel = (chave) => (DOMINIO_RUBRICAS.find(r=>r.chave===chave)||{}).label || chave;
+        // Compara ignorando rubricas em branco (não são gravadas) para o aviso de "não salvo"
+        // não ficar aceso por um campo que o usuário digitou e apagou.
+        const semVazios = (m) => Object.keys(m||{}).sort().reduce((ac,k)=>{ if(String(m[k]||"").trim()) ac[k]=String(m[k]).trim(); return ac; },{});
+        const rascunhoSujo = JSON.stringify({c:String(rascunho.codigoEmpresa||""),r:semVazios(rascunho.rubricas)})
+          !== JSON.stringify({c:String(cfg.codigoEmpresa||""),r:semVazios(cfg.rubricas)});
+        const qtdComLancamento = lancamentos.filter(l=>DOMINIO_RUBRICAS.some(r=>dominioCentavos(l.valores[r.chave])>0)).length;
+        const nomeArquivo = dominioNomeArquivo(empresaId, mesAno);
+
+        const baixar = () => {
+          if (!res.texto) { setMsg({ok:false,msg:"Nada para exportar: nenhum lançamento com valor e rubrica configurada."}); return; }
+          const blob = new Blob([res.texto], {type:"text/plain;charset=utf-8"});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = nomeArquivo;
+          a.click();
+          URL.revokeObjectURL(url);
+          setMsg({ok:true,msg:`✅ ${nomeArquivo} gerado — ${res.registros10} lançamento(s) e ${res.registros11} registro(s) de dia de falta.`});
+        };
+
+        const salvar = async () => {
+          setSalvando(true); setMsg(null);
+          try {
+            await onSalvarCfg({
+              codigoEmpresa: String(rascunho.codigoEmpresa||"").replace(/\D/g,"").slice(0,10),
+              tipoProcessoPadrao: rascunho.tipoProcessoPadrao || "11",
+              incluirDiasFalta: rascunho.incluirDiasFalta !== false,
+              rubricas: Object.keys(rascunho.rubricas||{}).reduce((ac,k)=>{
+                const v = String(rascunho.rubricas[k]||"").replace(/\D/g,"").slice(0,9);
+                if (v) ac[k] = v;
+                return ac;
+              },{}),
+            });
+            setTipoProcesso(rascunho.tipoProcessoPadrao || "11");
+            setIncluirDiasFalta(rascunho.incluirDiasFalta !== false);
+            setMsg({ok:true,msg:"✅ Configuração salva."});
+          } catch(e) {
+            setMsg({ok:false,msg:"A configuração vale nesta sessão e ficou salva neste navegador, mas não foi para o banco: "+e.message});
+          }
+          setSalvando(false);
+        };
+
+        const monoSt = {fontFamily:"ui-monospace,'Cascadia Mono',Consolas,monospace",fontSize:12,letterSpacing:"0.02em",whiteSpace:"pre"};
+
+        return (
+          <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:120,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"24px 16px",overflowY:"auto"}}>
+            <div onClick={e=>e.stopPropagation()} style={{width:"min(980px,100%)",background:C.card,borderRadius:12,boxShadow:"0 10px 40px rgba(0,0,0,0.3)",border:`1px solid ${C.border}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",borderBottom:`1px solid ${C.border}`}}>
+                <div>
+                  <div style={{fontWeight:800,fontSize:15,color:C.pri}}>📄 Exportar para a Domínio Sistemas</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>Arquivo Texto | De Lançamentos · competência {res.competencia} · período {periodoLabel}</div>
+                </div>
+                <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.muted,lineHeight:1}}>✕</button>
+              </div>
+
+              <div style={{display:"flex",borderBottom:`2px solid ${C.border}`,padding:"0 20px"}}>
+                {[{k:"exportar",l:"⬇️ Exportar"},{k:"depara",l:"🔗 Configurar De-Para"}].map(t=>(
+                  <button key={t.k} onClick={()=>setAba(t.k)} style={{
+                    background:"none",border:"none",borderBottom:aba===t.k?`2px solid ${C.acc}`:"2px solid transparent",
+                    marginBottom:-2,padding:"10px 18px",cursor:"pointer",fontWeight:aba===t.k?700:400,
+                    color:aba===t.k?C.acc:C.muted,fontSize:13
+                  }}>{t.l}</button>
+                ))}
+              </div>
+
+              <div style={{padding:"18px 20px"}}>
+                {aviso && <div style={{...s.warnBox,marginTop:0,marginBottom:14}}>⚠️ {aviso}</div>}
+                {msg && <div style={{...(msg.ok?s.successBox:s.warnBox),marginTop:0,marginBottom:14}}>{msg.msg}</div>}
+
+                {aba==="exportar" && (<>
+                  <div style={{display:"flex",gap:18,flexWrap:"wrap",alignItems:"flex-end",marginBottom:16}}>
+                    <div style={{minWidth:230}}>
+                      <label style={s.label}>Tipo do Processo</label>
+                      <select style={{...s.select,width:"100%"}} value={tipoProcesso} onChange={e=>setTipoProcesso(e.target.value)}>
+                        {DOMINIO_TIPOS_PROCESSO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                      </select>
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer",paddingBottom:8}}>
+                      <input type="checkbox" checked={incluirDiasFalta} onChange={e=>setIncluirDiasFalta(e.target.checked)}/>
+                      Incluir registro 11 (datas de faltas e DSR)
+                    </label>
+                  </div>
+
+                  {(pend.semCodigoEmpresa || pend.semRubricas || pend.colabSemCodigo.length>0 || pend.rubricasSemCodigo.length>0) && (
+                    <div style={{...s.warnBox,marginTop:0,marginBottom:16}}>
+                      <div style={{fontWeight:700,marginBottom:6}}>⚠️ Pendências antes de enviar à contabilidade</div>
+                      <ul style={{margin:0,paddingLeft:18,fontSize:12,lineHeight:1.7}}>
+                        {pend.semCodigoEmpresa && <li><strong>Código da empresa na Domínio não informado.</strong> Preencha em <em>Configurar De-Para</em> — sem ele as posições 039–048 saem zeradas.</li>}
+                        {pend.semRubricas && <li><strong>Nenhuma rubrica mapeada.</strong> Informe em <em>Configurar De-Para</em> o código da Domínio de cada rubrica que deve ser exportada.</li>}
+                        {pend.rubricasSemCodigo.length>0 && (
+                          <li><strong>{pend.rubricasSemCodigo.length} rubrica(s) com valor nesta folha mas sem código:</strong>{" "}
+                            {pend.rubricasSemCodigo.map(rubricaLabel).join(" · ")}</li>
+                        )}
+                        {pend.colabSemCodigo.length>0 && (
+                          <li><strong>{pend.colabSemCodigo.length} colaborador(es) com lançamento mas sem “Cód. Domínio”</strong> (ficam fora do arquivo) — preencha em 👥 Colaboradores → Financeiro:
+                            <div style={{marginTop:4,display:"flex",flexWrap:"wrap",gap:6}}>
+                              {pend.colabSemCodigo.slice(0,20).map(n=>(
+                                <span key={n} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:5,padding:"1px 7px",fontSize:11}}>{n}</span>
+                              ))}
+                              {pend.colabSemCodigo.length>20 && <span style={{fontSize:11}}>+{pend.colabSemCodigo.length-20} outro(s)</span>}
+                            </div>
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+                    {[
+                      {l:"Colaboradores exportados",v:`${res.colaboradores.length} de ${qtdComLancamento}`,c:C.pri},
+                      {l:"Registros 10 (lançamentos)",v:res.registros10,c:C.acc},
+                      {l:"Registros 11 (dias de falta)",v:res.registros11,c:C.amber},
+                      {l:"Rubricas no arquivo",v:res.porRubrica.length,c:C.green},
+                    ].map((it,i)=>(
+                      <div key={i} style={{flex:1,minWidth:150,background:C.rowAlt,border:`1px solid ${C.border}`,borderLeft:`4px solid ${it.c}`,borderRadius:8,padding:"9px 13px"}}>
+                        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{it.l}</div>
+                        <div style={{fontSize:15,fontWeight:800,color:it.c}}>{it.v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {res.porRubrica.length>0 && (
+                    <div style={{overflowX:"auto",marginBottom:16}}>
+                      <table style={{...s.table,fontSize:12}}>
+                        <thead><tr>
+                          <th style={s.th}>Rubrica (rh-app)</th>
+                          <th style={s.thC}>Cód. Domínio</th>
+                          <th style={s.thC}>Origem</th>
+                          <th style={s.thC}>Lançamentos</th>
+                          <th style={s.thC}>Total</th>
+                        </tr></thead>
+                        <tbody>
+                          {res.porRubrica.map((r,i)=>(
+                            <tr key={r.chave} style={s.row(i)}>
+                              <td style={{...s.td,fontWeight:600}}>{r.label}</td>
+                              <td style={{...s.tdC,...monoSt}}>{dominioZeros(r.codigo,9)}</td>
+                              <td style={{...s.tdC,color:C.muted}}>{DOMINIO_ORIGEM_LABEL[r.origem]}</td>
+                              <td style={s.tdC}>{r.qtd}</td>
+                              <td style={{...s.tdC,fontWeight:700}}>
+                                {r.origem==="valor" ? fmtBRL(r.total)
+                                  : r.origem==="horas" ? r.total.toFixed(2).replace(".",",")+" h"
+                                  : r.total.toFixed(2).replace(".",",")+" d"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>
+                    Prévia — primeiras linhas no formato exato
+                  </div>
+                  <div style={{background:"var(--c-subtle)",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",overflowX:"auto",marginBottom:6}}>
+                    {res.linhas.length===0
+                      ? <div style={{fontSize:12,color:C.muted}}>Nada a exportar ainda.</div>
+                      : res.linhas.slice(0,12).map((ln,i)=>(
+                          <div key={i} style={{display:"flex",gap:10,alignItems:"baseline"}}>
+                            <span style={{...monoSt,color:ln.slice(0,2)==="11"?C.amber:C.text}}>{ln}</span>
+                            <span style={{fontSize:10,color:C.muted,whiteSpace:"nowrap"}}>{ln.length} chars · reg. {ln.slice(0,2)}</span>
+                          </div>
+                        ))}
+                    {res.linhas.length>12 && <div style={{fontSize:11,color:C.muted,marginTop:4}}>… +{res.linhas.length-12} linha(s)</div>}
+                  </div>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:16}}>
+                    Registro 10 = 48 caracteres fixos · registro 11 = 11 caracteres · quebra de linha CRLF · valores sem ponto nem vírgula (2 decimais implícitas).
+                  </div>
+
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                    <button style={{...s.btnAcc,opacity:res.texto?1:0.5}} onClick={baixar} disabled={!res.texto}>⬇️ Baixar arquivo .txt</button>
+                    <button style={s.btn} onClick={()=>setAba("depara")}>🔗 Configurar De-Para</button>
+                  </div>
+                </>)}
+
+                {aba==="depara" && (<>
+                  <div style={{display:"flex",gap:18,flexWrap:"wrap",marginBottom:4}}>
+                    <div style={{minWidth:240}}>
+                      <label style={s.label}>Código da empresa na Domínio</label>
+                      <input style={s.input} inputMode="numeric" placeholder="Ex: 1" value={rascunho.codigoEmpresa}
+                        onChange={e=>setRascunho(p=>({...p,codigoEmpresa:e.target.value.replace(/\D/g,"").slice(0,10)}))}/>
+                      <div style={{fontSize:11,color:C.muted,marginTop:4}}>Posições 039–048 · até 10 dígitos</div>
+                    </div>
+                    <div style={{minWidth:240}}>
+                      <label style={s.label}>Tipo do processo padrão</label>
+                      <select style={{...s.select,width:"100%"}} value={rascunho.tipoProcessoPadrao}
+                        onChange={e=>setRascunho(p=>({...p,tipoProcessoPadrao:e.target.value}))}>
+                        {DOMINIO_TIPOS_PROCESSO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                      </select>
+                      <div style={{fontSize:11,color:C.muted,marginTop:4}}>Posições 028–029</div>
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer",alignSelf:"center"}}>
+                      <input type="checkbox" checked={rascunho.incluirDiasFalta}
+                        onChange={e=>setRascunho(p=>({...p,incluirDiasFalta:e.target.checked}))}/>
+                      Incluir registro 11 por padrão
+                    </label>
+                  </div>
+
+                  <div style={s.infoBox}>
+                    Informe o código da rubrica na Domínio (1 a 9 dígitos) para cada item que deve ser exportado.
+                    Em branco = essa rubrica <strong>não</strong> vai para o arquivo.
+                  </div>
+
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{...s.table,fontSize:12}}>
+                      <thead><tr>
+                        <th style={s.th}>Rubrica no rh-app</th>
+                        <th style={s.thC}>Origem</th>
+                        <th style={{...s.thC,minWidth:140}}>Cód. na Domínio</th>
+                      </tr></thead>
+                      <tbody>
+                        {DOMINIO_RUBRICAS.map((r,i)=>(
+                          <tr key={r.chave} style={s.row(i)}>
+                            <td style={s.td}>
+                              <div style={{fontWeight:600}}>{r.label}{r.chave===DOMINIO_RUBRICA_FALTAS&&<span style={{marginLeft:6,fontSize:10,color:C.amber,fontWeight:700}}>+ registro 11</span>}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{r.desc}</div>
+                            </td>
+                            <td style={{...s.tdC,color:C.muted,whiteSpace:"nowrap"}}>{DOMINIO_ORIGEM_LABEL[r.origem]}</td>
+                            <td style={s.tdC}>
+                              <input style={{...s.inputSm,...monoSt,textAlign:"center"}} inputMode="numeric" placeholder="—"
+                                value={rascunho.rubricas[r.chave]||""}
+                                onChange={e=>{
+                                  const v = e.target.value.replace(/\D/g,"").slice(0,9);
+                                  setRascunho(p=>({...p,rubricas:{...p.rubricas,[r.chave]:v}}));
+                                }}/>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{display:"flex",gap:10,marginTop:16,alignItems:"center",flexWrap:"wrap"}}>
+                    <button style={{...s.btnAcc,opacity:salvando?0.6:1}} onClick={salvar} disabled={salvando}>
+                      {salvando?"⏳ Salvando...":"💾 Salvar configuração"}
+                    </button>
+                    {rascunhoSujo && <span style={{fontSize:11,color:C.amber,fontWeight:700}}>Alterações não salvas — a prévia da aba Exportar usa a configuração salva.</span>}
+                  </div>
+                </>)}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
       // MÓDULO FOLHA DE PAGAMENTO
       // ============================================================
       function FolhaPage({ colabAPI, setColabAPI, empresaId, valorDSR }) {
@@ -10823,6 +11285,11 @@
         const [excluidos, setExcluidos] = useState(()=>{ try{return new Set(JSON.parse(localStorage.getItem('rh_folha_excluidos_'+mesAno)||'[]'));}catch(e){return new Set();} });
         const [comissoesMap, setComissoesMap] = useState({});
         const [ausenciasAuto, setAusenciasAuto] = useState({}); // atestados/férias dos módulos → status automático por dia
+        // ── Exportação Domínio Sistemas (arquivo texto de lançamentos) ──
+        const [showDominio, setShowDominio] = useState(false);
+        const [codigosDominio, setCodigosDominio] = useState({}); // nomeKey → código do empregado na Domínio
+        const [dominioCfg, setDominioCfg] = useState({codigoEmpresa:"",tipoProcessoPadrao:"11",incluirDiasFalta:true,rubricas:{}});
+        const [dominioCfgAviso, setDominioCfgAviso] = useState(null); // tabela dominio_config ainda não criada no banco
 
         useEffect(()=>{localStorage.setItem("rh_folha_marc",JSON.stringify(marcacoes));},[marcacoes]);
         useEffect(()=>{localStorage.setItem("rh_feriados",JSON.stringify(feriados));},[feriados]);
@@ -10841,6 +11308,40 @@
           }
           _loadComissoes();
         },[mesAno,empresaId]);
+
+        // Códigos do empregado na Domínio: lidos direto da tabela (o colabAPI é cache local e
+        // pode estar velho) e a configuração de De-Para da empresa.
+        useEffect(()=>{
+          if(!empresaId) return;
+          const LS_KEY = 'rh_dominio_cfg_'+empresaId;
+          const lerLocal = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)||'null'); } catch(e){ return null; } };
+          setCodigosDominio({});
+          _supa.from('colaboradores').select('nome,codigo_dominio').eq('empresa_id',empresaId).then(({data,error})=>{
+            if(error) return; // coluna/tabela indisponível: o painel de pendências avisa
+            const m = {};
+            (data||[]).forEach(c=>{ if(c.nome&&c.codigo_dominio) m[normalizarNome(c.nome)] = String(c.codigo_dominio); });
+            setCodigosDominio(m);
+          }).catch(()=>{});
+          _supa.from('dominio_config').select('*').eq('empresa_id',empresaId).maybeSingle().then(({data,error})=>{
+            if(error){
+              const local = lerLocal();
+              setDominioCfgAviso('A tabela dominio_config ainda não existe neste banco (migration pendente). A configuração abaixo fica salva só neste navegador.');
+              if(local) setDominioCfg(local);
+              return;
+            }
+            setDominioCfgAviso(null);
+            if(data) setDominioCfg({
+              codigoEmpresa: data.codigo_empresa||"",
+              tipoProcessoPadrao: data.tipo_processo_padrao||"11",
+              incluirDiasFalta: data.incluir_dias_falta !== false,
+              rubricas: data.rubricas||{},
+            });
+            else { const local = lerLocal(); if(local) setDominioCfg(local); }
+          }).catch(e=>{
+            setDominioCfgAviso('Não foi possível ler a configuração da Domínio no banco ('+(e&&e.message||e)+'). A configuração abaixo fica salva só neste navegador.');
+            const local = lerLocal(); if(local) setDominioCfg(local);
+          });
+        },[empresaId]);
 
         useEffect(()=>{
           if(!empresaId) return;
@@ -11130,6 +11631,8 @@
           let diasForaExpOuFerias=0; // denominador da proporcionalidade do Caju R$200 (fora da experiência e fora de férias)
           let diasUteisPrevistos = 0, diasEmExperiencia = 0;
           const diasFaltas = [];
+          const diasFaltasISO = [];   // registro 11 da Domínio — tipo 1 (falta normal)
+          const diasDSRISO = [];      // registro 11 da Domínio — tipo 2 (DSR/feriado perdido)
           // Data de fim da experiência (col I = EXPERIÊNCIA 90 DIAS)
           const fimExperiencia = colabInfo?.experiencia90 ? new Date(colabInfo.experiencia90 + "T12:00:00") : null;
           const hv = h => h && h !== "" && h !== "00:00";
@@ -11190,6 +11693,7 @@
             } else if (a.status === "falta") {
               faltas++;
               diasFaltas.push(iso.split("-").reverse().join("/"));
+              diasFaltasISO.push(iso);
             } else if (a.status === "atestado") { atestados++; }
             else if (a.status === "atestado_meio") { diasTrabalhados++; atestadosMeio++; }
             else if (a.status === "abono")  { abonos++; }
@@ -11227,8 +11731,11 @@
             });
             if (temFaltaSemana) {
               dsrPerdidos += 1;
+              // Dia de descanso perdido: o domingo da semana quando ele cai dentro do período
+              // (26→25), senão o último dia da semana que está no período.
+              diasDSRISO.push(isosSemana.indexOf(semKey) !== -1 ? semKey : isosSemana[isosSemana.length-1]);
               isosSemana.forEach(iso=>{
-                if (feriados.includes(iso)) feriadosNaSemanaPerdidos += 1;
+                if (feriados.includes(iso)) { feriadosNaSemanaPerdidos += 1; diasDSRISO.push(iso); }
               });
             }
             // abono não gera perda de DSR (já tratado pelo status diferente de "falta")
@@ -11281,7 +11788,9 @@
             cajuDias: cajuDias100, cajuValor, cajuValor100, cajuValor200, caju200Pct, caju200Motivo, atrasosCaju200,
             premioAssiduidade, premioAssiduidadeDias, atrasosInjustificados, descontarVT, bancoHoras,
             produtos, adiantamento, adiantAvulso, adiantFixo, adiantAuto, totalDesconto,
-            diasFaltas, observacoes: aj.observacoes||"",
+            diasFaltas, diasFaltasISO,
+            diasDSRISO: diasDSRISO.filter((iso,i)=>diasDSRISO.indexOf(iso)===i && diasFaltasISO.indexOf(iso)===-1),
+            observacoes: aj.observacoes||"",
             emExperiencia: diasEmExperiencia > 0,
             valorTransporte: colabInfo?.transporte || 0
           };
@@ -11307,6 +11816,7 @@
               admissao: c.admissao || "",
               nascimento: c.nascimento || "",
               jornada: c.jornada || "SEG-SAB",
+              codigoDominio: codigosDominio[nomeKey] || c.codigoDominio || "",
               encerramento: terminadosMap[nomeKey]||"",
               fonteCadastro: true, fonteCSV: false, dadosCSV: null
             });
@@ -11323,6 +11833,7 @@
                 nomeKey, nome: nomeCSV, funcao:"", setor:"", salario:0,
                 transporte: 0, experiencia30:"", experiencia90:"", admissao:"",
                 jornada: "SEG-SAB",
+                codigoDominio: codigosDominio[nomeKey] || "",
                 encerramento: terminadosMap[nomeKey]||"",
                 fonteCadastro:false, fonteCSV:true, dadosCSV: folhaData[nomeCSV]
               });
@@ -11348,6 +11859,55 @@
           acc.horasExtrasMin += r.calc.horasExtrasMin;
           return acc;
         }, {diasTrabalhados:0,faltas:0,atestados:0,ferias:0,cajuValor:0,totalDesconto:0,horasExtrasMin:0});
+
+        // ── Lançamentos no formato que gerarArquivoDominio() espera ──
+        // Cada chave corresponde a uma rubrica do catálogo DOMINIO_RUBRICAS e vem exatamente do
+        // que o calcularColab()/FolhaPage já calcula. Valor <= 0 é ignorado na geração.
+        const dominioLancamentos = resultados.map(r=>{
+          const dsrDias = (r.calc.dsrPerdidos||0) + (r.calc.feriadosPerdidos||0);
+          return {
+            nome: r.nome,
+            codigoDominio: r.codigoDominio||"",
+            valores: {
+              horas_extras: (r.calc.horasExtrasMin||0)/60,
+              horas_faltas: (r.calc.horasFaltasMin||0)/60,
+              faltas_dias: r.calc.faltas||0,
+              dsr_dias: dsrDias,
+              dsr_valor: Math.round(dsrDias*dsrUnitario*100)/100,
+              atestados_dias: r.calc.atestados||0,
+              ferias_dias: r.calc.ferias||0,
+              dias_trabalhados: r.calc.diasTrabalhados||0,
+              periculosidade: r.periculosidade ? calcPericulosidade(r.salario) : 0,
+              caju100: r.calc.cajuValor100||0,
+              caju200: r.calc.cajuValor200||0,
+              caju_total: r.calc.cajuValor||0,
+              premio_assiduidade_dias: r.calc.premioAssiduidade ? (r.calc.premioAssiduidadeDias||0) : 0,
+              comissao: comissoesMap[r.nomeKey]||0,
+              adiantamento: r.calc.adiantamento||0,
+              desconto_compras: r.calc.produtos||0,
+              vale_transporte: r.calc.descontarVT ? (Number(r.transporte)||0) : 0,
+            },
+            diasFaltas: [
+              ...(r.calc.diasFaltasISO||[]).map(d=>({data:d,tipo:1})),
+              ...(r.calc.diasDSRISO||[]).map(d=>({data:d,tipo:2})),
+            ].sort((a,b)=>a.data.localeCompare(b.data)),
+          };
+        });
+
+        const salvarDominioCfg = async (cfg) => {
+          setDominioCfg(cfg);
+          localStorage.setItem('rh_dominio_cfg_'+empresaId, JSON.stringify(cfg));
+          const {error} = await _supa.from('dominio_config').upsert({
+            empresa_id: empresaId,
+            codigo_empresa: String(cfg.codigoEmpresa||'').replace(/\D/g,'').slice(0,10) || null,
+            tipo_processo_padrao: cfg.tipoProcessoPadrao||'11',
+            incluir_dias_falta: cfg.incluirDiasFalta !== false,
+            rubricas: cfg.rubricas||{},
+            atualizado_em: new Date().toISOString(),
+          },{onConflict:'empresa_id'});
+          if(error) throw error;
+          setDominioCfgAviso(null);
+        };
 
         const carregarHistoricoFolha = async () => {
           if (!empresaId) return;
@@ -11739,6 +12299,7 @@
                   <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                     <button style={s.btnAcc} onClick={salvarFolha}>💾 Salvar</button>
                     <button style={s.btn} onClick={exportarCSVFolha}>⬇️ Baixar CSV</button>
+                    <button style={s.btn} onClick={()=>setShowDominio(true)} title="Arquivo texto de lançamentos no leiaute da Domínio Sistemas (Folha)">📄 Exportar Domínio (.txt)</button>
                   </div>
                 </div>
 
@@ -11994,6 +12555,19 @@
                 onAjustar={(campo,val)=>setAjuste(colabSelecionado,campo,val)}
                 onClose={()=>setColabSelecionado(null)}
                 analisarDia={(iso,diaDados)=>analisarDia(colabSelecionado,iso,diaDados,colabInfoAtual)}
+              />
+            )}
+
+            {showDominio && (
+              <ModalExportacaoDominio
+                empresaId={empresaId}
+                mesAno={mesAno}
+                periodoLabel={periodoLabel}
+                lancamentos={dominioLancamentos}
+                cfg={dominioCfg}
+                aviso={dominioCfgAviso}
+                onSalvarCfg={salvarDominioCfg}
+                onClose={()=>setShowDominio(false)}
               />
             )}
 
