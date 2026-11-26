@@ -769,7 +769,7 @@
         const [campanhasRecrut, setCampanhasRecrut] = React.useState([]);
         const [curriculosPorVaga, setCurriculosPorVaga] = React.useState([]); // [{nome,total,porDia:[7]}]
         const [curriculosPorDia, setCurriculosPorDia] = React.useState([]);
-        const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0});
+        const [kpis, setKpis] = React.useState({adiantPendente:0, desligadosMes:0, contratosVencendo:0, ouvidoriaNovas:0});
 
         React.useEffect(()=>{
           if(!empresaId) return;
@@ -882,8 +882,9 @@
           Promise.all([
             _supa.from('adiantamentos').select('id',{count:'exact',head:true}).eq('empresa_id',empresaId).eq('status','pendente').eq('mes_referencia',mesAtualR),
             _supa.from('colaboradores').select('id',{count:'exact',head:true}).eq('empresa_id',empresaId).eq('ativo',false).gte('atualizado_em',mesAtualR+'-01'),
-          ]).then(([adRes,desRes])=>{
-            setKpis(p=>({...p, adiantPendente:adRes.count||0, desligadosMes:desRes.count||0}));
+            _supa.from('ouvidoria_manifestacoes').select('id',{count:'exact',head:true}).eq('empresa_id',empresaId).eq('status','nova'),
+          ]).then(([adRes,desRes,ouvRes])=>{
+            setKpis(p=>({...p, adiantPendente:adRes.count||0, desligadosMes:desRes.count||0, ouvidoriaNovas:ouvRes.error?0:(ouvRes.count||0)}));
           }).catch(()=>{});
         },[empresaId]);
 
@@ -998,15 +999,16 @@
             </div>
 
             {/* ---- KPI CARDS ---- */}
-            {colabAPI.length > 0 && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+            {(colabAPI.length > 0 || kpis.ouvidoriaNovas > 0) && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))",gap:12,marginBottom:20}}>
                 {[
                   { icon:"👥", valor:colabAPI.length, label:"Colaboradores ativos", cor:C.pri, bg:"var(--c-cream)" },
                   { icon:"🏥", valor:(ausencias.atestados.length+ausencias.ferias.length), label:"Ausentes hoje", cor:ausencias.atestados.length+ausencias.ferias.length>0?C.danger:C.green, bg:ausencias.atestados.length+ausencias.ferias.length>0?"#FEF2F2":"#F0FDF4" },
                   { icon:"📋", valor:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length, label:"Experiências vencendo", cor:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length>0?C.amber:C.green, bg:experiencias.filter(e=>e.diff>=0&&e.diff<=7).length>0?C.amberBg:"#F0FDF4" },
                   { icon:"📥", valor:curriculosPorDia.reduce((t,d)=>t+d.n,0), label:"Currículos novos (7 dias)", cor:C.green, bg:C.greenBg },
+                  { icon:"📢", valor:kpis.ouvidoriaNovas, label:kpis.ouvidoriaNovas>0?`Ouvidoria (${kpis.ouvidoriaNovas===1?'nova':'novas'}) →`:"Ouvidoria (em dia) →", cor:kpis.ouvidoriaNovas>0?C.danger:C.green, bg:kpis.ouvidoriaNovas>0?"#FEF2F2":"#F0FDF4", destino:"ouvidoria", destaque:kpis.ouvidoriaNovas>0 },
                 ].map((k,i)=>(
-                  <div key={i} style={{background:k.bg,borderRadius:10,padding:"14px 16px",border:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12}}>
+                  <div key={i} onClick={k.destino&&onNavegar?()=>onNavegar(k.destino):undefined} role={k.destino?"button":undefined} tabIndex={k.destino?0:undefined} onKeyDown={k.destino&&onNavegar?(e=>{if(e.key==="Enter"||e.key===" ")onNavegar(k.destino);}):undefined} style={{background:k.bg,borderRadius:10,padding:"14px 16px",border:k.destaque?`1.5px solid ${C.danger}`:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,cursor:k.destino&&onNavegar?"pointer":"default"}}>
                     <div style={{fontSize:24,lineHeight:1}}>{k.icon}</div>
                     <div>
                       <div style={{fontSize:22,fontWeight:900,color:k.cor,lineHeight:1}}>{k.valor}</div>
