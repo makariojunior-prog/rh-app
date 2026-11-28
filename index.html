@@ -536,6 +536,58 @@
       return Math.round((Number(salario) || 0) * 0.30 * 100) / 100;
     }
 
+    // ===== DSR:INICIO =====
+    // Cálculo de perda de DSR (Lei 605/49):
+    // - Semana de apuração vai de Segunda a Domingo (não Domingo a Sábado).
+    // - Havendo falta injustificada na semana, perde 1 DSR (domingo da semana).
+    // - Feriado na mesma semana só entra como DSR adicional se cair em dia útil
+    //   (não domingo, evitando dupla contagem como 15/11/2026) E ocorrer APÓS a
+    //   primeira falta daquela semana (feriado anterior à falta não é perdido).
+    function calcularDSRPerdidos(datasPeriodo, faltasLista, feriadosLista) {
+      const faltasSet = new Set(faltasLista || []);
+      const feriadosSet = new Set(feriadosLista || []);
+      const fmtISO = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const semanasMap = {};
+      (datasPeriodo || []).forEach(iso => {
+        const dd = new Date(iso + "T12:00:00");
+        const dow = dd.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+        const diffSeg = dow === 0 ? -6 : 1 - dow;
+        const segunda = new Date(dd);
+        segunda.setDate(dd.getDate() + diffSeg);
+        const domingo = new Date(segunda);
+        domingo.setDate(segunda.getDate() + 6);
+        const semKey = fmtISO(segunda);
+        if (!semanasMap[semKey]) semanasMap[semKey] = { domingoISO: fmtISO(domingo), isos: [] };
+        semanasMap[semKey].isos.push(iso);
+      });
+      let dsrPerdidos = 0, feriadosPerdidos = 0;
+      const diasDSRISO = [];
+      Object.keys(semanasMap).sort().forEach(semKey => {
+        const sem = semanasMap[semKey];
+        const isosOrd = sem.isos.slice().sort();
+        const faltasSemana = isosOrd.filter(iso => faltasSet.has(iso));
+        if (faltasSemana.length === 0) return;
+        const primeiraFalta = faltasSemana[0];
+        dsrPerdidos += 1;
+        diasDSRISO.push(isosOrd.indexOf(sem.domingoISO) !== -1 ? sem.domingoISO : isosOrd[isosOrd.length - 1]);
+        isosOrd.forEach(iso => {
+          if (!feriadosSet.has(iso)) return;
+          if (new Date(iso + "T12:00:00").getDay() === 0) return;
+          if (iso > primeiraFalta) {
+            feriadosPerdidos += 1;
+            diasDSRISO.push(iso);
+          }
+        });
+      });
+      return {
+        dsrPerdidos,
+        feriadosPerdidos,
+        totalDSR: dsrPerdidos + feriadosPerdidos,
+        diasDSRISO: diasDSRISO.filter((iso, i) => diasDSRISO.indexOf(iso) === i && !faltasSet.has(iso)),
+      };
+    }
+    // ===== DSR:FIM =====
+
     // ===== DOMINIO:INICIO =====
     // Leiaute oficial "Importação Arquivo Texto | De Lançamentos" da Domínio Sistemas (Folha,
     // solução 8813). Arquivo texto puro, largura fixa posicional, só dígitos nos campos
@@ -11388,12 +11440,24 @@
             });
             setComprasSupa(mapa);
           }).catch(err=>console.error('compras load error:',err));
-          // Carrega registros de ponto do Supabase para o período
+          // Carrega registros de ponto do Supabase para o período (paginado de 1000 em 1000 para
+          // não cortar silenciosamente no limite padrão do PostgREST com >1000 linhas no mês).
           const [mes2, ano2] = mesAno.split("/").map(Number);
-          const iniISO = `${ano2}-${String(mes2-1||12).padStart(2,'0')}-26`;
-          const fimISO = `${ano2}-${String(mes2).padStart(2,'0')}-25`;
-          _supa.from('registros_ponto').select('*').eq('empresa_id',empresaId).gte('data',iniISO).lte('data',fimISO).then(({data:rp})=>{
-            if(!rp||rp.length===0) return;
+          const iniISO = toISO(new Date(ano2, mes2-2, 26));
+          const fimISO = toISO(new Date(ano2, mes2-1, 25));
+          (async()=>{
+            const PAGE = 1000;
+            const rp = [];
+            for(let from=0;;from+=PAGE){
+              const {data, error} = await _supa.from('registros_ponto').select('*')
+                .eq('empresa_id',empresaId).gte('data',iniISO).lte('data',fimISO)
+                .order('id',{ascending:true}).range(from, from+PAGE-1);
+              if(error) throw error;
+              if(!data||data.length===0) break;
+              rp.push(...data);
+              if(data.length<PAGE) break;
+            }
+            if(rp.length===0) return;
             const empMap = {};
             rp.forEach(r=>{
               if(!empMap[r.colaborador_nome]) empMap[r.colaborador_nome]={cracha:r.cracha,nome:r.colaborador_nome,dias:{}};
@@ -11413,7 +11477,7 @@
               });
               return merged;
             });
-          }).catch(err=>console.error('registros_ponto load error:',err));
+          })().catch(err=>console.error('registros_ponto load error:',err));
           // ── Atestados e Férias registrados nos módulos → marcam automaticamente os dias na folha ──
           // Ausência justificada (atestado/férias) NÃO pode virar falta nem perder DSR (CLT). Antes,
           // se não fosse remarcada manualmente na folha, caía como falta. Agora é puxada da fonte.
@@ -11713,35 +11777,10 @@
             }
           });
 
-          let dsrPerdidos = 0, feriadosNaSemanaPerdidos = 0;
-          const semanasMap = {};
-          datasPeriodo.forEach(iso=>{
-            const dd = new Date(iso+"T12:00:00");
-            const dayOfWeek = dd.getDay();
-            const domingo = new Date(dd);
-            domingo.setDate(dd.getDate() - dayOfWeek);
-            const semKey = toISO(domingo);
-            if (!semanasMap[semKey]) semanasMap[semKey] = [];
-            semanasMap[semKey].push(iso);
-          });
-          Object.keys(semanasMap).forEach(semKey=>{
-            const isosSemana = semanasMap[semKey];
-            let temFaltaSemana = false;
-            isosSemana.forEach(iso=>{
-              const a = analisarDia(nomeKey, iso, dados?.dias?.[iso], colabInfo);
-              if (a.status === "falta") temFaltaSemana = true;
-            });
-            if (temFaltaSemana) {
-              dsrPerdidos += 1;
-              // Dia de descanso perdido: o domingo da semana quando ele cai dentro do período
-              // (26→25), senão o último dia da semana que está no período.
-              diasDSRISO.push(isosSemana.indexOf(semKey) !== -1 ? semKey : isosSemana[isosSemana.length-1]);
-              isosSemana.forEach(iso=>{
-                if (feriados.includes(iso)) { feriadosNaSemanaPerdidos += 1; diasDSRISO.push(iso); }
-              });
-            }
-            // abono não gera perda de DSR (já tratado pelo status diferente de "falta")
-          });
+          const dsrRes = calcularDSRPerdidos(datasPeriodo, diasFaltasISO, feriados);
+          const dsrPerdidos = dsrRes.dsrPerdidos;
+          const feriadosNaSemanaPerdidos = dsrRes.feriadosPerdidos;
+          diasDSRISO.push(...dsrRes.diasDSRISO);
 
           // ── Caju R$100 (R$5,00/dia trabalhado) ──
           // Desconta só falta e atestado de dia inteiro; meio período de atestado, abono e
